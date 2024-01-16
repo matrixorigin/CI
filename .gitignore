@@ -16,3 +16,4 @@ coverage.txt
 out.txt
 vendor/
 gen_config
+**/node_modules
