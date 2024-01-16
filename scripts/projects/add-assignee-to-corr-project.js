@@ -13,9 +13,11 @@ async function run() {
   try {
     const issueNumber = process.env.Issue_ID;
     // get issue info
+    const owner_repo = process.env.GITHUB_REPOSITORY;
+    const parts = owner_repo.split('/');
     const issue = await octokit.rest.issues.get({
-      owner: process.env.GITHUB_REPOSITORY_OWNER,
-      repo: "matrixone",         
+      owner: parts[0],
+      repo: parts[1],         
       issue_number: issueNumber,
     });
     // get assignees list
