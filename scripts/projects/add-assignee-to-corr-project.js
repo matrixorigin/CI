@@ -35,7 +35,7 @@ async function run() {
         query {
           repository(owner:"${organizationLogin}", name:"${parts[1]}") {
             issue(number:${issueNumber}) {
-              projectItems(first:10,includeArchived:false){
+              projectItems(first:100,includeArchived:false){
                 nodes{
                   ... on ProjectV2Item{
                     id
@@ -68,6 +68,7 @@ async function run() {
         'compute-group-1': 33,
         'compute-group-2': 36,
         'storage-group': 35,
+        'mo-cloud-team': 18,
       };
     const issue_item_id = [];
     for(const iss of issue_list){
