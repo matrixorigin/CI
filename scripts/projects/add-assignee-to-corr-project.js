@@ -6,7 +6,7 @@ const octokit = new Octokit({
 });
 const githubApiEndpoint = "https://api.github.com/graphql";
 
-const organizationLogin = "matrixorigin";
+const organizationLogin = process.env.GITHUB_REPOSITORY_OWNER;
 const token = process.env.GITHUB_TOKEN;
 const art = "Bearer "+token;
 async function run() {
@@ -14,6 +14,7 @@ async function run() {
     const issueNumber = process.env.Issue_ID;
     // get issue info
     const owner_repo = process.env.GITHUB_REPOSITORY;
+    console.log(owner_repo);
     const parts = owner_repo.split('/');
     const issue = await octokit.rest.issues.get({
       owner: parts[0],
@@ -24,18 +25,58 @@ async function run() {
     const assignees = issue.data.assignees;
     // get issue node_id
     const issue_node_id = issue.data.node_id;
+    // graphql header
+    const headers = {
+        'Authorization': art,
+        'Content-Type': 'application/json',
+      };
+    // Retrieve information about the project to which the current issue belongs.
+    var query = `
+        query {
+          repository(owner:"${organizationLogin}", name:"${parts[1]}") {
+            issue(number:${issueNumber}) {
+              projectItems(first:10,includeArchived:false){
+                nodes{
+                  ... on ProjectV2Item{
+                    id
+                    project{
+                      id
+                      title
+                    }
+                  }
+                }
+              }
+          }
+        }
+        }
+      `;
+    var options = {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify({ query }),
+        };
+    const resp_add = await fetch(githubApiEndpoint, options);
+    const resp_add_json = await resp_add.json();
+    // issue info list
+    const issue_list = resp_add_json.data.repository.issue.projectItems.nodes;
+    const m1 = new Map();
     if (assignees.length === 0) {
       console.log("The issue has not yet been assigned");
       return;
     }
     const projectMapping = {
-      'compute-group-1': 33,
-      'compute-group-2': 36,
-      'storage-group': 35,
-    };
-
+        'compute-group-1': 33,
+        'compute-group-2': 36,
+        'storage-group': 35,
+      };
+    const issue_item_id = [];
+    for(const iss of issue_list){
+      issue_item_id.push(iss.project.id);
+      m1.set(iss.project.id,iss.id);
+    }
+    console.log(m1);
     const projectsToAssociate = [];
-    // get team_list in org
+    // get team list in org
     const teams = await octokit.rest.teams.list({
         org: organizationLogin,  
       });
@@ -54,7 +95,7 @@ async function run() {
         }
       }
     }
-
+    
     if (projectsToAssociate.length === 0) {
       console.log("Put it in the default project");
       projectsToAssociate.push(13); 
@@ -62,15 +103,9 @@ async function run() {
     // deduplicate
     const result = Array.from(new Set(projectsToAssociate))
     console.log(result)
-
-    // graphql header
-    const headers = {
-        'Authorization': art,
-        'Content-Type': 'application/json',
-      };
-    // get node-id by projectid ,push issue to project
-    for (const projectId of result) {
-    var query = `
+    const projectID_list = [];
+    for(const projectId of result){
+      var query = `
         query {
           organization(login: "${organizationLogin}") {
             projectV2(number: ${projectId}) {
@@ -85,27 +120,60 @@ async function run() {
           body: JSON.stringify({ query }),
         };
       let pid;   // 存node-id
-      // get project node-id
       const resp = await fetch(githubApiEndpoint, options);
       const resp_json = await resp.json();
       pid = resp_json.data.organization.projectV2.id;
-      console.log('Project ID:', pid);
-      var query=`
-          mutation{
-            addProjectV2ItemById(input:{projectId: \"${pid}\" contentId: \"${issue_node_id}\" }){
-                item  {
-                   id   
+      projectID_list.push(pid);
+      console.log(pid);
+    }
+    let union_list = projectID_list.filter(v => issue_item_id.includes(v));
+    console.log(union_list);
+    // need delete project_item_id list
+    let diff_del = issue_item_id.concat(union_list).filter(v => !issue_item_id.includes(v) || !union_list.includes(v));
+    // need add project_item list
+    let diff_add = projectID_list.concat(union_list).filter(v => !projectID_list.includes(v) || !union_list.includes(v));
+    console.log("delete diff_del item");
+    console.log(diff_del);
+    if(diff_del.length !== 0){
+        for(const pid of diff_del){
+        const del_item_id = m1.get(pid);
+        var query=`
+            mutation{
+              deleteProjectV2Item(input:{projectId: \"${pid}\" itemId: \"${del_item_id}\" }){
+                  deletedItemId  
                   }
-                }
-          }
-        `;
-      var options = {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify({ query }),
-        };
-      // push issue to project
-      await fetch(githubApiEndpoint, options);
+            }
+          `;
+        var options = {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({ query }),
+          };
+        await fetch(githubApiEndpoint, options);
+        console.log("success delete item");
+      }
+    }
+    console.log("add item");
+    if(diff_add.length !== 0){
+        for (const pid of diff_add) {
+        var query=`
+            mutation{
+              addProjectV2ItemById(input:{projectId: \"${pid}\" contentId: \"${issue_node_id}\" }){
+                  item  {
+                     id   
+                    }
+                  }
+            }
+          `;
+        var options = {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({ query }),
+          };
+        // add item
+        const resp_add = await fetch(githubApiEndpoint, options);
+        await resp_add.json();
+      }
     }
   } catch (error) {
     console.log(error.message)
