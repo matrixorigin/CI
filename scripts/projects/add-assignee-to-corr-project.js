@@ -61,7 +61,7 @@ async function run() {
     const issue_list = resp_add_json.data.repository.issue.projectItems.nodes;
     const m1 = new Map();
     if (assignees.length === 0) {
-      console.log("Issue 没有 assignee，不进行项目关联");
+      console.log("The issue has not yet been assigned");
       return;
     }
     const projectMapping = {
@@ -120,7 +120,6 @@ async function run() {
           body: JSON.stringify({ query }),
         };
       let pid;   // 存node-id
-      // 获取node-id的请求
       const resp = await fetch(githubApiEndpoint, options);
       const resp_json = await resp.json();
       pid = resp_json.data.organization.projectV2.id;
