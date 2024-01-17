@@ -35,7 +35,7 @@ async function run() {
         query {
           repository(owner:"${organizationLogin}", name:"${parts[1]}") {
             issue(number:${issueNumber}) {
-              projectItems(first:110,includeArchived:false){
+              projectItems(first:100,includeArchived:false){
                 nodes{
                   ... on ProjectV2Item{
                     id
