@@ -103,12 +103,15 @@ async function run() {
       projectsToAssociate.push(13); 
     }
     // deduplicate
-    const result = Array.from(new Set(projectsToAssociate))
+    result = Array.from(new Set(projectsToAssociate))
     console.log(result);
     flag = true;
     if(result.includes(99999)){
+      console.log("包含99999，flag设置为false");
       flag = false;
+      result = result.filter(item => item !== 99999);
     }
+    console.log("flag=",flag);
     const projectID_list = [];
     for(const projectId of result){
       var query = `
@@ -140,6 +143,7 @@ async function run() {
     let diff_add = projectID_list.concat(union_list).filter(v => !projectID_list.includes(v) || !union_list.includes(v));
     console.log("delete diff_del item");
     console.log(diff_del);
+    console.log(diff_del.length !== 0 && flag);
     if(diff_del.length !== 0 && flag){
         for(const pid of diff_del){
         const del_item_id = m1.get(pid);
@@ -160,10 +164,6 @@ async function run() {
       }
     }
     console.log("add item");
-    if(diff_add.length === 1 && flag) {
-      console.log("只有99999,不需要添加");
-      return ;
-    }
     if(diff_add.length !== 0){
         for (const pid of diff_add) {
         var query=`
