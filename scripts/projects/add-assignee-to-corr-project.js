@@ -69,6 +69,7 @@ async function run() {
         'compute-group-2': 36,
         'storage-group': 35,
         'mo-cloud-team': 18,
+        'mo-qa-team': 99999,
       };
     const issue_item_id = [];
     for(const iss of issue_list){
@@ -103,7 +104,11 @@ async function run() {
     }
     // deduplicate
     const result = Array.from(new Set(projectsToAssociate))
-    console.log(result)
+    console.log(result);
+    flag = true;
+    if(result.includes(99999)){
+      flag = false;
+    }
     const projectID_list = [];
     for(const projectId of result){
       var query = `
@@ -135,7 +140,7 @@ async function run() {
     let diff_add = projectID_list.concat(union_list).filter(v => !projectID_list.includes(v) || !union_list.includes(v));
     console.log("delete diff_del item");
     console.log(diff_del);
-    if(diff_del.length !== 0){
+    if(diff_del.length !== 0 && flag){
         for(const pid of diff_del){
         const del_item_id = m1.get(pid);
         var query=`
