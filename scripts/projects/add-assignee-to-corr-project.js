@@ -97,14 +97,13 @@ async function run() {
         }
       }
     }
-    
-    if (projectsToAssociate.length === 0) {
-      console.log("Put it in the default project");
-      projectsToAssociate.push(13); 
-    }
     // deduplicate
     result = Array.from(new Set(projectsToAssociate))
     console.log(result);
+    if (result.length === 0 || (result.length >= 1 && result.includes(99999)) {
+      console.log("Put it in the default project");
+      result.push(13); 
+    }
     flag = true;
     if(result.includes(99999)){
       console.log("包含99999，flag设置为false");
