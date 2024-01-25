@@ -160,6 +160,10 @@ async function run() {
       }
     }
     console.log("add item");
+    if(diff_add.length === 1 && flag) {
+      console.log("只有99999,不需要添加");
+      return ;
+    }
     if(diff_add.length !== 0){
         for (const pid of diff_add) {
         var query=`
