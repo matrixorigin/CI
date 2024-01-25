@@ -69,6 +69,7 @@ async function run() {
         'compute-group-2': 36,
         'storage-group': 35,
         'mo-cloud-team': 18,
+        'mo-qa-team': 99999,
       };
     const issue_item_id = [];
     for(const iss of issue_list){
@@ -96,14 +97,20 @@ async function run() {
         }
       }
     }
-    
-    if (projectsToAssociate.length === 0) {
-      console.log("Put it in the default project");
-      projectsToAssociate.push(13); 
-    }
     // deduplicate
-    const result = Array.from(new Set(projectsToAssociate))
-    console.log(result)
+    result = Array.from(new Set(projectsToAssociate))
+    console.log(result);
+    if (result.length === 0 || (result.length >= 1 && result.includes(99999)) {
+      console.log("Put it in the default project");
+      result.push(13); 
+    }
+    flag = true;
+    if(result.includes(99999)){
+      console.log("包含99999，flag设置为false");
+      flag = false;
+      result = result.filter(item => item !== 99999);
+    }
+    console.log("flag=",flag);
     const projectID_list = [];
     for(const projectId of result){
       var query = `
@@ -135,7 +142,8 @@ async function run() {
     let diff_add = projectID_list.concat(union_list).filter(v => !projectID_list.includes(v) || !union_list.includes(v));
     console.log("delete diff_del item");
     console.log(diff_del);
-    if(diff_del.length !== 0){
+    console.log(diff_del.length !== 0 && flag);
+    if(diff_del.length !== 0 && flag){
         for(const pid of diff_del){
         const del_item_id = m1.get(pid);
         var query=`
