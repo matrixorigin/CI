@@ -100,7 +100,7 @@ async function run() {
     // deduplicate
     result = Array.from(new Set(projectsToAssociate))
     console.log(result);
-    if (result.length === 0 || (result.length >= 1 && result.includes(99999)) {
+    if (result.length === 0 || (result.length >= 1 && result.includes(99999))) {
       console.log("Put it in the default project");
       result.push(13); 
     }
