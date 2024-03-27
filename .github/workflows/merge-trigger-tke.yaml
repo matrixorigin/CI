@@ -18,6 +18,9 @@ on:
       WECHAT_MO_CHECKIN_BOT_WEBHOOK:
         description: 'WECHAT_MO_CHECKIN_BOT_WEBHOOK'
         required: true
+      TOKEN_ACTION:
+        description: 'TOKEN_ACTION'
+        required: true
       
 
 jobs:
