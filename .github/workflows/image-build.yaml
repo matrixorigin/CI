@@ -3,11 +3,6 @@ name:  Build and Push Images
 on:
   workflow_call:
     inputs: 
-      tag:
-        description: "image tag"
-        required: true
-        default: "latest"
-        type: string
       repo:
         description: "ecr repo"
         required: true
@@ -135,6 +130,6 @@ jobs:
           REGISTRY: ${{ steps.login-ecr-public.outputs.registry }}
           REGISTRY_ALIAS: ${{ inputs.alias }}
           REPOSITORY: ${{ inputs.repo }}
-          IMAGE_TAG: ${{ inputs.tag }}
+          IMAGE_TAG: ${{ steps.prep.outputs.tags }}
         run: |
             docker buildx build --platform linux/arm64,linux/amd64 -f ./optools/images/Dockerfile -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG --push .
