@@ -2,6 +2,32 @@ name:  Build and Push Images
 
 on:
   workflow_call:
+    inputs: 
+      tag:
+        description: "image tag"
+        required: true
+        default: "latest"
+        type: string
+      repo:
+        description: "ecr repo"
+        required: true
+        default: "matrixone"
+        type: string
+      region:
+        description: "aws region of ecr"
+        required: true
+        default: "us-east-1"
+        type: string
+      role: 
+        description: "ecr push role"
+        required: true
+        default: ""
+        type: string
+      alias:
+        description:  "ecr public repo alias"
+        required: true
+        default: "p4n7f8j9"
+        type: string
     secrets:
       DOCKERHUB_USERNAME: 
         description: 'DOCKERHUB_USERNAME'
@@ -80,6 +106,19 @@ jobs:
           registry: registry.cn-shanghai.aliyuncs.com
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_TOKEN }}
+          
+      # github OIDC https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1 # More information on this action can be found below in the 'AWS Credentials' section
+        with:
+          role-to-assume: ${{ inputs.role }}
+          aws-region: ${{ inputs.region }}
+      
+      - name: Login to Amazon ECR
+        id: login-ecr-public
+        uses: aws-actions/amazon-ecr-login@v1
+        with:
+          registry-type: public
 
       - name: Build
         uses: docker/build-push-action@v3
@@ -90,8 +129,12 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.prep.outputs.tags }}
-      - name: Push image to ecr 
-        uses: ./.github/actions/ecr
-        with:
-          role: ${{ secrets.AWS_ROLE }}
-          tag:  ${{ steps.prep.outputs.version }}
+      - name: Build, tag, and push docker image to Amazon ECR Public
+        shell: bash
+        env:
+          REGISTRY: ${{ steps.login-ecr-public.outputs.registry }}
+          REGISTRY_ALIAS: ${{ inputs.alias }}
+          REPOSITORY: ${{ inputs.repo }}
+          IMAGE_TAG: ${{ inputs.tag }}
+        run: |
+            docker buildx build --platform linux/arm64,linux/amd64 -f ./optools/images/Dockerfile -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG --push .
