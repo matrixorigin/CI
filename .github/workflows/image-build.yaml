@@ -54,17 +54,31 @@ jobs:
         with:
           fetch-depth: 0
           
+      # github OIDC https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1 # More information on this action can be found below in the 'AWS Credentials' section
+        with:
+          role-to-assume: ${{ inputs.role }}
+          aws-region: ${{ inputs.region }}
+      
+      - name: Login to Amazon ECR
+        id: login-ecr-public
+        uses: aws-actions/amazon-ecr-login@v1
+        with:
+          registry-type: public
+          
       - name: Prepare
         id: prep
         run: |
           DOCKER_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/${GITHUB_REPOSITORY#*/}
           ACR_DOCKER_IMAGE="registry.cn-shanghai.aliyuncs.com/${DOCKER_IMAGE}"
+          ECR_DOCKER_IMAGE="${{ steps.login-ecr-public.outputs.registry }}/${{ inputs.alias }}/${{ inputs.repo }}"
           VERSION=nightly-${GITHUB_SHA::8}
           # If this is git tag, use the tag name as a docker tag
           if [[ $GITHUB_REF == refs/tags/* ]]; then
             VERSION=${GITHUB_REF#refs/tags/v}
           fi
-          TAGS="${DOCKER_IMAGE}:${VERSION},${ACR_DOCKER_IMAGE}:${VERSION}"
+          TAGS="${DOCKER_IMAGE}:${VERSION},${ACR_DOCKER_IMAGE}:${VERSION},${ECR_DOCKER_IMAGE}:${VERSION}"
           # If the VERSION looks like a version number, assume that
           # this is the most recent version of the image and also
           # tag it 'latest'.
@@ -102,18 +116,7 @@ jobs:
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_TOKEN }}
           
-      # github OIDC https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1 # More information on this action can be found below in the 'AWS Credentials' section
-        with:
-          role-to-assume: ${{ inputs.role }}
-          aws-region: ${{ inputs.region }}
       
-      - name: Login to Amazon ECR
-        id: login-ecr-public
-        uses: aws-actions/amazon-ecr-login@v1
-        with:
-          registry-type: public
 
       - name: Build
         uses: docker/build-push-action@v3
@@ -124,12 +127,3 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.prep.outputs.tags }}
-      - name: Build, tag, and push docker image to Amazon ECR Public
-        shell: bash
-        env:
-          REGISTRY: ${{ steps.login-ecr-public.outputs.registry }}
-          REGISTRY_ALIAS: ${{ inputs.alias }}
-          REPOSITORY: ${{ inputs.repo }}
-          IMAGE_TAG: ${{ steps.prep.outputs.tags }}
-        run: |
-            docker buildx build --platform linux/arm64,linux/amd64 -f ./optools/images/Dockerfile -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG --push .
