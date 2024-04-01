@@ -3,6 +3,11 @@ name: WeWork Robot
 # Controls when the workflow will run
 on:
   workflow_call:
+    inputs:
+      nightly-check:
+        type: boolean
+        default: false
+        required: false
     secrets:
       TOKEN_ACTION:
         description: 'TOKEN_ACTION'
@@ -54,9 +59,9 @@ jobs:
         run: |
           res=`grep -r "issue#$ISSUE_NUM" ${{ github.workspace }}/test || true`
           if [ -n "$res" ]; then
-            echo "::set-output name=check_val::True"
+            echo "check_val=True" >> $GITHUB_OUTPUT;
           else
-            echo "::set-output name=check_val::False"
+            echo "check_val=False" >> $GITHUB_OUTPUT;
           fi
 
       - name: Reopen Issue
@@ -101,12 +106,11 @@ jobs:
           mentions: "Prinz,DengNan"
 
   nightly-check:
-    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'workflow_call' && inputs.nightly-check }}
     runs-on: aws-arm64-runner
     steps:
       - uses: actions/checkout@v3
         with:
-          fetch-depth: '3'
           path: ./matrixone
       - name: Set up Go
         uses: ./matrixone/.github/actions/setup_env
@@ -143,7 +147,7 @@ jobs:
           echo "ut start"
           CGO_CFLAGS="-I${GITHUB_WORKSPACE}/matrixone/cgo" CGO_LDFLAGS="-L${GITHUB_WORKSPACE}/matrixone/cgo -lmo" go test -v -tags matrixone_test -p 6 -covermode=count -coverprofile=${{ env.raw_ut_coverage }} -coverpkg=./pkg/... ${test_scope} | tee ${{ env.ut_report }}
           echo "ut finished"
-      - name: Start BVT Test Service
+      - name: Start MO Service
         if: ${{ always() && !cancelled() }}
         timeout-minutes: 10
         run: |

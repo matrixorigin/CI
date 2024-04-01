@@ -121,10 +121,10 @@ jobs:
         run: |
           set +e;
           for i in {1..10}; do
-            sudo sntp -sS time.windows.com;
-            if [ "$?" == "0" ]; then
+            if sudo sntp -sS time.windows.com; then
               exit 0;
             fi
+            sleep 1;
           done
           exit 1;
       - name: Checkout source
@@ -215,10 +215,10 @@ jobs:
         run: |
           set +e;
           for i in {1..10}; do
-            sudo sntp -sS time.apple.com;
-            if [ "$?" == "0" ]; then
+            if sudo sntp -sS time.apple.com; then
               exit 0;
             fi
+            sleep 1;
           done
           exit 1;
       - name: Checkout source
