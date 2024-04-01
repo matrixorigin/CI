@@ -3,11 +3,6 @@ name: WeWork Robot
 # Controls when the workflow will run
 on:
   workflow_call:
-    inputs:
-      nightly-check:
-        type: boolean
-        default: false
-        required: false
     secrets:
       TOKEN_ACTION:
         description: 'TOKEN_ACTION'
@@ -106,7 +101,7 @@ jobs:
           mentions: "Prinz,DengNan"
 
   nightly-check:
-    if: ${{ github.event_name == 'workflow_call' && inputs.nightly-check }}
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: aws-arm64-runner
     steps:
       - uses: actions/checkout@v3
