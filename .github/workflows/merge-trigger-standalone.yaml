@@ -7,6 +7,8 @@ on:
         description: 'WECHAT_MO_CHECKIN_BOT_WEBHOOK'
         required: true
 
+env:
+  mo_reuse_enable_checker: true
 
 jobs:
   pessimistic-bvt-darwin-arm64:
