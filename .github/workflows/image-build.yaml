@@ -5,17 +5,17 @@ on:
     inputs: 
       repo:
         description: "ecr repo"
-        required: true
+        required: false
         default: "matrixone"
         type: string
       region:
         description: "aws region of ecr"
-        required: true
+        required: false
         default: "us-east-1"
         type: string
       alias:
         description:  "ecr public repo alias"
-        required: true
+        required: false
         default: "p4n7f8j9"
         type: string
     secrets:
