@@ -14,6 +14,9 @@ on:
         default: "v1.1.2"
         required: false
 
+env:
+  mo_reuse_enable_checker: true
+
 jobs:
   upgrade-ci-target-linux-amd64:
     runs-on: ubuntu-latest
