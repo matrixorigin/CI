@@ -7,12 +7,12 @@ on:
         description: "release version"
         type: string
         default: "matrixorigin/matrixone"
-        required: true
+        required: false
       release-version:
         description: "release version"
         type: string
         default: "v1.1.2"
-        required: true
+        required: false
 
 jobs:
   upgrade-ci-target-linux-amd64:
