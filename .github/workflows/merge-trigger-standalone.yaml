@@ -187,8 +187,6 @@ jobs:
       - name: NOTICE FAIL RESULT
         if: ${{ failure() || cancelled() || needs.pessimistic-bvt-darwin-arm64.result != 'success' }}
         uses: guguducken/action-wechat-work@master
-          run :|
-            echo "webhook"
         env:
           WECHAT_WORK_BOT_WEBHOOK: ${{ secrets.WECHAT_MO_CHECKIN_BOT_WEBHOOK }}
         with:
