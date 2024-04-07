@@ -3,6 +3,10 @@ name: MatrixOne e2e upgrade CI
 on:
   workflow_call:
 
+
+env:
+  mo_reuse_enable_checker: true
+
 jobs:
   upgrade-ci-linux-x86:
     runs-on: ubuntu-latest
