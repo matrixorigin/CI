@@ -90,6 +90,13 @@ jobs:
         uses: actions/checkout@v3
         with:
           path: ./matrixone
+      - name: Clean TKE ENV
+        run: |
+          if [ "$(kubectl -n mo-checkin-regression-${{ github.event.pull_request.number }} get pod|grep -c "mo-checkin-regression-*")" -ne 0 ];then 
+            kubectl get matrixonecluster -n mo-checkin-regression-${{ github.event.pull_request.number }} | awk 'NR>1{system("kubectl delete matrixonecluster/"$1" -n mo-checkin-regression-${{ github.event.pull_request.number }}")}'
+            sleep 60s;
+          fi
+          kubectl get bucket -n mo-checkin-regression-${{ github.event.pull_request.number }} | grep bucket | awk '{system("kubectl delete bucket/"$1" -n mo-checkin-regression-${{ github.event.pull_request.number }}")}'                
       - name: Prepare Registry Token
         run: |
           # set docker login info
@@ -98,10 +105,9 @@ jobs:
           DOCKER_PASSWORD=${{ secrets.TCR_TOKEN }}
           if [ "$(kubectl get namespaces| grep -c mo-checkin-regression-${{ github.event.pull_request.number }})" -eq 0 ];then
             kubectl create namespace mo-checkin-regression-${{ github.event.pull_request.number }};
+            kubectl -n mo-checkin-regression-${{ github.event.pull_request.number }} create secret generic tencent-token --from-literal=AWS_ACCESS_KEY_ID=${{ secrets.TENCENT_AK }} --from-literal=AWS_SECRET_ACCESS_KEY=${{ secrets.TENCENT_SK }};
+            kubectl -n mo-checkin-regression-${{ github.event.pull_request.number }} create secret docker-registry tke-registry --docker-server=$DOCKER_REGISTRY_SERVER --docker-username=$DOCKER_USER --docker-password=$DOCKER_PASSWORD;       
           fi
-
-          kubectl -n mo-checkin-regression-${{ github.event.pull_request.number }} create secret generic tencent-token --from-literal=AWS_ACCESS_KEY_ID=${{ secrets.TENCENT_AK }} --from-literal=AWS_SECRET_ACCESS_KEY=${{ secrets.TENCENT_SK }};
-          kubectl -n mo-checkin-regression-${{ github.event.pull_request.number }} create secret docker-registry tke-registry --docker-server=$DOCKER_REGISTRY_SERVER --docker-username=$DOCKER_USER --docker-password=$DOCKER_PASSWORD;       
       - name: ECHO mo-checkin-regression.yaml
         run: |
           echo '${{ needs.docker_image_build.outputs.version }}'
@@ -113,13 +119,6 @@ jobs:
           sed -i "s/imagetag/${{ needs.docker_image_build.outputs.version }}/g" $GITHUB_WORKSPACE/matrixone/optools/mo_checkin_regression/mo_checkin_regression_tke.yaml
          
           cat $GITHUB_WORKSPACE/matrixone/optools/mo_checkin_regression/mo_checkin_regression_tke.yaml
-      - name: Clean TKE ENV
-        run: |
-          if [ "$(kubectl -n mo-checkin-regression-${{ github.event.pull_request.number }} get pod|grep -c "mo-checkin-regression-*")" -ne 0 ];then 
-            kubectl get matrixonecluster -n mo-checkin-regression-${{ github.event.pull_request.number }} | awk 'NR>1{system("kubectl delete matrixonecluster/"$1" -n mo-checkin-regression-${{ github.event.pull_request.number }}")}'
-            sleep 60s;
-          fi
-          kubectl get bucket -n mo-checkin-regression-${{ github.event.pull_request.number }} | grep bucket | awk '{system("kubectl delete bucket/"$1" -n mo-checkin-regression-${{ github.event.pull_request.number }}")}'                
       - name: Create MO Cluster
         run: |
           kubectl -n mo-checkin-regression-${{ github.event.pull_request.number }} apply -f $GITHUB_WORKSPACE/matrixone/optools/mo_checkin_regression/mo_checkin_regression_tke.yaml
