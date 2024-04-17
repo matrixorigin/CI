@@ -135,7 +135,6 @@ jobs:
       - name: checkout head
         uses: actions/checkout@v3
         with:
-          fetch-depth: '3'
           path: ./head
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
@@ -145,16 +144,15 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/head && make clean && make build
           git rev-parse --short HEAD
-      - name: echo cn.toml tn.toml
+      - name: Prepare Hosts
         run: |
-          cd $GITHUB_WORKSPACE/head
-          cat ./etc/launch-with-proxy/cn1.toml
-          cat ./etc/launch-with-proxy/cn2.toml
-          cat ./etc/launch-with-proxy/tn.toml
+          sudo bash -c 'echo -e "127.0.0.1\tcn0" >> /etc/hosts;';
+          sudo bash -c 'echo -e "127.0.0.1\tcn1" >> /etc/hosts;';
       - name: Start MO
         run: |
+          sudo cat /etc/hosts | grep '127.0.0.1';
           cd $GITHUB_WORKSPACE/head
-          ./optools/run_bvt.sh $GITHUB_WORKSPACE/head launch-with-proxy -with-proxy
+          ./optools/run_bvt.sh $GITHUB_WORKSPACE/head launch-dynamic-with-proxy -with-proxy
       - name: Clone test-tool repository
         uses: actions/checkout@v3
         with:
@@ -166,7 +164,6 @@ jobs:
         with:
           java-version: '8'
           distribution: 'adopt'
-          architecture: x64
       - name: Start BVT Test
         id: bvt_on_pr_version
         run: |
@@ -186,8 +183,8 @@ jobs:
         if: ${{ always() && !cancelled() }}
         run: |
           cd $GITHUB_WORKSPACE/head
-          # 5 nodes in one Process
-          ./optools/check_log_count.sh 5000 60 # {count threshold} {metric collected interval}
+          # one node in one Process
+          ./optools/check_log_count.sh 1000 60 # {count threshold} {metric collected interval}
       - name: generate upload files
         if: ${{ always() }}
         continue-on-error: true
