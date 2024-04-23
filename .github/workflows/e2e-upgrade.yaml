@@ -11,7 +11,7 @@ on:
       release-version:
         description: "release version"
         type: string
-        default: "v1.1.2"
+        default: "v1.1.3"
         required: false
 
 env:
