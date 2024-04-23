@@ -8,11 +8,6 @@ on:
         type: string
         default: "matrixorigin/matrixone"
         required: false
-      release-version:
-        description: "release version"
-        type: string
-        default: "v1.1.3"
-        required: false
 
 env:
   mo_reuse_enable_checker: true
@@ -197,7 +192,7 @@ jobs:
           LATEST_RELEASE_TAG=($(curl -L \
           -H "Accept: application/vnd.github+json" \
           -H "X-GitHub-Api-Version: 2022-11-28" \
-          https://api.github.com/repos/matrixorigin/matrixone/releases/latest | jq -r .tag_name))
+          https://api.github.com/repos/${{ inputs.release-repo }}/releases/latest | jq -r .tag_name))
           echo "Latest release tag is $LATEST_RELEASE_TAG"
           echo "tag=$LATEST_RELEASE_TAG" >> $GITHUB_OUTPUT
           
