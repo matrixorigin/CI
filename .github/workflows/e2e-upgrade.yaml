@@ -180,6 +180,8 @@ jobs:
     runs-on: ubuntu-latest
     name: Compatibility Test With Release on Linux/x64(LAUNCH)
     timeout-minutes: 60
+    outputs:
+      latest-release-tag: ${{ steps.get-latest-release.outputs.tag }}
 
     steps:
       - name: Checkout Head
@@ -197,14 +199,14 @@ jobs:
           -H "X-GitHub-Api-Version: 2022-11-28" \
           https://api.github.com/repos/matrixorigin/matrixone/releases/latest | jq -r .tag_name))
           echo "Latest release tag is $LATEST_RELEASE_TAG"
-          echo "RELEASE_TAG=$LATEST_RELEASE_TAG" >> $GITHUB_ENV
+          echo "tag=$LATEST_RELEASE_TAG" >> $GITHUB_OUTPUT
           
       - name: Checkout Upstream Release
         uses: actions/checkout@v3
         with:
           path: ./upstream
           repository: ${{ inputs.release-repo }}
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ steps.get-latest-release.outputs.tag }}
           
       - name: Set up Go
         uses: ./upstream/.github/actions/setup_env
