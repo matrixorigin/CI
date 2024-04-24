@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: CheckOut
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Check the code to see if the issue number is removed
         id: get_check_val
@@ -104,7 +104,7 @@ jobs:
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: aws-arm64-runner
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: '3'
           path: ./matrixone
@@ -124,13 +124,13 @@ jobs:
           echo "ut_excluded_pkg='pkg/pb\|pkg/sql/parsers/goyacc\|yaccpar'" >> $GITHUB_ENV
           echo "bvt_excluded_pkg='pkg/pb\|yaccpar'" >> $GITHUB_ENV
       - name: Clone test-tool repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
       - name: Set up JDK 8 for x64
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
           java-version: '8'
           distribution: 'adopt'
@@ -236,7 +236,7 @@ jobs:
           echo 'Detail<<EOF' >> $GITHUB_ENV
           cat coverage_report.txt >> $GITHUB_ENV
           echo 'EOF' >> $GITHUB_ENV          
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: ${{ always() && !cancelled() }}
         continue-on-error: true
         with:
@@ -244,7 +244,7 @@ jobs:
           path: |
             ${{ github.workspace }}/matrixone/code_quality_reports.zip
           retention-days: 7
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: ${{ failure() }}
         continue-on-error: true
         with:
