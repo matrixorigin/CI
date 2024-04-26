@@ -3,7 +3,6 @@ name: MatrixOne e2e upgrade CI
 on:
   workflow_call:
 
-
 env:
   mo_reuse_enable_checker: true
 
@@ -15,17 +14,17 @@ jobs:
 
     steps:
       - name: checkout head
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
-          fetch-depth: '3'
+          fetch-depth: "3"
           path: ./head
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
 
       - name: checkout upstream
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
-          fetch-depth: '3'
+          fetch-depth: "3"
           path: ./upstream
           repository: ${{ github.event.pull_request.base.repo.full_name }}
           ref: ${{ github.event.pull_request.base.ref }}
@@ -36,7 +35,7 @@ jobs:
       - name: Build MatrixOne for head
         run: |
           cd $GITHUB_WORKSPACE/head && make clean && make build
-          git rev-parse --short HEAD          
+          git rev-parse --short HEAD
 
       - name: Build MatrixOne for upstream
         run: |
@@ -45,7 +44,7 @@ jobs:
 
       - name: Create path for execution
         run: |
-          cd $GITHUB_WORKSPACE && mkdir workspace 
+          cd $GITHUB_WORKSPACE && mkdir workspace
 
       - name: Start the Latest Version of Main of MO
         run: |
@@ -53,7 +52,7 @@ jobs:
           mv $GITHUB_WORKSPACE/upstream/etc .
           mv $GITHUB_WORKSPACE/upstream/mo-service .
           mv $GITHUB_WORKSPACE/upstream/optools .
-          
+
           # Explicitly declare pessimistic mode
           echo "==============cn configuration of upstram=============="
           echo ""  >> ./etc/launch/cn.toml
@@ -67,17 +66,17 @@ jobs:
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/workspace launch
 
       - name: Clone test-tool repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
 
       - name: Set up JDK 8 for x64
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
-          java-version: '8'
-          distribution: 'adopt'
+          java-version: "8"
+          distribution: "adopt"
           architecture: x64
 
       - name: Start BVT Test for MO with the Latest Version of Main
@@ -140,7 +139,7 @@ jobs:
           sed -i 's/  port: [0-9]*/  port: 12345/g' mo.yml
           cat mo.yml
           echo "============================="
-          
+
           ./run.sh -n -g -o -p $GITHUB_WORKSPACE/head/test/distributed/cases -e optimistic 2>&1
 
       - name: Dump mo-service-new goroutines
@@ -169,7 +168,7 @@ jobs:
           mv ${{ github.workspace }}/workspace ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/mo-tester ${{ github.workspace }}/upload/
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:

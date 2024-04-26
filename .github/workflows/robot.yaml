@@ -5,22 +5,22 @@ on:
   workflow_call:
     secrets:
       TOKEN_ACTION:
-        description: 'TOKEN_ACTION'
+        description: "TOKEN_ACTION"
         required: true
       WECHAT_WORK_BOT_WEBHOOK:
-        description: 'WECHAT_WORK_BOT_WEBHOOK'
-        required: true 
-      DOCU_GROUP_HOOK:
-        description: 'DOCU_GROUP_HOOK'
+        description: "WECHAT_WORK_BOT_WEBHOOK"
         required: true
-      
+      DOCU_GROUP_HOOK:
+        description: "DOCU_GROUP_HOOK"
+        required: true
+
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel.
 jobs:
   issue-notify:
-    if : github.event_name == 'issues' && github.event.action == 'assigned' 
+    if: github.event_name == 'issues' && github.event.action == 'assigned'
     runs-on: ubuntu-latest
     steps:
-      - name : ISSUE Triggered
+      - name: ISSUE Triggered
         uses: chf007/action-wechat-work@master
         env:
           WECHAT_WORK_BOT_WEBHOOK: ${{secrets.WECHAT_WORK_BOT_WEBHOOK}}
@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: CheckOut
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Check the code to see if the issue number is removed
         id: get_check_val
@@ -63,7 +63,7 @@ jobs:
         if: ${{ steps.get_check_val.outputs.check_val == 'True' }}
         uses: actions-cool/issues-helper@v3
         with:
-          actions: 'open-issue'
+          actions: "open-issue"
           token: ${{ secrets.TOKEN_ACTION }}
           issue-number: ${{ github.event.issue.number }}
 
@@ -71,7 +71,7 @@ jobs:
         if: ${{ steps.get_check_val.outputs.check_val == 'True' }}
         uses: actions-cool/issues-helper@v3
         with:
-          actions: 'create-comment'
+          actions: "create-comment"
           token: ${{ secrets.TOKEN_ACTION }}
           issue-number: ${{ github.event.issue.number }}
           body: |
@@ -85,10 +85,10 @@ jobs:
         if: github.event.issue.user.login != github.event.sender.login && github.event.action == 'closed' && github.event.sender.login != 'sukki37' && github.event.sender.login != 'aressu1985' && github.event.sender.login != 'fengttt' && github.event.sender.login != 'florashi181'
         uses: actions-cool/issues-helper@v3
         with:
-          actions: 'open-issue'
+          actions: "open-issue"
           token: ${{ secrets.TOKEN_ACTION }}
           issue-number: ${{ github.event.issue.number }}
-       
+
   issue_close_check:
     runs-on: ubuntu-latest
     if: github.event_name == 'issues' && github.event.action == 'closed'
@@ -104,7 +104,7 @@ jobs:
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: aws-arm64-runner
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           path: ./matrixone
       - name: Set up Go
@@ -123,16 +123,16 @@ jobs:
           echo "ut_excluded_pkg='pkg/pb\|pkg/sql/parsers/goyacc\|yaccpar'" >> $GITHUB_ENV
           echo "bvt_excluded_pkg='pkg/pb\|yaccpar'" >> $GITHUB_ENV
       - name: Clone test-tool repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
       - name: Set up JDK 8 for x64
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
-          java-version: '8'
-          distribution: 'adopt'
+          java-version: "8"
+          distribution: "adopt"
       - name: Start Unit Test
         timeout-minutes: 120
         run: |
@@ -164,7 +164,7 @@ jobs:
           sed -i 's/  port: [0-9]*/  port: 12345/g' mo.yml
           cat mo.yml
           echo "============================"
-          
+
           ./run.sh -n -g -o -p $GITHUB_WORKSPACE/matrixone/test/distributed/cases -e optimistic 2>&1
       - name: Generate UT and BVT Coverage File
         if: ${{ always() && !cancelled() }}
@@ -183,7 +183,7 @@ jobs:
           cat ${{ env.raw_bvt_coverage }} | grep -v ${{ env.bvt_excluded_pkg }} > ${{ env.bvt_coverage }}
           echo "bvt_coverage finished"
           go tool cover -o ${{ env.bvt_html_coverage }} -html=${{ env.bvt_coverage }}
-          echo "bvt_html_coverage finished"        
+          echo "bvt_html_coverage finished"
       - name: Coverage Calculate
         if: ${{ always() && !cancelled() }}
         run: |
@@ -224,7 +224,7 @@ jobs:
           done
           cat bvt_tmp.txt | sort -k 1 -k 2n >> coverage_report.txt
           # zip -r code_quality_reports.zip ${{ env.bvt_html_coverage }} ${{ env.ut_html_coverage }} coverage_report.txt lint.out UT-Report.out
-          zip -r code_quality_reports.zip ${{ env.bvt_html_coverage }} ${{ env.ut_html_coverage }} coverage_report.txt UT-Report.out $GITHUB_WORKSPACE/matrixone/mo-service.log 
+          zip -r code_quality_reports.zip ${{ env.bvt_html_coverage }} ${{ env.ut_html_coverage }} coverage_report.txt UT-Report.out $GITHUB_WORKSPACE/matrixone/mo-service.log
       - name: Generate Notice Content
         if: ${{ always() && !cancelled() }}
         run: |
@@ -234,8 +234,8 @@ jobs:
           echo "Url=${{ github.event.repository.html_url }}/actions/runs/${{ github.run_id }}" >> $GITHUB_ENV
           echo 'Detail<<EOF' >> $GITHUB_ENV
           cat coverage_report.txt >> $GITHUB_ENV
-          echo 'EOF' >> $GITHUB_ENV          
-      - uses: actions/upload-artifact@v3
+          echo 'EOF' >> $GITHUB_ENV
+      - uses: actions/upload-artifact@v4
         if: ${{ always() && !cancelled() }}
         continue-on-error: true
         with:
@@ -243,7 +243,7 @@ jobs:
           path: |
             ${{ github.workspace }}/matrixone/code_quality_reports.zip
           retention-days: 7
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: ${{ failure() }}
         continue-on-error: true
         with:

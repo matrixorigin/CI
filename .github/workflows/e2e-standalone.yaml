@@ -11,9 +11,9 @@ jobs:
     timeout-minutes: 90
     steps:
       - name: checkout head
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
-          fetch-depth: '3'
+          fetch-depth: "3"
           path: ./head
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
@@ -39,16 +39,16 @@ jobs:
           cd $GITHUB_WORKSPACE/head
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/head launch
       - name: Clone test-tool repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
       - name: Set up JDK 8 for x64
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
-          java-version: '8'
-          distribution: 'adopt'
+          java-version: "8"
+          distribution: "adopt"
           architecture: x64
       - name: Start BVT Test
         id: bvt_on_pr_version
@@ -80,10 +80,10 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/head
           mv mo-service.log mo-service.r1.log
-          
+
           # delete for clear the start finish status of mo
           rm -rf mo-data/local/system_init_completed
-          
+
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/head launch
       - name: Start BVT Test for MO with Version of Head Restarted
         id: bvt_on_latest_head_version_run2
@@ -96,10 +96,10 @@ jobs:
           echo "============================="
 
           ./run.sh -n -g -o -p $GITHUB_WORKSPACE/head/test/distributed/cases -e pessimistic_transaction 2>&1
-      - name: Dump restarted mo-service goroutines 
+      - name: Dump restarted mo-service goroutines
         if: ${{ always() && !cancelled() }}
         run: |
-          if [ "$(ps -ef | grep 'mo-service' | grep -v "grep" | wc -l)" -gt 0 ]; then curl http://localhost:12345/debug/pprof/goroutine\?debug=2 -o ${{ github.workspace }}/head/restarted-dump-stacks.log; pkill -9 mo-service; else echo 'current mo-service has already crashed'; exit 1; fi               
+          if [ "$(ps -ef | grep 'mo-service' | grep -v "grep" | wc -l)" -gt 0 ]; then curl http://localhost:12345/debug/pprof/goroutine\?debug=2 -o ${{ github.workspace }}/head/restarted-dump-stacks.log; pkill -9 mo-service; else echo 'current mo-service has already crashed'; exit 1; fi
       - name: Check Log Messages Count per second
         if: ${{ always() && !cancelled() }}
         run: |
@@ -116,7 +116,7 @@ jobs:
           mv ${{ github.workspace }}/head/mo-service.log ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/mo-tester ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/head/dump-stacks* ${{ github.workspace }}/upload/
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
@@ -133,7 +133,7 @@ jobs:
       mo_reuse_enable_checker: true
     steps:
       - name: checkout head
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           path: ./head
           repository: ${{ github.event.pull_request.head.repo.full_name }}
@@ -154,16 +154,16 @@ jobs:
           cd $GITHUB_WORKSPACE/head
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/head launch-dynamic-with-proxy -with-proxy
       - name: Clone test-tool repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
       - name: Set up JDK 8 for x64
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
-          java-version: '8'
-          distribution: 'adopt'
+          java-version: "8"
+          distribution: "adopt"
       - name: Start BVT Test
         id: bvt_on_pr_version
         run: |
@@ -195,7 +195,7 @@ jobs:
           mv ${{ github.workspace }}/head/mo-service.log ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/mo-tester ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/head/dump-stacks.log ${{ github.workspace }}/upload/
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
@@ -212,9 +212,9 @@ jobs:
       mo_reuse_enable_checker: true
     steps:
       - name: checkout head
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
-          fetch-depth: '3'
+          fetch-depth: "3"
           path: ./head
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
@@ -239,17 +239,17 @@ jobs:
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/head launch
 
       - name: Clone test-tool repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
 
       - name: Set up JDK 8 for x64
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
-          java-version: '8'
-          distribution: 'adopt'
+          java-version: "8"
+          distribution: "adopt"
           architecture: x64
 
       - name: Start BVT Test
@@ -261,7 +261,7 @@ jobs:
           sed -i 's/  port: [0-9]*/  port: 12345/g' mo.yml
           cat mo.yml
           echo "============================="
-          
+
           ./run.sh -n -g -o -p $GITHUB_WORKSPACE/head/test/distributed/cases -s  $GITHUB_WORKSPACE/head/test/distributed/resources -e optimistic 2>&1
 
       - name: Dump mo-service goroutines
@@ -292,7 +292,7 @@ jobs:
           mv ${{ github.workspace }}/mo-tester ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/head/dump-stacks.log ${{ github.workspace }}/upload/
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:

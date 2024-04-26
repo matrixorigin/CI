@@ -1,25 +1,25 @@
-name:  MO Checkin Regression On TKE
+name: MO Checkin Regression On TKE
 
 on:
   workflow_call:
     secrets:
       TCR_USERNAME:
-        description: 'TCR_USERNAME'
+        description: "TCR_USERNAME"
         required: true
       TCR_TOKEN:
-        description: 'TCR_TOKEN'
+        description: "TCR_TOKEN"
         required: true
       TENCENT_AK:
-        description: 'TENCENT_AK'
+        description: "TENCENT_AK"
         required: true
       TENCENT_SK:
-        description: 'TENCENT_SK'
+        description: "TENCENT_SK"
         required: true
       WECHAT_MO_CHECKIN_BOT_WEBHOOK:
-        description: 'WECHAT_MO_CHECKIN_BOT_WEBHOOK'
+        description: "WECHAT_MO_CHECKIN_BOT_WEBHOOK"
         required: true
       TOKEN_ACTION:
-        description: 'TOKEN_ACTION'
+        description: "TOKEN_ACTION"
         required: true
 
 jobs:
@@ -29,12 +29,12 @@ jobs:
     timeout-minutes: 30
     name: BUILD MO DOCKER IMAGE
     outputs:
-       version: ${{ steps.prep.outputs.version }}
-       commit_id: ${{ steps.prep.outputs.commit_id }}
+      version: ${{ steps.prep.outputs.version }}
+      commit_id: ${{ steps.prep.outputs.commit_id }}
     steps:
       - name: Clone Repo Matrixorigin/Matrixone
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           path: ./matrixone
       - name: Prepare And Build
@@ -46,7 +46,7 @@ jobs:
           DOCKER_IMAGE=ccr.ccs.tencentyun.com/matrixone-dev/matrixone
           VERSION=commit-$LAST_COMMIT_ID
           TAGS="${DOCKER_IMAGE}:${VERSION}"
-          
+
           # Set output parameters.
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
           echo "docker_image=${DOCKER_IMAGE}" >> $GITHUB_OUTPUT
@@ -70,11 +70,11 @@ jobs:
             fi;
             echo "image build failed, will sleep 5 seconds and retry";
             sleep 5;
-          done;   
+          done;
 
   setup_mo_test_env:
     if: ${{ always() && !cancelled() && needs.docker_image_build.result == 'success' }}
-    needs: 
+    needs:
       - docker_image_build
     runs-on: amd64-mo-guangzhou-medium8
     timeout-minutes: 40
@@ -87,7 +87,7 @@ jobs:
     steps:
       - name: Clone Repo Matrixorigin/Matrixone
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           path: ./matrixone
       - name: Clean TKE ENV
@@ -96,7 +96,7 @@ jobs:
             kubectl get matrixonecluster -n mo-checkin-regression-${{ github.event.pull_request.number }} | awk 'NR>1{system("kubectl delete matrixonecluster/"$1" -n mo-checkin-regression-${{ github.event.pull_request.number }}")}'
             sleep 60s;
           fi
-          kubectl get bucket -n mo-checkin-regression-${{ github.event.pull_request.number }} | grep bucket | awk '{system("kubectl delete bucket/"$1" -n mo-checkin-regression-${{ github.event.pull_request.number }}")}'                
+          kubectl get bucket -n mo-checkin-regression-${{ github.event.pull_request.number }} | grep bucket | awk '{system("kubectl delete bucket/"$1" -n mo-checkin-regression-${{ github.event.pull_request.number }}")}'
       - name: Prepare Registry Token
         run: |
           # set docker login info
@@ -117,7 +117,7 @@ jobs:
           sed -i 's/regionformocheckin/ap-guangzhou/g' $GITHUB_WORKSPACE/matrixone/optools/mo_checkin_regression/mo_checkin_regression_tke.yaml
           sed -i 's@endpointformocheckin@https://cos.ap-guangzhou.myqcloud.com@g' $GITHUB_WORKSPACE/matrixone/optools/mo_checkin_regression/mo_checkin_regression_tke.yaml
           sed -i "s/imagetag/${{ needs.docker_image_build.outputs.version }}/g" $GITHUB_WORKSPACE/matrixone/optools/mo_checkin_regression/mo_checkin_regression_tke.yaml
-         
+
           cat $GITHUB_WORKSPACE/matrixone/optools/mo_checkin_regression/mo_checkin_regression_tke.yaml
       - name: Create MO Cluster
         run: |
@@ -211,13 +211,13 @@ jobs:
     if: ${{ always() && !cancelled() && needs.setup_mo_test_env.result == 'success' }}
     name: MO CHECKIN BVT TEST
     runs-on: amd64-mo-guangzhou-medium8
-    needs: 
+    needs:
       - setup_mo_test_env
       - docker_image_build
     steps:
       - name: Clone MO-Tester
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-tester
           token: ${{secrets.TOKEN_ACTION}}
@@ -225,7 +225,7 @@ jobs:
           ref: main
       - name: Clone matrixone Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           path: ./matrixone
       - name: Set JAVA PATH
@@ -254,26 +254,25 @@ jobs:
         run: |
           mkdir -p $GITHUB_WORKSPACE/reports/mo-tester
           mkdir -p $GITHUB_WORKSPACE/mo-tester && cp -r $GITHUB_WORKSPACE/mo-tester $GITHUB_WORKSPACE/reports/mo-tester
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
           name: mo-checkin-regression-${{ github.event.pull_request.number }}-bvt
           path: |
-             ${{ github.workspace }}/reports
-
+            ${{ github.workspace }}/reports
 
   ssb_and_tpch_test:
     if: ${{ always() && !cancelled() && needs.setup_mo_test_env.result == 'success' }}
     name: MO CHECKIN SSB AND TPCH TEST
     runs-on: amd64-mo-guangzhou-2xlarge16
-    needs: 
+    needs:
       - setup_mo_test_env
       - bvt_test
     steps:
       - name: Clone mo-load-data Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-load-data
           token: ${{secrets.TOKEN_ACTION}}
@@ -282,7 +281,7 @@ jobs:
 
       - name: Clone mo-ssb Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-ssb
           token: ${{secrets.TOKEN_ACTION}}
@@ -291,7 +290,7 @@ jobs:
 
       - name: Clone mo-tpch Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-tpch
           token: ${{secrets.TOKEN_ACTION}}
@@ -299,13 +298,13 @@ jobs:
           ref: main
       - name: Clone mo-night-regression Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-nightly-regression
           token: ${{secrets.TOKEN_ACTION}}
           path: ./mo-nightly-regression
           ref: main
-      
+
       - name: Create Account for Test
         timeout-minutes: 2
         id: account_for_ssb_and_tpch
@@ -359,14 +358,13 @@ jobs:
           curl "http://$cn_1_ip:6060/debug/pprof/trace?seconds=30" -o cn_1_trace.out
           curl "http://$cn_1_ip:6060/debug/pprof/goroutine?debug=2" -o cn_1_groutine.out
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: ${{ always() && steps.step_ssb_test.conclusion != 'success' }}
         with:
           name: mo-cluster-trace-${{ github.event.pull_request.number }}-ssb
           path: |
             ${{ github.workspace }}/upload
           retention-days: 7
-
 
       # start tpch test
       - name: Load TPCH 10G Test Data
@@ -402,14 +400,13 @@ jobs:
           curl "http://$cn_1_ip:6060/debug/pprof/trace?seconds=30" -o cn_1_trace.out
           curl "http://$cn_1_ip:6060/debug/pprof/goroutine?debug=2" -o cn_1_groutine.out
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: ${{ always() && steps.load_tpch_data.conclusion != 'success' }}
         with:
           name: mo-cluster-trace-${{ github.event.pull_request.number }}-load-tpch
           path: |
             ${{ github.workspace }}/upload
           retention-days: 7
-
 
       - name: Start TPCH 10G Test
         if: ${{ always() && !cancelled() && steps.load_tpch_data.conclusion == 'success' }}
@@ -444,7 +441,7 @@ jobs:
           curl "http://$cn_1_ip:6060/debug/pprof/trace?seconds=30" -o cn_1_trace.out
           curl "http://$cn_1_ip:6060/debug/pprof/goroutine?debug=2" -o cn_1_groutine.out
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: ${{ always() && steps.step_tpch_test.conclusion != 'success' }}
         with:
           name: mo-cluster-trace-${{ github.event.pull_request.number }}-tpch
@@ -463,26 +460,26 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/mo-load-data/report && cp -r $GITHUB_WORKSPACE/mo-load-data/report $GITHUB_WORKSPACE/reports/mo-load-data
           mkdir -p $GITHUB_WORKSPACE/mo-tpch/report && cp -r $GITHUB_WORKSPACE/mo-tpch/report $GITHUB_WORKSPACE/reports/mo-tpch
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
           name: mo-checkin-regression-${{ github.event.pull_request.number }}-ssb-tpch
           path: |
-             ${{ github.workspace }}/reports
+            ${{ github.workspace }}/reports
           retention-days: 7
 
   sysbench_test:
     if: ${{ always() && !cancelled() && needs.setup_mo_test_env.result == 'success' }}
     name: SYSBENCH TEST
     runs-on: amd64-mo-guangzhou-2xlarge16
-    needs: 
+    needs:
       - setup_mo_test_env
       - bvt_test
     steps:
       - name: Clone mo-load Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-load
           token: ${{secrets.TOKEN_ACTION}}
@@ -490,13 +487,13 @@ jobs:
           ref: main
       - name: Clone mo-night-regression Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-nightly-regression
           token: ${{secrets.TOKEN_ACTION}}
           path: ./mo-nightly-regression
           ref: main
-          
+
       - name: Create Account for Test And Set PATH
         timeout-minutes: 2
         id: account_for_sysbench
@@ -505,7 +502,6 @@ jobs:
           echo "sysbench_password=111" >> $GITHUB_OUTPUT
           echo "$JAVA_HOME/bin" >> $GITHUB_PATH
 
- 
       # start sysbench test
       - name: Start OLTP Mixed Test With 100 Threads
         if: ${{ always() && !cancelled() }}
@@ -521,15 +517,15 @@ jobs:
           sed -i 's/127.0.0.1/${{ needs.setup_mo_test_env.outputs.mo_svc_ip }}/g' mo.yml
           sed -i 's/name:.*$/name: "${{ steps.account_for_sysbench.outputs.sysbench_account }}"/g' mo.yml
           sed -i 's/password:.*$/password: "${{ steps.account_for_sysbench.outputs.sysbench_password }}"/g' mo.yml
-          
+
           echo 'Start Prepare Data of 10-tables-100000-per-table'
           ./start.sh -m SYSBENCH -n 10 -s 100000 -t 1 | tee report/load-oltp-mix.log
           sleep 10
-          
+
           echo ''
           echo 'Start OLTP Insert Test With 100 threads'
           ./start.sh -c cases/sysbench/mixed_10_100000 -t 100 -d 20 -g -b sbtest | tee report/oltp-mix.log
-     
+
       - name: Result Summary
         if: ${{ always() && !cancelled()  }}
         run: |
@@ -558,27 +554,27 @@ jobs:
         run: |
           mkdir -p $GITHUB_WORKSPACE/reports/mo-load
           mkdir -p $GITHUB_WORKSPACE/mo-load/report && cp -r $GITHUB_WORKSPACE/mo-load/report $GITHUB_WORKSPACE/reports/mo-load
-          
-      - uses: actions/upload-artifact@v3
+
+      - uses: actions/upload-artifact@v4
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
           name: mo-checkin-regression-${{ github.event.pull_request.number }}-sysbench
           path: |
-             ${{ github.workspace }}/reports
+            ${{ github.workspace }}/reports
           retention-days: 7
 
   tpcc_test:
     if: ${{ always() && !cancelled() && needs.setup_mo_test_env.result == 'success'}}
     name: TPCC TEST
     runs-on: amd64-mo-guangzhou-2xlarge16
-    needs: 
+    needs:
       - setup_mo_test_env
       - bvt_test
     steps:
       - name: Clone mo-load-data Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-load-data
           token: ${{secrets.TOKEN_ACTION}}
@@ -587,7 +583,7 @@ jobs:
 
       - name: Clone mo-tpcc Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-tpcc
           token: ${{secrets.TOKEN_ACTION}}
@@ -595,13 +591,13 @@ jobs:
           ref: main
       - name: Clone mo-night-regression Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-nightly-regression
           token: ${{secrets.TOKEN_ACTION}}
           path: ./mo-nightly-regression
           ref: main
-          
+
       - name: Create Account for Test
         timeout-minutes: 2
         id: account_for_tpcc
@@ -609,7 +605,6 @@ jobs:
           mysql -h ${{ needs.setup_mo_test_env.outputs.mo_svc_ip }} -P 6001 -udump -p111 -e "create account tpcc_test admin_name = 'admin' identified by '111' comment 'for tpcc test';"
           echo "tpcc_account=tpcc_test:admin" >> $GITHUB_OUTPUT
           echo "tpcc_password=111" >> $GITHUB_OUTPUT
-          
 
       - name: Modify Tool's Setting And Set PATH
         run: |
@@ -619,8 +614,8 @@ jobs:
           sed -i '/.*SECRET_ACCESS_KEY: ""*/c\SECRET_ACCESS_KEY: "${{secrets.TENCENT_SK}}"' access.yml
 
           echo "$JAVA_HOME/bin" >> $GITHUB_PATH
-    
-     # start tpcc test
+
+      # start tpcc test
       - name: Load TPCC 10 Warehouse Data
         if: ${{ always() && !cancelled() }}
         timeout-minutes: 20
@@ -641,7 +636,7 @@ jobs:
           set -uo pipefail
           export LC_ALL="C.UTF-8"
           locale
-          
+
           cd $GITHUB_WORKSPACE/mo-tpcc
           mkdir -p report
           cp props.mo props_10.mo
@@ -655,7 +650,7 @@ jobs:
           sed -i 's/password=.*/password=${{ steps.account_for_tpcc.outputs.tpcc_password }}/g' props_10.mo
           ./runBenchmark.sh props_10.mo | tee report/tpcc-benchmark-10-100.log
           ./runVerify.sh props_10.mo | tee report/tpcc-verify-10-100.log
-          
+
       - name: Result Summary
         if: ${{ always() && !cancelled()  }}
         run: |
@@ -677,29 +672,29 @@ jobs:
               echo "..."
               tail -n 3 tmp 
           done
-      
+
       - name: Collect Upload files
         if: ${{ always() || cancelled() }}
         run: |
           mkdir -p $GITHUB_WORKSPACE/reports/mo-load-data
           mkdir -p $GITHUB_WORKSPACE/reports/mo-tpcc
           mkdir -p $GITHUB_WORKSPACE/mo-load-data/report && cp -r $GITHUB_WORKSPACE/mo-load-data/report $GITHUB_WORKSPACE/reports/mo-load-data
-          mkdir -p $GITHUB_WORKSPACE/mo-tpcc/report && cp -r $GITHUB_WORKSPACE/mo-tpcc/report $GITHUB_WORKSPACE/reports/mo-tpcc     
-      
-      - uses: actions/upload-artifact@v3
+          mkdir -p $GITHUB_WORKSPACE/mo-tpcc/report && cp -r $GITHUB_WORKSPACE/mo-tpcc/report $GITHUB_WORKSPACE/reports/mo-tpcc
+
+      - uses: actions/upload-artifact@v4
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
           name: mo-checkin-regression-${{ github.event.pull_request.number }}-tpcc
           path: |
-             ${{ github.workspace }}/reports
+            ${{ github.workspace }}/reports
           retention-days: 7
 
   clean_up_env:
     if: ${{ always() && github.event.pull_request.merged == true }}
     name: CLEAN ENV AND NOTICE
     runs-on: amd64-mo-guangzhou-medium8
-    needs: 
+    needs:
       - docker_image_build
       - setup_mo_test_env
       - bvt_test
@@ -734,7 +729,7 @@ jobs:
           curl "http://$cn_1_ip:6060/debug/pprof/trace?seconds=30" -o cn_1_trace.out
           curl "http://$cn_1_ip:6060/debug/pprof/goroutine?debug=2" -o cn_1_groutine.out
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: ${{ needs.docker_image_build.result == 'success' }}
         continue-on-error: true
         with:
@@ -742,7 +737,7 @@ jobs:
           path: |
             ${{ github.workspace }}/upload
           retention-days: 7
-        
+
       - name: Check MO Status and Clean ENV
         if: ${{ needs.docker_image_build.result == 'success' && needs.setup_mo_test_env.result == 'success' && needs.bvt_test.result == 'success' && needs.ssb_and_tpch_test.result == 'success' && needs.sysbench_test.result == 'success' && needs.tpcc_test.result == 'success'  }}
         run: |
@@ -753,7 +748,7 @@ jobs:
           kubectl get matrixonecluster -n mo-checkin-regression-${{ github.event.pull_request.number }} | awk 'NR>1{system("kubectl delete matrixonecluster/"$1" -n mo-checkin-regression-${{ github.event.pull_request.number }}")}'
           sleep 60      
           kubectl -n mo-checkin-regression-${{ github.event.pull_request.number }} get pod -owide
-          
+
           #delete bucket
           kubectl get bucket -n mo-checkin-regression-${{ github.event.pull_request.number }} | grep bucket | awk '{system("kubectl delete bucket/"$1" -n mo-checkin-regression-${{ github.event.pull_request.number }}")}'
           #delete namespace
