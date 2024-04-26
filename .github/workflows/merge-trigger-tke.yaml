@@ -35,7 +35,7 @@ jobs:
     steps:
       - name: Clone Repo Matrixorigin/Matrixone
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           path: ./matrixone
       - name: Prepare And Build
@@ -77,7 +77,7 @@ jobs:
     steps:
       - name: Clone Repo Matrixorigin/Matrixone
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           path: ./matrixone
       - name: Clean TKE ENV
@@ -216,7 +216,7 @@ jobs:
     steps:
       - name: Clone MO-Tester
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-tester
           token: ${{secrets.TOKEN_ACTION}}
@@ -224,7 +224,7 @@ jobs:
           ref: main
       - name: Clone matrixone Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           path: ./matrixone
       - name: Set JAVA PATH
@@ -253,7 +253,7 @@ jobs:
         run: |
           mkdir -p $GITHUB_WORKSPACE/reports/mo-tester
           mkdir -p $GITHUB_WORKSPACE/mo-tester && cp -r $GITHUB_WORKSPACE/mo-tester $GITHUB_WORKSPACE/reports/mo-tester
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
@@ -268,7 +268,7 @@ jobs:
     steps:
       - name: Clone mo-load-data Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-load-data
           token: ${{secrets.TOKEN_ACTION}}
@@ -277,7 +277,7 @@ jobs:
 
       - name: Clone mo-ssb Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-ssb
           token: ${{secrets.TOKEN_ACTION}}
@@ -286,7 +286,7 @@ jobs:
 
       - name: Clone mo-tpch Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-tpch
           token: ${{secrets.TOKEN_ACTION}}
@@ -294,7 +294,7 @@ jobs:
           ref: main
       - name: Clone mo-night-regression Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-nightly-regression
           token: ${{secrets.TOKEN_ACTION}}
@@ -368,7 +368,7 @@ jobs:
           curl "http://$cn_1_ip:6060/debug/pprof/trace?seconds=30" -o cn_1_trace.out
           curl "http://$cn_1_ip:6060/debug/pprof/goroutine?debug=2" -o cn_1_groutine.out
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: ${{ always() && steps.step_ssb_test.conclusion != 'success' }}
         with:
           name: mo-cluster-trace-${{ github.event.pull_request.number }}-ssb
@@ -411,7 +411,7 @@ jobs:
           curl "http://$cn_1_ip:6060/debug/pprof/trace?seconds=30" -o cn_1_trace.out
           curl "http://$cn_1_ip:6060/debug/pprof/goroutine?debug=2" -o cn_1_groutine.out
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: ${{ always() && steps.load_tpch_data.conclusion != 'success' }}
         with:
           name: mo-cluster-trace-${{ github.event.pull_request.number }}-load-tpch
@@ -453,7 +453,7 @@ jobs:
           curl "http://$cn_1_ip:6060/debug/pprof/trace?seconds=30" -o cn_1_trace.out
           curl "http://$cn_1_ip:6060/debug/pprof/goroutine?debug=2" -o cn_1_groutine.out
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: ${{ always() && steps.step_tpch_test.conclusion != 'success' }}
         with:
           name: mo-cluster-trace-${{ github.event.pull_request.number }}-tpch
@@ -472,7 +472,7 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/mo-load-data/report && cp -r $GITHUB_WORKSPACE/mo-load-data/report $GITHUB_WORKSPACE/reports/mo-load-data
           mkdir -p $GITHUB_WORKSPACE/mo-tpch/report && cp -r $GITHUB_WORKSPACE/mo-tpch/report $GITHUB_WORKSPACE/reports/mo-tpch
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
@@ -489,7 +489,7 @@ jobs:
     steps:
       - name: Clone mo-load Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-load
           token: ${{secrets.TOKEN_ACTION}}
@@ -497,7 +497,7 @@ jobs:
           ref: main
       - name: Clone mo-night-regression Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-nightly-regression
           token: ${{secrets.TOKEN_ACTION}}
@@ -608,7 +608,7 @@ jobs:
     steps:
       - name: Clone mo-load-data Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-load-data
           token: ${{secrets.TOKEN_ACTION}}
@@ -617,7 +617,7 @@ jobs:
 
       - name: Clone mo-tpcc Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-tpcc
           token: ${{secrets.TOKEN_ACTION}}
@@ -625,7 +625,7 @@ jobs:
           ref: main
       - name: Clone mo-night-regression Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-nightly-regression
           token: ${{secrets.TOKEN_ACTION}}
@@ -734,7 +734,7 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/mo-load-data/report && cp -r $GITHUB_WORKSPACE/mo-load-data/report $GITHUB_WORKSPACE/reports/mo-load-data
           mkdir -p $GITHUB_WORKSPACE/mo-tpcc/report && cp -r $GITHUB_WORKSPACE/mo-tpcc/report $GITHUB_WORKSPACE/reports/mo-tpcc     
       
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
@@ -776,7 +776,7 @@ jobs:
           curl "http://$cn_1_ip:6060/debug/pprof/trace?seconds=30" -o cn_1_trace.out
           curl "http://$cn_1_ip:6060/debug/pprof/goroutine?debug=2" -o cn_1_groutine.out
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: ${{ needs.docker_image_build.result == 'success' }}
         continue-on-error: true
         with:

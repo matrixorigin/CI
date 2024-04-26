@@ -81,7 +81,7 @@ jobs:
     needs: [check_organization_user]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: '3'
           path: ./matrixone
@@ -133,14 +133,14 @@ jobs:
           echo "-----------------------ut finish-----------------------"
       - name: Clone mo-tester repository
         if: ${{ steps.ut-pr.outputs.paths != '' }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
       - name: Set up JDK 8 for x64
         if: ${{ steps.ut-pr.outputs.paths != '' }}
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
           java-version: '8'
           distribution: 'adopt'
@@ -203,7 +203,7 @@ jobs:
           echo "======================= Coverage HTML Generate Finished ======================="
           zip -r code_coverage_reports_${{ github.event.pull_request.number}}_${{ github.run_id }}.zip ${{ env.all_html_coverage }} ${{ env.raw_ut_coverage }} ${{ env.raw_ut_coverage_temp }} ${{ env.test_report }} ${{ env.raw_bvt_coverage_temp }} ${{ env.raw_bvt_coverage }} ${{ env.all_coverage }} ${{ env.ut_html_coverage }} ${{ env.bvt_html_coverage }} 'mo-service.log'
           rm -rf ${{ env.all_html_coverage }} ${{ env.raw_ut_coverage }} ${{ env.raw_ut_coverage_temp }} ${{ env.test_report }} ${{ env.raw_bvt_coverage_temp }} ${{ env.raw_bvt_coverage }} ${{ env.all_coverage }} ${{ env.ut_html_coverage }} ${{ env.bvt_html_coverage }} 'mo-service.log'
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: ${{ steps.ut-pr.outputs.paths != '' && failure() && steps.test_ut.conclusion != 'failure' && steps.test_bvt_start.conclusion != 'failure' && steps.test_bvt_stop.conclusion != 'failure' }}
         continue-on-error: true
         with:
