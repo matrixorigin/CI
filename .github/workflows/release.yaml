@@ -4,28 +4,27 @@ on:
   workflow_call:
     secrets:
       TOKEN_ACTION:
-        description: 'TOKEN_ACTION'
+        description: "TOKEN_ACTION"
         required: true
       APPLE_DEVELOPER_CERTIFICATE_P12_BASE64:
-        description: 'APPLE_DEVELOPER_CERTIFICATE_P12_BASE64'
+        description: "APPLE_DEVELOPER_CERTIFICATE_P12_BASE64"
         required: true
       APPLE_DEVELOPER_CERTIFICATE_PASSWORD:
-        description: 'APPLE_DEVELOPER_CERTIFICATE_PASSWORD'
+        description: "APPLE_DEVELOPER_CERTIFICATE_PASSWORD"
         required: true
       AC_PASSWORD:
-        description: 'AC_PASSWORD'
+        description: "AC_PASSWORD"
         required: true
       AC_PROVIDER:
-        description: 'AC_PROVIDER'
+        description: "AC_PROVIDER"
         required: true
 
-        
 jobs:
   linux-amd64-build-job:
     runs-on: ubuntu-20.04
     steps:
       - name: Checkout source
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Get release
         id: get_release
         uses: bruceadams/get-release@v1.3.2
@@ -64,17 +63,17 @@ jobs:
           asset_path: ./mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64.zip
           asset_name: mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64.zip
           asset_content_type: application/zip
-  
+
   linux-arm64-build-job:
     runs-on: aws-arm64-runner
     steps:
       - name: Checkout source
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Get release
         id: get_release
         uses: bruceadams/get-release@v1.3.2
         env:
-          GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}         
+          GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
       - name: Echo some info
         run: |
           echo ${{ steps.get_release.outputs.upload_url }}
@@ -86,7 +85,7 @@ jobs:
       - name: Build normal
         run: |
           make build
-          
+
           mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64/etc
           mv mo-service mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64/
 
@@ -116,7 +115,7 @@ jobs:
   darwin-x86-build-job:
     runs-on: macos-latest
     steps:
-    # GitHub Hosted MacOS runner cannot connect to time.apple.com, so use time.windows.com
+      # GitHub Hosted MacOS runner cannot connect to time.apple.com, so use time.windows.com
       - name: Sync System Time
         run: |
           set +e;
@@ -128,7 +127,7 @@ jobs:
           done
           exit 1;
       - name: Checkout source
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Get release
         id: get_release
         uses: bruceadams/get-release@v1.3.2
@@ -152,9 +151,9 @@ jobs:
           p12-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
 
       - name: Clone gon
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
-          fetch-depth: '1'
+          fetch-depth: "1"
           repository: matrixorigin/gon
           ref: master
           path: ./gon
@@ -178,11 +177,11 @@ jobs:
           cd ./mo-macos11
           spctl -a -vvv -t install mo-service
           codesign --test-requirement="=notarized" -vv mo-service
-        
+
           # rename filepath
           cd .. && mv ./mo-macos11 mo-${{ steps.get_release.outputs.tag_name }}-darwin-x86_64
           mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-darwin-x86_64/etc
-          
+
           # copy toml configure file
           mv etc/launch mo-${{ steps.get_release.outputs.tag_name }}-darwin-x86_64/etc/
           if [ -d "./etc/launch-with-python-udf-server" ]; then
@@ -222,7 +221,7 @@ jobs:
           done
           exit 1;
       - name: Checkout source
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Get release
         id: get_release
         uses: bruceadams/get-release@v1.3.2
@@ -265,7 +264,7 @@ jobs:
           # rename filepath
           cd .. && mv ./mo-macos11 mo-${{ steps.get_release.outputs.tag_name }}-darwin-arm64
           mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-darwin-arm64/etc
-          
+
           # copy toml configure file
           mv etc/launch mo-${{ steps.get_release.outputs.tag_name }}-darwin-arm64/etc
           if [ -d "./etc/launch-with-python-udf-server" ]; then
@@ -298,7 +297,7 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - name: Checkout source
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Get release
         id: get_release
         uses: bruceadams/get-release@v1.3.2
@@ -317,7 +316,7 @@ jobs:
           # copy toml configure file
           mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64/etc
           mv mo-service mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64/
-          
+
           mv ./etc/launch mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64/etc/
           if [ -d "./etc/launch-with-python-udf-server" ]; then
             mv ./etc/launch-with-python-udf-server ./mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64/etc/
@@ -341,7 +340,7 @@ jobs:
     runs-on: aws-arm64-runner
     steps:
       - name: Checkout source
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Get release
         id: get_release
         uses: bruceadams/get-release@v1.3.2
@@ -360,7 +359,7 @@ jobs:
           # copy toml configure file
           mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64/etc
           mv mo-service mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64/
-          
+
           mv ./etc/launch mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64/etc/
           if [ -d "./etc/launch-with-python-udf-server" ]; then
             mv ./etc/launch-with-python-udf-server ./mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64/etc/
