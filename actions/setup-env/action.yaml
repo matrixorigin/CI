@@ -30,7 +30,7 @@ runs:
       uses: actions/setup-go@v5
       with:
         go-version: ${{ inputs.go-version }} 
-        cache: ${{ inputs.cache }}
+        cache: ${{ inputs.cache == "true" }}
     - name: Set up JDK 8 for x64
       if: ${{ inputs.setup-java == 'true' }}
       uses: actions/setup-java@v4
