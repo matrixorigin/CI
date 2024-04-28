@@ -8,7 +8,7 @@ inputs:
   setup-java:
     description: 'version of golang'
     required: false
-    default: "true"
+    default: true
   java-version:
     description: 'version of java'
     required: false
@@ -20,7 +20,7 @@ inputs:
   cache:
     description: 'wether use cache'
     required: false
-    default: "false"
+    default: false
 
 runs:
   using: "composite"
