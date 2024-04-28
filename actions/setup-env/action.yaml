@@ -8,7 +8,7 @@ inputs:
   setup-java:
     description: 'version of golang'
     required: false
-    default: true
+    default: "true"
   java-version:
     description: 'version of java'
     required: false
@@ -20,7 +20,7 @@ inputs:
   cache:
     description: 'wether use cache'
     required: false
-    default: false
+    default: "false"
 
 runs:
   using: "composite"
@@ -32,7 +32,7 @@ runs:
         go-version: ${{ inputs.go-version }} 
         cache: ${{ inputs.cache }}
     - name: Set up JDK 8 for x64
-      if: ${{ inputs.setup-java }}
+      if: ${{ inputs.setup-java == 'true' }}
       uses: actions/setup-java@v4
       with:
         java-version: ${{ inputs.java-version }} 
