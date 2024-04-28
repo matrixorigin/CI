@@ -1,0 +1,30 @@
+name: assign-issue
+description: "assign issue to project"
+inputs:
+  token_action:
+    description: 'secret.token_action'
+    required: true
+  issue_id:
+    description: 'issue_id'
+    required: true
+
+runs:
+  using: ubuntu-latest
+
+  steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          repository: matrixorigin/CI
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: npm install dependency
+        run: |
+          cd ${GITHUB_WORKSPACE}/scripts/projects
+          npm install
+      - run: node ${GITHUB_WORKSPACE}/scripts/projects/add-assignee-to-corr-project.js
+        env:
+          GITHUB_TOKEN: ${{ inputs.token_action }}
+          Issue_ID: ${{ inputs.issue_id }}
