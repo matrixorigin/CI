@@ -5,28 +5,28 @@ on:
   workflow_call:
     secrets:
       TOKEN_ACTION:
-        description: 'A token passed from the caller workflow'
+        description: "A token passed from the caller workflow"
         required: true
       S3ENDPOINT:
-        description: 'S3ENDPOINT For Test'
+        description: "S3ENDPOINT For Test"
         required: true
       S3REGION:
-        description: 'S3REGION For Test'
+        description: "S3REGION For Test"
         required: true
       S3APIKEY:
-        description: 'S3APIKEY For Test'
+        description: "S3APIKEY For Test"
         required: true
       S3APISECRET:
-        description: 'S3APISECRET For Test'
+        description: "S3APISECRET For Test"
         required: true
       S3BUCKET:
-        description: 'S3BUCKET For Test'
+        description: "S3BUCKET For Test"
         required: true
       DOCU_GROUP_HOOK:
-        description: 'DOCU_GROUP_HOOK For Notice'
+        description: "DOCU_GROUP_HOOK For Notice"
         required: true
       OPENAI_API_KEY:
-        description: 'OPENAI_API_KEY For get PR Suggestion'
+        description: "OPENAI_API_KEY For get PR Suggestion"
         required: true
 
 jobs:
@@ -36,44 +36,44 @@ jobs:
       in_org: ${{ steps.check_in_org.outputs.in_org }}
       safe_label: ${{ steps.check_safe_label.outputs.safe_label }}
     steps:
-    - id: check_in_org
-      name: CHECK ORGANIZATION USER
-      run: |
-        PAGE=1;
-        PER_PAGE=100;
-        USER_IN_ORG="0";
-        while true; do
-          users=$(curl -L \
+      - id: check_in_org
+        name: CHECK ORGANIZATION USER
+        run: |
+          PAGE=1;
+          PER_PAGE=100;
+          USER_IN_ORG="0";
+          while true; do
+            users=$(curl -L \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${{ secrets.TOKEN_ACTION }}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/orgs/matrixorigin/members?page=$PAGE&per_page=$PER_PAGE");
+            if [ $(echo $users | jq ".[].login" | grep -c "${{ github.event.pull_request.user.login }}" ) -eq 1 ]; then
+              USER_IN_ORG="1";
+              break;
+            fi
+            if [ $(echo $users | jq ".[].login" | wc -l ) -eq $PER_PAGE ]; then
+              PAGE=$(($PAGE+1));
+              users="";
+            else
+              break;
+            fi
+          done
+          echo "in_org=$USER_IN_ORG" >> $GITHUB_OUTPUT;
+
+      - id: check_safe_label
+        name: CHECK PULL REQUEST LABEL
+        run: |
+          labels=$(curl -L \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${{ secrets.TOKEN_ACTION }}" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/orgs/matrixorigin/members?page=$PAGE&per_page=$PER_PAGE");
-          if [ $(echo $users | jq ".[].login" | grep -c "${{ github.event.pull_request.user.login }}" ) -eq 1 ]; then
-            USER_IN_ORG="1";
-            break;
-          fi
-          if [ $(echo $users | jq ".[].login" | wc -l ) -eq $PER_PAGE ]; then
-            PAGE=$(($PAGE+1));
-            users="";
+            '${{ github.event.pull_request.url}}' | jq ".labels");
+          if [ $(echo $labels | jq ".[].name" | grep -c "safe-to-test" ) -ge 1 ]; then
+            echo "safe_label=1" >> $GITHUB_OUTPUT;
           else
-            break;
+            echo "safe_label=0" >> $GITHUB_OUTPUT;
           fi
-        done
-        echo "in_org=$USER_IN_ORG" >> $GITHUB_OUTPUT;
-
-    - id: check_safe_label
-      name: CHECK PULL REQUEST LABEL
-      run: |
-        labels=$(curl -L \
-          -H "Accept: application/vnd.github+json" \
-          -H "Authorization: Bearer ${{ secrets.TOKEN_ACTION }}" \
-          -H "X-GitHub-Api-Version: 2022-11-28" \
-          '${{ github.event.pull_request.url}}' | jq ".labels");
-        if [ $(echo $labels | jq ".[].name" | grep -c "safe-to-test" ) -ge 1 ]; then
-          echo "safe_label=1" >> $GITHUB_OUTPUT;
-        else
-          echo "safe_label=0" >> $GITHUB_OUTPUT;
-        fi
 
   ut_coverage:
     if: ${{ needs.check_organization_user.outputs.safe_label == '1' || needs.check_organization_user.outputs.in_org == '1' }}
@@ -83,12 +83,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: '3'
+          fetch-depth: "3"
           path: ./matrixone
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
       - name: Set up Go
-        uses: ./matrixone/.github/actions/setup_env
+        uses: matrixorigin/CI/actions/setup-env@main
       - name: Set Variables
         run: |
           cd $GITHUB_WORKSPACE/matrixone
@@ -138,13 +138,6 @@ jobs:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
-      - name: Set up JDK 8 for x64
-        if: ${{ steps.ut-pr.outputs.paths != '' }}
-        uses: actions/setup-java@v4
-        with:
-          java-version: '8'
-          distribution: 'adopt'
-          architecture: x64
       - name: Start BVT Test Service
         if: ${{ steps.ut-pr.outputs.paths != '' }}
         id: test_bvt_start
@@ -211,7 +204,7 @@ jobs:
           path: |
             ${{ github.workspace }}/matrixone/code_coverage_reports_${{ github.event.pull_request.number}}_${{ github.run_id }}.zip
           retention-days: 7
-          
+
   pr-size-label:
     runs-on: ubuntu-latest
     needs: [check_organization_user]
@@ -243,20 +236,20 @@ jobs:
           name_label: "doc influence"
           reviewers: "lacrimosaprinz,dengn"
           mentions: "Prinz,DengNan"
-          
+
   chatgpt-review:
     name: ChatGPT Review
     needs: [check_organization_user]
     runs-on: ubuntu-latest
     if: ${{ github.event.action == 'opened' }}
     steps:
-    - uses: matrixorigin/ChatGPT-Reviewer@main
-      name: ChatGPT Review
-      env:
-        GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
-        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      with:
-        model: "gpt-3.5-turbo"
-        temperature: 0.2
-        review_per_file: false
-        comment_per_file: false      
+      - uses: matrixorigin/ChatGPT-Reviewer@main
+        name: ChatGPT Review
+        env:
+          GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        with:
+          model: "gpt-3.5-turbo"
+          temperature: 0.2
+          review_per_file: false
+          comment_per_file: false
