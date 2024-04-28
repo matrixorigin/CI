@@ -1,0 +1,39 @@
+name: setup_env
+description: "setup build environment"
+inputs:
+  go-version:
+    description: 'version of golang'
+    required: false
+    default: "1.21.5"
+  setup-java:
+    description: 'version of golang'
+    required: false
+    default: "true"
+  java-version:
+    description: 'version of java'
+    required: false
+    default: "8"
+  java-distribution:
+    description: 'distribution of java'
+    required: false
+    default: "adopt"
+  cache:
+    description: 'wether use cache'
+    required: false
+    default: "false"
+
+runs:
+  using: "composite"
+
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ inputs.go-version }} 
+        cache: ${{ inputs.cache == 'true' }}
+    - name: Set up JDK 8 for x64
+      if: ${{ inputs.setup-java == 'true' }}
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ inputs.java-version }} 
+        distribution: ${{ inputs.java-distribution}}
