@@ -35,5 +35,5 @@ runs:
       if: ${{ inputs.setup-java }}
       uses: actions/setup-java@v4
       with:
-        java-version: ${{ inputs.go-version }} 
+        java-version: ${{ inputs.java-version }} 
         distribution: ${{ inputs.java-distribution}}
