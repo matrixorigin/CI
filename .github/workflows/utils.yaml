@@ -87,7 +87,7 @@ jobs:
           path: ./matrixone
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
-      - name: Set up Go
+      - name: Set up Go and Java
         uses: matrixorigin/CI/actions/setup-env@main
       - name: Set Variables
         run: |
