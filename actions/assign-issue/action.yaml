@@ -1,0 +1,22 @@
+name: "assign-issue"
+description: "assign-issue"
+inputs:
+  GITHUB_TOKEN:
+    description: "GITHUB_TOKEN"
+    required: true
+    default: ""
+  Issue_ID:
+    description: "Issue_ID"
+    required: true
+    default: ""
+  GITHUB_REPOSITORY_OWNER:
+    description: "GITHUB_REPOSITORY_OWNER"
+    required: true
+    default: ""
+  GITHUB_REPOSITORY:
+    description: "GITHUB_REPOSITORY"
+    required: true
+    default: ""
+runs:
+  using: "node20"
+  main: "dist/index.js"
