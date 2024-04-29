@@ -2,19 +2,19 @@ name: "assign-issue"
 description: "assign-issue"
 inputs:
   GITHUB_TOKEN:
-    description: "GitHub Token"
+    description: "GITHUB_TOKEN"
     required: true
     default: ""
   Issue_ID:
-    description: "Issue ID"
+    description: "Issue_ID"
     required: true
     default: ""
   GITHUB_REPOSITORY_OWNER:
-    description: "github-repo-owner"
+    description: "GITHUB_REPOSITORY_OWNER"
     required: true
     default: ""
   GITHUB_REPOSITORY:
-    description: "github-repo"
+    description: "GITHUB_REPOSITORY"
     required: true
     default: ""
 runs:
