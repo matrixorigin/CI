@@ -1,0 +1,29 @@
+name: Pull Issue Add Reviewers
+description: Auto add reviewers for a pull request which associate a special issue
+author: guguducken
+
+inputs:
+  token_action:
+    description: "The user GitHub token for get data"
+    required: true
+  name_label:
+    description: "The name of label which in issue"
+    default: ""
+    required: true
+  uri_notice:
+    description: "The webhook uri which should send message to"
+    default: ""
+    required: true
+  mentions:
+    description: "the mentions"
+    required: false
+  reviewers:
+    description: "the reviewers which need add to pull request"
+    required: true
+
+runs:
+  using: "node20"
+  main: "actions/index.js"
+branding:
+  icon: "arrow-down"
+  color: "blue"
