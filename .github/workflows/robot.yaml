@@ -99,6 +99,18 @@ jobs:
           uri_notice: ${{ secrets.DOCU_GROUP_HOOK }}
           name_label: "doc influence"
           mentions: "Prinz,DengNan"
+          
+  add-issue-to-project:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues' && github.event.action == 'assigned'
+    steps:
+      - name: assign issue
+        uses: matrixorigin/CI/actions/assign-issue@main
+        with:
+          GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
+          Issue_ID: ${{ github.event.issue.number }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
 
   nightly-check:
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
