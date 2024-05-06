@@ -229,7 +229,7 @@ jobs:
     needs: [check_organization_user]
     if: ${{ github.event.action == 'opened' }}
     steps:
-      - uses: matrixorigin/CI/pull-issue-reviewer@main
+      - uses: matrixorigin/CI/actions/pull-issue-reviewer@main
         with:
           token_action: ${{ secrets.TOKEN_ACTION }}
           uri_notice: ${{ secrets.DOCU_GROUP_HOOK }}
