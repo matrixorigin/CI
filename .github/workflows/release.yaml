@@ -18,6 +18,15 @@ on:
       AC_PROVIDER:
         description: "AC_PROVIDER"
         required: true
+      TENCENT_AK:
+        description: "TENCENT_AK"
+        required: true
+      TENCENT_SK:
+        description: "TENCENT_SK"
+        required: true
+      RELEASE_BUCKET:
+        description: "RELEASE_BUCKET"
+        required: true
 
 jobs:
   linux-amd64-build-job:
@@ -63,6 +72,18 @@ jobs:
           asset_path: ./mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64.zip
           asset_name: mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64.zip
           asset_content_type: application/zip
+      - name: Upload Artifact to COS
+        uses: matrixorigin/CI/actions/upload-artifact-oss@main
+        with:
+          access_key: ${{ secrets.TENCENT_AK }}
+          secret_key: ${{ secrets.TENCENT_SK }}
+          artifact_path: ${{ github.workspace }}/mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64.zip
+          bucket: ${{ secrets.RELEASE_BUCKET }}
+          oss_path: matrixone/${{ steps.get_release.outputs.tag_name }}
+          provider: cos
+          region: ap-shanghai
+          retry_times: 5
+          storage_class: "STANDARD"
 
   linux-arm64-build-job:
     runs-on: aws-arm64-runner
@@ -111,6 +132,19 @@ jobs:
           asset_path: ./mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64.zip
           asset_name: mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64.zip
           asset_content_type: application/zip
+      - name: Upload Artifact to COS
+        uses: matrixorigin/CI/actions/upload-artifact-oss@main
+        with:
+          access_key: ${{ secrets.TENCENT_AK }}
+          secret_key: ${{ secrets.TENCENT_SK }}
+          artifact_path: ${{ github.workspace }}/mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64.zip
+          bucket: ${{ secrets.RELEASE_BUCKET }}
+          oss_path: matrixone/${{ steps.get_release.outputs.tag_name }}
+          provider: cos
+          region: ap-shanghai
+          retry_times: 5
+          storage_class: "STANDARD"
+          
 
   darwin-x86-build-job:
     runs-on: macos-latest
@@ -205,6 +239,28 @@ jobs:
           asset_path: ./mo-${{ steps.get_release.outputs.tag_name }}-darwin-x86_64.zip
           asset_name: mo-${{ steps.get_release.outputs.tag_name }}-darwin-x86_64.zip
           asset_content_type: application/zip
+      - name: Checkout matrixorigin/CI
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: '1'
+          repository: matrixorigin/CI
+          ref: main
+          path: ./CI
+      - name: Upload Artifact to COS
+        run: |
+          cd ${{ github.workspace }}/CI/actions/upload-artifact-oss;
+          make build;
+          ./action;
+        env:
+          INPUT_ACCESS_KEY: ${{ secrets.TENCENT_AK }}
+          INPUT_ARTIFACT_PATH: ${{ github.workspace }}/mo-${{ steps.get_release.outputs.tag_name }}-darwin-x86_64.zip
+          INPUT_BUCKET: ${{ secrets.RELEASE_BUCKET }}
+          INPUT_OSS_PATH: matrixone/${{ steps.get_release.outputs.tag_name }}
+          INPUT_PROVIDER: cos
+          INPUT_REGION: ap-shanghai
+          INPUT_RETRY_TIMES: 5
+          INPUT_SECRET_KEY: ${{ secrets.TENCENT_SK }}
+          INPUT_STORAGE_CLASS: "STANDARD"
 
   #if the release for darwin-arm is failed, please contact guguducken to check runner status
   darwin-arm-build-job:
@@ -287,6 +343,28 @@ jobs:
           asset_path: ./mo-${{ steps.get_release.outputs.tag_name }}-darwin-arm64.zip
           asset_name: mo-${{ steps.get_release.outputs.tag_name }}-darwin-arm64.zip
           asset_content_type: application/zip
+      - name: Checkout matrixorigin/CI
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: '1'
+          repository: matrixorigin/CI
+          ref: main
+          path: ./CI
+      - name: Upload Artifact to COS
+        run: |
+          cd ${{ github.workspace }}/CI/actions/upload-artifact-oss;
+          make build;
+          ./action;
+        env:
+          INPUT_ACCESS_KEY: ${{ secrets.TENCENT_AK }}
+          INPUT_ARTIFACT_PATH: ${{ github.workspace }}/mo-${{ steps.get_release.outputs.tag_name }}-darwin-arm64.zip
+          INPUT_BUCKET: ${{ secrets.RELEASE_BUCKET }}
+          INPUT_OSS_PATH: matrixone/${{ steps.get_release.outputs.tag_name }}
+          INPUT_PROVIDER: cos
+          INPUT_REGION: ap-shanghai
+          INPUT_RETRY_TIMES: 5
+          INPUT_SECRET_KEY: ${{ secrets.TENCENT_SK }}
+          INPUT_STORAGE_CLASS: "STANDARD"
       - name: Remove Code-Signing Certificates
         if: ${{ always() }}
         run: |
@@ -335,6 +413,19 @@ jobs:
           asset_path: ./mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64.zip
           asset_name: mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64.zip
           asset_content_type: application/zip
+      - name: Upload Artifact to COS
+        uses: matrixorigin/CI/actions/upload-artifact-oss@main
+        with:
+          access_key: ${{ secrets.TENCENT_AK }}
+          secret_key: ${{ secrets.TENCENT_SK }}
+          artifact_path: ${{ github.workspace }}/mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64.zip
+          bucket: ${{ secrets.RELEASE_BUCKET }}
+          oss_path: matrixone/${{ steps.get_release.outputs.tag_name }}
+          provider: cos
+          region: ap-shanghai
+          retry_times: 5
+          storage_class: "STANDARD"
+
 
   musl-arm64-build-job:
     runs-on: aws-arm64-runner
@@ -378,3 +469,15 @@ jobs:
           asset_path: ./mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64.zip
           asset_name: mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64.zip
           asset_content_type: application/zip
+      - name: Upload Artifact to COS
+        uses: matrixorigin/CI/actions/upload-artifact-oss@main
+        with:
+          access_key: ${{ secrets.TENCENT_AK }}
+          secret_key: ${{ secrets.TENCENT_SK }}
+          artifact_path: ${{ github.workspace }}/mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64.zip
+          bucket: ${{ secrets.RELEASE_BUCKET }}
+          oss_path: matrixone/${{ steps.get_release.outputs.tag_name }}
+          provider: cos
+          region: ap-shanghai
+          retry_times: 5
+          storage_class: "STANDARD"
