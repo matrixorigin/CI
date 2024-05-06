@@ -23,7 +23,7 @@ inputs:
 
 runs:
   using: "node20"
-  main: "actions/index.js"
+  main: "dist/index.js"
 branding:
   icon: "arrow-down"
   color: "blue"
