@@ -79,7 +79,7 @@ jobs:
           secret_key: ${{ secrets.TENCENT_SK }}
           artifact_path: ${{ github.workspace }}/mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64.zip
           bucket: ${{ secrets.RELEASE_BUCKET }}
-          oss_path: matrixone/${{ github. ref_name }}
+          oss_path: matrixone/${{ github.ref_name }}
           provider: cos
           region: ap-shanghai
           retry_times: 5
@@ -139,7 +139,7 @@ jobs:
           secret_key: ${{ secrets.TENCENT_SK }}
           artifact_path: ${{ github.workspace }}/mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64.zip
           bucket: ${{ secrets.RELEASE_BUCKET }}
-          oss_path: matrixone/${{ github. ref_name }}
+          oss_path: matrixone/${{ github.ref_name }}
           provider: cos
           region: ap-shanghai
           retry_times: 5
@@ -255,7 +255,7 @@ jobs:
           INPUT_ACCESS_KEY: ${{ secrets.TENCENT_AK }}
           INPUT_ARTIFACT_PATH: ${{ github.workspace }}/mo-${{ steps.get_release.outputs.tag_name }}-darwin-x86_64.zip
           INPUT_BUCKET: ${{ secrets.RELEASE_BUCKET }}
-          INPUT_OSS_PATH: matrixone/${{ github. ref_name }}
+          INPUT_OSS_PATH: matrixone/${{ github.ref_name }}
           INPUT_PROVIDER: cos
           INPUT_REGION: ap-shanghai
           INPUT_RETRY_TIMES: 5
@@ -359,7 +359,7 @@ jobs:
           INPUT_ACCESS_KEY: ${{ secrets.TENCENT_AK }}
           INPUT_ARTIFACT_PATH: ${{ github.workspace }}/mo-${{ steps.get_release.outputs.tag_name }}-darwin-arm64.zip
           INPUT_BUCKET: ${{ secrets.RELEASE_BUCKET }}
-          INPUT_OSS_PATH: matrixone/${{ github. ref_name }}
+          INPUT_OSS_PATH: matrixone/${{ github.ref_name }}
           INPUT_PROVIDER: cos
           INPUT_REGION: ap-shanghai
           INPUT_RETRY_TIMES: 5
@@ -420,7 +420,7 @@ jobs:
           secret_key: ${{ secrets.TENCENT_SK }}
           artifact_path: ${{ github.workspace }}/mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64.zip
           bucket: ${{ secrets.RELEASE_BUCKET }}
-          oss_path: matrixone/${{ github. ref_name }}
+          oss_path: matrixone/${{ github.ref_name }}
           provider: cos
           region: ap-shanghai
           retry_times: 5
@@ -476,7 +476,7 @@ jobs:
           secret_key: ${{ secrets.TENCENT_SK }}
           artifact_path: ${{ github.workspace }}/mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64.zip
           bucket: ${{ secrets.RELEASE_BUCKET }}
-          oss_path: matrixone/${{ github. ref_name }}
+          oss_path: matrixone/${{ github.ref_name }}
           provider: cos
           region: ap-shanghai
           retry_times: 5
