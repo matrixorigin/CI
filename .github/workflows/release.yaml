@@ -242,7 +242,7 @@ jobs:
           asset_name: mo-${{ steps.get_release.outputs.tag_name }}-darwin-x86_64.zip
           asset_content_type: application/zip
       - name: Checkout matrixorigin/CI
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: '1'
           repository: matrixorigin/CI
@@ -347,7 +347,7 @@ jobs:
           asset_name: mo-${{ steps.get_release.outputs.tag_name }}-darwin-arm64.zip
           asset_content_type: application/zip
       - name: Checkout matrixorigin/CI
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: '1'
           repository: matrixorigin/CI
