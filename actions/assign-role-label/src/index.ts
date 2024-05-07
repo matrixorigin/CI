@@ -5,6 +5,7 @@ import * as team from "./team"
 
 
 
+
 async function run() {
     const githubToken = core.getInput("github-token", { required: true })
     const correspondence = core.getInput("correspondence", { required: false })
@@ -13,8 +14,14 @@ async function run() {
     let owner = github.context.repo.owner
     let repo = github.context.repo.repo
 
+    let corrMap = new Map<string,string>()
+
     // parse correspondence to map
-    let corrMap = JSON.parse(correspondence) as Map<string, string>
+    let corrRecord = JSON.parse(correspondence) as Record<string, string>
+    for (const entry of Object.entries(corrRecord)) {
+        corrMap.set(entry[0],entry[1])
+    }
+
     if (corrMap.size == 0) {
         return
     }

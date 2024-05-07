@@ -29,66 +29,59 @@ var __importStar = (this && this.__importStar) || function (mod) {
     __setModuleDefault(result, mod);
     return result;
 };
-var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 const github = __importStar(__nccwpck_require__(9654));
 const core = __importStar(__nccwpck_require__(4538));
 const issue = __importStar(__nccwpck_require__(1307));
 const team = __importStar(__nccwpck_require__(4991));
-function run() {
-    return __awaiter(this, void 0, void 0, function* () {
-        const githubToken = core.getInput("github-token", { required: true });
-        const correspondence = core.getInput("correspondence", { required: false });
-        let issueNumber = github.context.issue.number;
-        let owner = github.context.repo.owner;
-        let repo = github.context.repo.repo;
-        // parse correspondence to map
-        let corrMap = JSON.parse(correspondence);
-        if (corrMap.size == 0) {
-            return;
+async function run() {
+    const githubToken = core.getInput("github-token", { required: true });
+    const correspondence = core.getInput("correspondence", { required: false });
+    let issueNumber = github.context.issue.number;
+    let owner = github.context.repo.owner;
+    let repo = github.context.repo.repo;
+    let corrMap = new Map();
+    // parse correspondence to map
+    let corrRecord = JSON.parse(correspondence);
+    for (const entry of Object.entries(corrRecord)) {
+        corrMap.set(entry[0], entry[1]);
+    }
+    if (corrMap.size == 0) {
+        return;
+    }
+    // get teams and corresponding members
+    let teams = Array.from(corrMap.keys());
+    let teamsMember = await team.getTeamMemberMap(githubToken, teams);
+    // get all assignees for issue
+    let assignees = await issue.listAssignees(githubToken, owner, repo, issueNumber);
+    // get all labels for issue
+    let labels = await issue.listLabels(githubToken, owner, repo, issueNumber);
+    let added = new Set();
+    let deleted = new Set();
+    for (const assignee of assignees) {
+        let corrTeam = findTeam(teamsMember, assignee);
+        if (corrTeam === null) {
+            continue;
         }
-        // get teams and corresponding members
-        let teams = Array.from(corrMap.keys());
-        let teamsMember = yield team.getTeamMemberMap(githubToken, teams);
-        // get all assignees for issue
-        let assignees = yield issue.listAssignees(githubToken, owner, repo, issueNumber);
-        // get all labels for issue
-        let labels = yield issue.listLabels(githubToken, owner, repo, issueNumber);
-        let added = new Set();
-        let deleted = new Set();
-        for (const assignee of assignees) {
-            let corrTeam = findTeam(teamsMember, assignee);
-            if (corrTeam === null) {
-                continue;
-            }
-            // get label and check whether issue already labeled it
-            let corrLabel = corrMap.get(corrTeam);
-            if (labels.includes(corrLabel)) {
-                continue;
-            }
-            added.add(corrLabel);
+        // get label and check whether issue already labeled it
+        let corrLabel = corrMap.get(corrTeam);
+        if (labels.includes(corrLabel)) {
+            continue;
         }
-        // generate need delete label array
-        for (const corrMapElement of corrMap.values()) {
-            if (added.has(corrMapElement)) {
-                continue;
-            }
-            if (!labels.includes(corrMapElement)) {
-                continue;
-            }
-            deleted.add(corrMapElement);
+        added.add(corrLabel);
+    }
+    // generate need delete label array
+    for (const corrMapElement of corrMap.values()) {
+        if (added.has(corrMapElement)) {
+            continue;
         }
-        yield issue.addLabels(githubToken, owner, repo, issueNumber, Array.from(added));
-        yield issue.removeLabels(githubToken, owner, repo, issueNumber, Array.from(deleted));
-    });
+        if (!labels.includes(corrMapElement)) {
+            continue;
+        }
+        deleted.add(corrMapElement);
+    }
+    await issue.addLabels(githubToken, owner, repo, issueNumber, Array.from(added));
+    await issue.removeLabels(githubToken, owner, repo, issueNumber, Array.from(deleted));
 }
 function findTeam(teamsMap, member) {
     for (const entry of teamsMap.entries()) {
@@ -98,15 +91,13 @@ function findTeam(teamsMap, member) {
     }
     return null;
 }
-function main() {
-    return __awaiter(this, void 0, void 0, function* () {
-        try {
-            yield run();
-        }
-        catch (err) {
-            core.setFailed(err);
-        }
-    });
+async function main() {
+    try {
+        await run();
+    }
+    catch (err) {
+        core.setFailed(err);
+    }
 }
 main();
 
@@ -141,80 +132,84 @@ var __importStar = (this && this.__importStar) || function (mod) {
     __setModuleDefault(result, mod);
     return result;
 };
-var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.removeLabels = exports.addLabels = exports.listAssignees = exports.listLabels = void 0;
 const github = __importStar(__nccwpck_require__(9654));
 const core = __importStar(__nccwpck_require__(4538));
-function listLabels(token, owner, repo, issueNumber) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const octokit = github.getOctokit(token);
-        let result = new Array();
-        let page = 1;
-        while (true) {
-            let { data: labels } = yield octokit.rest.issues.listLabelsOnIssue({
-                owner: owner,
-                repo: repo,
-                issue_number: issueNumber,
-                page: page,
-                per_page: 100
-            });
-            labels.forEach((data) => {
-                result.push(data.name);
-            });
-            if (labels.length == 100) {
-                page++;
-                continue;
-            }
-            break;
-        }
-        return result;
-    });
-}
-exports.listLabels = listLabels;
-function listAssignees(token, owner, repo, issueNumber) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const octokit = github.getOctokit(token);
-        let result = new Array();
-        let page = 1;
-        while (true) {
-            let { data: assignees } = yield octokit.rest.issues.listAssignees({
-                owner: owner,
-                repo: repo,
-                issue_number: issueNumber,
-                page: page,
-                per_page: 100
-            });
-            assignees.forEach((assignee) => {
-                result.push(assignee.login);
-            });
-            if (assignees.length == 100) {
-                page++;
-                continue;
-            }
-            break;
-        }
-        return result;
-    });
-}
-exports.listAssignees = listAssignees;
-function addLabels(token, owner, repo, issueNumber, labels) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const octokit = github.getOctokit(token);
-        octokit.rest.issues.addLabels({
+async function listLabels(token, owner, repo, issueNumber) {
+    const octokit = github.getOctokit(token);
+    let result = new Array();
+    let page = 1;
+    while (true) {
+        let { data: labels } = await octokit.rest.issues.listLabelsOnIssue({
             owner: owner,
             repo: repo,
             issue_number: issueNumber,
-            labels: labels
-        }).then((resp) => {
+            page: page,
+            per_page: 100
+        });
+        labels.forEach((data) => {
+            result.push(data.name);
+        });
+        if (labels.length == 100) {
+            page++;
+            continue;
+        }
+        break;
+    }
+    return result;
+}
+exports.listLabels = listLabels;
+async function listAssignees(token, owner, repo, issueNumber) {
+    const octokit = github.getOctokit(token);
+    let result = new Array();
+    let page = 1;
+    while (true) {
+        let { data: assignees } = await octokit.rest.issues.listAssignees({
+            owner: owner,
+            repo: repo,
+            issue_number: issueNumber,
+            page: page,
+            per_page: 100
+        });
+        assignees.forEach((assignee) => {
+            result.push(assignee.login);
+        });
+        if (assignees.length == 100) {
+            page++;
+            continue;
+        }
+        break;
+    }
+    return result;
+}
+exports.listAssignees = listAssignees;
+async function addLabels(token, owner, repo, issueNumber, labels) {
+    const octokit = github.getOctokit(token);
+    octokit.rest.issues.addLabels({
+        owner: owner,
+        repo: repo,
+        issue_number: issueNumber,
+        labels: labels
+    }).then((resp) => {
+        // @ts-ignore
+        if (resp.status == 404) {
+            core.error("http response status code is " + resp.status + ", this mean Resource not found");
+        }
+        // @ts-ignore
+        if (resp.status == 410) {
+            core.error("http response status code is " + resp.status + ", this mean Gone");
+        }
+        // @ts-ignore
+        if (resp.status == 422) {
+            core.error("http response status code is " + resp.status + ", this mean Validation failed, or the endpoint has been spammed.");
+        }
+    });
+}
+exports.addLabels = addLabels;
+async function removeLabels(token, owner, repo, issueNumber, labels) {
+    for (let i = 0; i < labels.length; i++) {
+        removeLabel(token, owner, repo, issueNumber, labels[i]).then((resp) => {
             // @ts-ignore
             if (resp.status == 404) {
                 core.error("http response status code is " + resp.status + ", this mean Resource not found");
@@ -223,40 +218,17 @@ function addLabels(token, owner, repo, issueNumber, labels) {
             if (resp.status == 410) {
                 core.error("http response status code is " + resp.status + ", this mean Gone");
             }
-            // @ts-ignore
-            if (resp.status == 422) {
-                core.error("http response status code is " + resp.status + ", this mean Validation failed, or the endpoint has been spammed.");
-            }
         });
-    });
-}
-exports.addLabels = addLabels;
-function removeLabels(token, owner, repo, issueNumber, labels) {
-    return __awaiter(this, void 0, void 0, function* () {
-        for (let i = 0; i < labels.length; i++) {
-            removeLabel(token, owner, repo, issueNumber, labels[i]).then((resp) => {
-                // @ts-ignore
-                if (resp.status == 404) {
-                    core.error("http response status code is " + resp.status + ", this mean Resource not found");
-                }
-                // @ts-ignore
-                if (resp.status == 410) {
-                    core.error("http response status code is " + resp.status + ", this mean Gone");
-                }
-            });
-        }
-    });
+    }
 }
 exports.removeLabels = removeLabels;
-function removeLabel(token, owner, repo, issueNumber, label) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const octokit = github.getOctokit(token);
-        return yield octokit.rest.issues.removeLabel({
-            owner: owner,
-            repo: repo,
-            issue_number: issueNumber,
-            name: label
-        });
+async function removeLabel(token, owner, repo, issueNumber, label) {
+    const octokit = github.getOctokit(token);
+    return await octokit.rest.issues.removeLabel({
+        owner: owner,
+        repo: repo,
+        issue_number: issueNumber,
+        name: label
     });
 }
 
@@ -291,54 +263,41 @@ var __importStar = (this && this.__importStar) || function (mod) {
     __setModuleDefault(result, mod);
     return result;
 };
-var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.listTeamMembers = exports.getTeamMemberMap = void 0;
 const github = __importStar(__nccwpck_require__(9654));
-function getTeamMemberMap(token, teamSlugs) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const octokit = github.getOctokit(token);
-        let organization = github.context.repo.owner;
-        let m = new Map;
-        for (let i = 0; i < teamSlugs.length; i++) {
-            let team = teamSlugs[i];
-            m.set(team, yield listTeamMembers(token, organization, team));
-        }
-        return m;
-    });
+async function getTeamMemberMap(token, teamSlugs) {
+    const octokit = github.getOctokit(token);
+    let organization = github.context.repo.owner;
+    let m = new Map;
+    for (let i = 0; i < teamSlugs.length; i++) {
+        let team = teamSlugs[i];
+        m.set(team, await listTeamMembers(token, organization, team));
+    }
+    return m;
 }
 exports.getTeamMemberMap = getTeamMemberMap;
-function listTeamMembers(token, organization, slug) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const octokit = github.getOctokit(token);
-        let arr = new Array;
-        let page = 1;
-        while (true) {
-            let { data: members } = yield octokit.rest.teams.listMembersInOrg({
-                org: organization,
-                team_slug: slug,
-                page: page,
-                per_page: 100
-            });
-            members.forEach((data) => {
-                arr.push(data.login);
-            });
-            if (members.length == 100) {
-                page++;
-                continue;
-            }
-            break;
+async function listTeamMembers(token, organization, slug) {
+    const octokit = github.getOctokit(token);
+    let arr = new Array;
+    let page = 1;
+    while (true) {
+        let { data: members } = await octokit.rest.teams.listMembersInOrg({
+            org: organization,
+            team_slug: slug,
+            page: page,
+            per_page: 100
+        });
+        members.forEach((data) => {
+            arr.push(data.login);
+        });
+        if (members.length == 100) {
+            page++;
+            continue;
         }
-        return arr;
-    });
+        break;
+    }
+    return arr;
 }
 exports.listTeamMembers = listTeamMembers;
 
