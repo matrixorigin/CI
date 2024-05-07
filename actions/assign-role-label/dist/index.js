@@ -80,7 +80,9 @@ async function run() {
         }
         deleted.add(corrMapElement);
     }
+    core.info("this action will add labels: " + added.toString());
     await issue.addLabels(githubToken, owner, repo, issueNumber, Array.from(added));
+    core.info("this action will remove labels: " + deleted.toString());
     await issue.removeLabels(githubToken, owner, repo, issueNumber, Array.from(deleted));
 }
 function findTeam(teamsMap, member) {
