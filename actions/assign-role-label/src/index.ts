@@ -49,14 +49,10 @@ async function run() {
             continue
         }
         for (const team of corrTeam) {
-            core.info(`the assignee ${assignee} correspond to team ${corrTeam}`)
+            core.info(`the assignee ${assignee} correspond to team ${team}`)
             // get label and check whether issue already labeled it
             let corrLabel = corrMap.get(team)
-            if (labels.includes(corrLabel as string)) {
-                core.info(`assignee ${assignee}, team ${corrTeam} corresponding label ${corrLabel as string} already labeled`)
-                continue
-            }
-            core.info(`assignee ${assignee}, team ${corrTeam} need add label ${corrLabel as string}`)
+            core.info(`assignee ${assignee}, team ${team} need add label ${corrLabel as string}`)
             added.add(corrLabel as string)
         }
     }
