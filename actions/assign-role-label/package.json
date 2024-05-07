@@ -1,16 +1,16 @@
 {
-  "name": "projects",
+  "name": "assign-role-label",
   "version": "1.0.0",
   "description": "",
-  "main": "add-assignee-to-corr-project.js",
+  "main": "lib/index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@octokit/action": "^6.0.7",
-    "node-fetch": "^2.6.1"
+    "@actions/core": "^1.10.1",
+    "@actions/github": "^6.0.0",
+    "typescript": "^5.4.5"
   }
 }
