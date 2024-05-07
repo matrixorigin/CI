@@ -13,6 +13,9 @@ export async function listLabels(token: string,owner: string,repo: string,issueN
             page: page,
             per_page: 100
         })
+        if (labels.length == 0) {
+            break
+        }
         labels.forEach((data) => {
             result.push(data.name)
         })
@@ -37,6 +40,9 @@ export async function listAssignees(token: string,owner: string,repo: string,iss
             page: page,
             per_page: 100
         })
+        if (assignees.length == 0) {
+            break
+        }
         assignees.forEach((assignee) => {
             result.push(assignee.login)
         })
