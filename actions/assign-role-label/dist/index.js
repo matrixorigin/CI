@@ -165,29 +165,12 @@ async function listLabels(token, owner, repo, issueNumber) {
 exports.listLabels = listLabels;
 async function listAssignees(token, owner, repo, issueNumber) {
     const octokit = github.getOctokit(token);
-    let result = new Array();
-    let page = 1;
-    while (true) {
-        let { data: assignees } = await octokit.rest.issues.listAssignees({
-            owner: owner,
-            repo: repo,
-            issue_number: issueNumber,
-            page: page,
-            per_page: 100
-        });
-        if (assignees.length == 0) {
-            break;
-        }
-        assignees.forEach((assignee) => {
-            result.push(assignee.login);
-        });
-        if (assignees.length == 100) {
-            page++;
-            continue;
-        }
-        break;
-    }
-    return result;
+    let { data: label } = await octokit.rest.issues.get({
+        owner: owner,
+        repo: repo,
+        issue_number: issueNumber,
+    });
+    return label.assignees?.map((assignee) => { return assignee.login; }) || [];
 }
 exports.listAssignees = listAssignees;
 async function addLabels(token, owner, repo, issueNumber, labels) {
