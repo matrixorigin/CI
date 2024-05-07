@@ -148,6 +148,9 @@ async function listLabels(token, owner, repo, issueNumber) {
             page: page,
             per_page: 100
         });
+        if (labels.length == 0) {
+            break;
+        }
         labels.forEach((data) => {
             result.push(data.name);
         });
@@ -172,6 +175,9 @@ async function listAssignees(token, owner, repo, issueNumber) {
             page: page,
             per_page: 100
         });
+        if (assignees.length == 0) {
+            break;
+        }
         assignees.forEach((assignee) => {
             result.push(assignee.login);
         });
