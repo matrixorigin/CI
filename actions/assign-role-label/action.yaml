@@ -1,0 +1,19 @@
+name: Assign Role Label
+description: Label the issue according to the specified correspondence.
+author: guguducken
+
+inputs:
+  github-token:
+    description: 'The user GitHub token for get data'
+    required: true
+  correspondence:
+    description: 'The GitHub repo for get data'
+    required: false
+    default: ""
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
+branding:
+  icon: "code"
+  color: "blue"
