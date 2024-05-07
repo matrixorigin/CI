@@ -43,20 +43,22 @@ async function run() {
 
     core.info("start check assignees team and corresponding label")
     for (const assignee of assignees) {
-        let corrTeam = findTeam(teamsMember,assignee)
-        if (corrTeam === null) {
+        let corrTeam = findTeams(teamsMember,assignee)
+        if (corrTeam.length == 0) {
             core.info(`the assignee ${assignee} does not have corresponding required team`)
             continue
         }
-        core.info(`the assignee ${assignee} correspond to team ${corrTeam}`)
-        // get label and check whether issue already labeled it
-        let corrLabel = corrMap.get(corrTeam)
-        if (labels.includes(corrLabel as string)) {
-            core.info(`assignee ${assignee}, team ${corrTeam} corresponding label ${corrLabel as string} already labeled`)
-            continue
+        for (const team of corrTeam) {
+            core.info(`the assignee ${assignee} correspond to team ${corrTeam}`)
+            // get label and check whether issue already labeled it
+            let corrLabel = corrMap.get(team)
+            if (labels.includes(corrLabel as string)) {
+                core.info(`assignee ${assignee}, team ${corrTeam} corresponding label ${corrLabel as string} already labeled`)
+                continue
+            }
+            core.info(`assignee ${assignee}, team ${corrTeam} need add label ${corrLabel as string}`)
+            added.add(corrLabel as string)
         }
-        core.info(`assignee ${assignee}, team ${corrTeam} need add label ${corrLabel as string}`)
-        added.add(corrLabel as string)
     }
 
     // generate need delete label array
@@ -77,13 +79,14 @@ async function run() {
     await issue.removeLabels(githubToken,owner,repo,issueNumber,Array.from(deleted))
 }
 
-function findTeam(teamsMap: Map<string, string[]>,member: string) {
+function findTeams(teamsMap: Map<string, string[]>,member: string) {
+    let teams = new Array<string>()
     for (const entry of teamsMap.entries()) {
         if (entry[1].includes(member)) {
-            return entry[0]
+            teams.push(entry[0])
         }
     }
-    return null
+    return teams
 }
 
 async function main() {

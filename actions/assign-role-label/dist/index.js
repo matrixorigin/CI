@@ -62,20 +62,22 @@ async function run() {
     let deleted = new Set();
     core.info("start check assignees team and corresponding label");
     for (const assignee of assignees) {
-        let corrTeam = findTeam(teamsMember, assignee);
-        if (corrTeam === null) {
+        let corrTeam = findTeams(teamsMember, assignee);
+        if (corrTeam.length == 0) {
             core.info(`the assignee ${assignee} does not have corresponding required team`);
             continue;
         }
-        core.info(`the assignee ${assignee} correspond to team ${corrTeam}`);
-        // get label and check whether issue already labeled it
-        let corrLabel = corrMap.get(corrTeam);
-        if (labels.includes(corrLabel)) {
-            core.info(`assignee ${assignee}, team ${corrTeam} corresponding label ${corrLabel} already labeled`);
-            continue;
+        for (const team of corrTeam) {
+            core.info(`the assignee ${assignee} correspond to team ${corrTeam}`);
+            // get label and check whether issue already labeled it
+            let corrLabel = corrMap.get(team);
+            if (labels.includes(corrLabel)) {
+                core.info(`assignee ${assignee}, team ${corrTeam} corresponding label ${corrLabel} already labeled`);
+                continue;
+            }
+            core.info(`assignee ${assignee}, team ${corrTeam} need add label ${corrLabel}`);
+            added.add(corrLabel);
         }
-        core.info(`assignee ${assignee}, team ${corrTeam} need add label ${corrLabel}`);
-        added.add(corrLabel);
     }
     // generate need delete label array
     for (const corrMapElement of corrMap.values()) {
@@ -92,13 +94,14 @@ async function run() {
     core.info("this action will remove labels: " + Array.from(deleted).join(","));
     await issue.removeLabels(githubToken, owner, repo, issueNumber, Array.from(deleted));
 }
-function findTeam(teamsMap, member) {
+function findTeams(teamsMap, member) {
+    let teams = new Array();
     for (const entry of teamsMap.entries()) {
         if (entry[1].includes(member)) {
-            return entry[0];
+            teams.push(entry[0]);
         }
     }
-    return null;
+    return teams;
 }
 async function main() {
     try {
