@@ -111,6 +111,11 @@ jobs:
           Issue_ID: ${{ github.event.issue.number }}
           GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+      - uses: matrixorigin/CI/actions/assign-role-label@main
+        name: Add Label for Assignee Role
+        with:
+          github-token: ${{ secrets.TOKEN_ACTION }}
+          correspondence: "{\"mo-qa-team\":\"phase/testing\"}"
 
   nightly-check:
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
