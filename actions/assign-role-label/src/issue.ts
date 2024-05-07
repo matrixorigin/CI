@@ -56,6 +56,9 @@ export async function listAssignees(token: string,owner: string,repo: string,iss
 }
 
 export async function addLabels(token: string,owner: string,repo: string,issueNumber:number,labels: string[]) {
+    if (labels.length == 0) {
+        return
+    }
     const octokit = github.getOctokit(token)
     octokit.rest.issues.addLabels({
         owner: owner,
@@ -81,6 +84,9 @@ export async function addLabels(token: string,owner: string,repo: string,issueNu
 }
 
 export async function removeLabels(token: string,owner: string,repo: string,issueNumber:number,labels: string[]) {
+    if (labels.length == 0) {
+        return
+    }
     for (let i = 0; i < labels.length; i++) {
         removeLabel(token,owner,repo,issueNumber,labels[i]).then(
             (resp) => {

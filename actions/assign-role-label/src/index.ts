@@ -65,7 +65,6 @@ async function run() {
 
     await issue.addLabels(githubToken,owner,repo,issueNumber,Array.from(added))
     await issue.removeLabels(githubToken,owner,repo,issueNumber,Array.from(deleted))
-
 }
 
 function findTeam(teamsMap: Map<string, string[]>,member: string) {
