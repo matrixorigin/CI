@@ -99,7 +99,7 @@ jobs:
           uri_notice: ${{ secrets.DOCU_GROUP_HOOK }}
           name_label: "doc influence"
           mentions: "Prinz,DengNan"
-          
+
   add-issue-to-project:
     runs-on: ubuntu-latest
     if: github.event_name == 'issues' && github.event.action == 'assigned'
@@ -126,7 +126,7 @@ jobs:
           fetch-depth: "3"
           path: ./matrixone
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/1.2-dev
       - name: Set Variables
         run: |
           echo "ut_report='UT-Report.out'" >> $GITHUB_ENV
