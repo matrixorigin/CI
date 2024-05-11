@@ -44,7 +44,7 @@ jobs:
           echo ${{ steps.get_release.outputs.upload_url }}
           echo ${{ steps.get_release.outputs.tag_name }}
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/1.2-dev
         with:
           setup-java: false
       - name: Build normal
@@ -102,7 +102,7 @@ jobs:
           echo ${{ steps.get_release.outputs.upload_url }}
           echo ${{ steps.get_release.outputs.tag_name }}
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/1.2-dev
         with:
           setup-java: false
       - name: Build normal
@@ -146,7 +146,6 @@ jobs:
           region: ap-shanghai
           retry_times: 5
           storage_class: "STANDARD"
-          
 
   darwin-x86-build-job:
     runs-on: macos-latest
@@ -173,7 +172,7 @@ jobs:
           echo ${{ steps.get_release.outputs.upload_url }}
           echo ${{ steps.get_release.outputs.tag_name }}
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/1.2-dev
         with:
           setup-java: false
       - name: Build normal
@@ -245,7 +244,7 @@ jobs:
       - name: Checkout matrixorigin/CI
         uses: actions/checkout@v4
         with:
-          fetch-depth: '1'
+          fetch-depth: "1"
           repository: matrixorigin/CI
           ref: main
           path: ./CI
@@ -348,7 +347,7 @@ jobs:
       - name: Checkout matrixorigin/CI
         uses: actions/checkout@v4
         with:
-          fetch-depth: '1'
+          fetch-depth: "1"
           repository: matrixorigin/CI
           ref: main
           path: ./CI
@@ -388,7 +387,7 @@ jobs:
           echo ${{ steps.get_release.outputs.upload_url }}
           echo ${{ steps.get_release.outputs.tag_name }}
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/1.2-dev
         with:
           setup-java: false
       - name: Build normal
@@ -430,7 +429,6 @@ jobs:
           retry_times: 5
           storage_class: "STANDARD"
 
-
   musl-arm64-build-job:
     runs-on: aws-arm64-runner
     steps:
@@ -446,7 +444,7 @@ jobs:
           echo ${{ steps.get_release.outputs.upload_url }}
           echo ${{ steps.get_release.outputs.tag_name }}
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/1.2-dev
         with:
           setup-java: false
       - name: Build normal
