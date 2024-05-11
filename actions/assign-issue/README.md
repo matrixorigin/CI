@@ -7,3 +7,13 @@ Input:
 - Issue_ID: 触发workflow的issue_id 
 - GITHUB_REPOSITORY_OWNER: github_repository_owner
 - GITHUB_REPOSITORY: github_repository
+
+usage：
+```
+uses: matrixorigin/CI/actions/assign-issue@main
+with:
+  GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
+  Issue_ID: ${{ github.event.issue.number }}
+  GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+  GITHUB_REPOSITORY: ${{ github.repository }}
+```
