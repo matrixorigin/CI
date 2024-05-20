@@ -85,7 +85,7 @@ jobs:
           provider: cos
           region: ap-shanghai
           retry_times: 5
-          storage_class: "STANDARD"
+          storage_class: "MAZ_STANDARD"
 
   linux-arm64-build-job:
     runs-on: aws-arm64-runner
@@ -145,7 +145,7 @@ jobs:
           provider: cos
           region: ap-shanghai
           retry_times: 5
-          storage_class: "STANDARD"
+          storage_class: "MAZ_STANDARD"
 
   darwin-x86-build-job:
     runs-on: macos-latest
@@ -262,7 +262,7 @@ jobs:
           INPUT_REGION: ap-shanghai
           INPUT_RETRY_TIMES: 5
           INPUT_SECRET_KEY: ${{ secrets.TENCENT_SK }}
-          INPUT_STORAGE_CLASS: "STANDARD"
+          INPUT_STORAGE_CLASS: "MAZ_STANDARD"
 
   #if the release for darwin-arm is failed, please contact guguducken to check runner status
   darwin-arm-build-job:
@@ -365,7 +365,7 @@ jobs:
           INPUT_REGION: ap-shanghai
           INPUT_RETRY_TIMES: 5
           INPUT_SECRET_KEY: ${{ secrets.TENCENT_SK }}
-          INPUT_STORAGE_CLASS: "STANDARD"
+          INPUT_STORAGE_CLASS: "MAZ_STANDARD"
       - name: Remove Code-Signing Certificates
         if: ${{ always() }}
         run: |
@@ -427,7 +427,7 @@ jobs:
           provider: cos
           region: ap-shanghai
           retry_times: 5
-          storage_class: "STANDARD"
+          storage_class: "MAZ_STANDARD"
 
   musl-arm64-build-job:
     runs-on: aws-arm64-runner
@@ -484,4 +484,4 @@ jobs:
           provider: cos
           region: ap-shanghai
           retry_times: 5
-          storage_class: "STANDARD"
+          storage_class: "MAZ_STANDARD"
