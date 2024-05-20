@@ -39,6 +39,7 @@ func (c *COS) UploadArtifact(bucket string, region string, storageClass string, 
 	endpoint := fmt.Sprintf(cosUrlTpl, bucket, region)
 
 	key := filepath.Join(storePath, filepath.Base(artifactPath))
+	fileType := filepath.Ext(key)
 
 	u, _ := url.Parse(endpoint)
 	b := &cos.BaseURL{BucketURL: u}
@@ -51,7 +52,7 @@ func (c *COS) UploadArtifact(bucket string, region string, storageClass string, 
 
 	opt := &cos.ObjectPutOptions{
 		ObjectPutHeaderOptions: &cos.ObjectPutHeaderOptions{
-			ContentType:      "text/html",
+			ContentType:      fmt.Sprintf("application/%s", fileType),
 			XCosStorageClass: storageClass,
 			Listener:         &progress{nil, sync.Once{}},
 		},
