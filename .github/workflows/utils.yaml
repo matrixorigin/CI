@@ -237,19 +237,19 @@ jobs:
           reviewers: "lacrimosaprinz,dengn"
           mentions: "Prinz,DengNan"
 
-  chatgpt-review:
-    name: ChatGPT Review
-    needs: [check_organization_user]
-    runs-on: ubuntu-latest
-    if: ${{ github.event.action == 'opened' }}
-    steps:
-      - uses: matrixorigin/ChatGPT-Reviewer@main
-        name: ChatGPT Review
-        env:
-          GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        with:
-          model: "gpt-3.5-turbo"
-          temperature: 0.2
-          review_per_file: false
-          comment_per_file: false
+  # chatgpt-review:
+  #   name: ChatGPT Review
+  #   needs: [check_organization_user]
+  #   runs-on: ubuntu-latest
+  #   if: ${{ github.event.action == 'opened' }}
+  #   steps:
+  #     - uses: matrixorigin/ChatGPT-Reviewer@main
+  #       name: ChatGPT Review
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
+  #         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  #       with:
+  #         model: "gpt-3.5-turbo"
+  #         temperature: 0.2
+  #         review_per_file: false
+  #         comment_per_file: false
