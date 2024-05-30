@@ -16,7 +16,7 @@ jobs:
     name: Validate GitHub Actions workflows
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - name: Check for any changed workflows
