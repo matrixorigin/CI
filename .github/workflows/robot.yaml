@@ -18,7 +18,7 @@ on:
 jobs:
   issue-notify:
     if: github.event_name == 'issues' && github.event.action == 'assigned'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: ISSUE Triggered
         uses: chf007/action-wechat-work@master
@@ -31,7 +31,7 @@ jobs:
 
   add-projects-milestone:
     if: github.event_name == 'issues' && github.event.action == 'opened'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Issue Add  Milestone
         if: contains(github.event.issue.labels.*.name, 'kind/bug')
@@ -42,7 +42,7 @@ jobs:
 
   check-bvt-issue:
     if: github.event_name == 'issues' && github.event.action == 'closed'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: CheckOut
         uses: actions/checkout@v4
@@ -78,7 +78,7 @@ jobs:
             Hello @${{ github.event.issue.user.login }}. The bug issue in the BVT test code has not been removed,issues automatically open.
 
   issue-reopen:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     if: github.event_name == 'issues' && github.event.action == 'closed'
     steps:
       - name: Reopen Issue
@@ -90,7 +90,7 @@ jobs:
           issue-number: ${{ github.event.issue.number }}
 
   issue_close_check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     if: github.event_name == 'issues' && github.event.action == 'closed'
     steps:
       - uses: guguducken/pull-issue-reviewer@issue_close_check_with_name
@@ -101,7 +101,7 @@ jobs:
           mentions: "Prinz,DengNan"
           
   add-issue-to-project:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     if: github.event_name == 'issues' && github.event.action == 'assigned'
     steps:
       - name: assign issue

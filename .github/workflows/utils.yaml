@@ -31,7 +31,7 @@ on:
 
 jobs:
   check_organization_user:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     outputs:
       in_org: ${{ steps.check_in_org.outputs.in_org }}
       safe_label: ${{ steps.check_safe_label.outputs.safe_label }}
@@ -79,7 +79,7 @@ jobs:
     if: ${{ needs.check_organization_user.outputs.safe_label == '1' || needs.check_organization_user.outputs.in_org == '1' }}
     name: PR Unit Test Coverage
     needs: [check_organization_user]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -206,7 +206,7 @@ jobs:
           retention-days: 7
 
   pr-size-label:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: [check_organization_user]
     steps:
       - name: size-label
@@ -225,7 +225,7 @@ jobs:
             }
 
   docu_issue_check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: [check_organization_user]
     if: ${{ github.event.action == 'opened' }}
     steps:
@@ -240,7 +240,7 @@ jobs:
   # chatgpt-review:
   #   name: ChatGPT Review
   #   needs: [check_organization_user]
-  #   runs-on: ubuntu-latest
+  #   runs-on: ubuntu-22.04
   #   if: ${{ github.event.action == 'opened' }}
   #   steps:
   #     - uses: matrixorigin/ChatGPT-Reviewer@main

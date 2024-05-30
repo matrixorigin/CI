@@ -6,7 +6,7 @@ on:
 jobs:
   bvt-docker-compose-push:
     if: ${{ !github.event.pull_request.draft }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     name: multi cn e2e bvt test docker compose(Optimistic/PUSH)
     timeout-minutes: 60
 
@@ -110,7 +110,7 @@ jobs:
 
   multi-CN-bvt-docker-compose-pessimistic:
     if: ${{ !github.event.pull_request.draft }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     name: multi cn e2e bvt test docker compose(PESSIMISTIC)
     timeout-minutes: 60
 
