@@ -42,7 +42,7 @@ on:
 
 jobs:
   test-name:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     name: Auto Add Labels
 
     steps:

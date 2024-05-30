@@ -22,7 +22,7 @@ on:
 
 jobs:
   ut-linux-x86:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     name: UT Test on Ubuntu/x86
     steps:
       - uses: actions/checkout@v4
@@ -74,7 +74,7 @@ jobs:
           make ut UT_PARALLEL=6
 
   sca:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     name: SCA Test on Ubuntu/x86
     steps:
       - uses: actions/checkout@v4
