@@ -6,7 +6,7 @@ on:
 jobs:
   bvt-linux-x86:
     if: ${{ !github.event.pull_request.draft }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     name: e2e BVT Test on Linux/x64(LAUNCH,Optimistic)
     timeout-minutes: 90
     steps:
@@ -120,7 +120,7 @@ jobs:
           retention-days: 7
 
   multi-cn-proxy-bvt-linux-x86:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     name: Multi-CN e2e BVT Test on Linux/x64(LAUNCH, PROXY)
     timeout-minutes: 60
     env:
@@ -194,7 +194,7 @@ jobs:
           retention-days: 7
 
   pessimistic-bvt-linux-x86:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     name: e2e BVT Test on Linux/x64(LAUNCH, PESSIMISTIC)
     timeout-minutes: 60
     env:

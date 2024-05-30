@@ -79,7 +79,7 @@ on:
 
 jobs:
   test-name:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     name: Get Change Paths
 
     steps:
