@@ -342,7 +342,7 @@ jobs:
           sleep 60s
           cd $GITHUB_WORKSPACE/mo-load-data
           mkdir -p report
-          ./load.sh -u ${{ steps.account_for_ssb_and_tpch.outputs.ssb_tpch_account }} -p ${{ steps.account_for_ssb_and_tpch.outputs.ssb_tpch_password }} -h ${{ needs.setup_mo_test_env.outputs.mo_svc_ip }} -c cases/02_from_cos/ssb_10 -r -m -g | tee report/mo-load-data-ssb.log
+          ./load.sh -u ${{ steps.account_for_ssb_and_tpch.outputs.ssb_tpch_account }} -p ${{ steps.account_for_ssb_and_tpch.outputs.ssb_tpch_password }} -h ${{ needs.setup_mo_test_env.outputs.mo_svc_ip }} -c cases/02_from_cos/ssb_10 -r -m | tee report/mo-load-data-ssb.log
           # start test
           cd $GITHUB_WORKSPACE/mo-ssb
           mkdir -p report
@@ -389,7 +389,7 @@ jobs:
           sleep 60s
           cd $GITHUB_WORKSPACE/mo-load-data
           mkdir -p report
-          ./load.sh -u ${{ steps.account_for_ssb_and_tpch.outputs.ssb_tpch_account }} -p ${{ steps.account_for_ssb_and_tpch.outputs.ssb_tpch_password }} -h ${{ needs.setup_mo_test_env.outputs.mo_svc_ip }} -c cases/02_from_cos/tpch_10 -r -m -g | tee report/mo-load-data-tpch.log
+          ./load.sh -u ${{ steps.account_for_ssb_and_tpch.outputs.ssb_tpch_account }} -p ${{ steps.account_for_ssb_and_tpch.outputs.ssb_tpch_password }} -h ${{ needs.setup_mo_test_env.outputs.mo_svc_ip }} -c cases/02_from_cos/tpch_10 -r -m | tee report/mo-load-data-tpch.log
 
       - name: Check MO Status and Collect Trace
         if: ${{ always() && steps.load_tpch_data.conclusion != 'success' }}
@@ -662,7 +662,7 @@ jobs:
           sleep 60s
           cd $GITHUB_WORKSPACE/mo-load-data
           mkdir -p report
-          ./load.sh -u ${{ steps.account_for_tpcc.outputs.tpcc_account }} -p ${{ steps.account_for_tpcc.outputs.tpcc_password }} -h ${{ needs.setup_mo_test_env.outputs.mo_svc_ip }} -c cases/02_from_cos/tpcc_10 -r -m -g | tee report/mo-load-data-tpcc.log
+          ./load.sh -u ${{ steps.account_for_tpcc.outputs.tpcc_account }} -p ${{ steps.account_for_tpcc.outputs.tpcc_password }} -h ${{ needs.setup_mo_test_env.outputs.mo_svc_ip }} -c cases/02_from_cos/tpcc_10 -r -m | tee report/mo-load-data-tpcc.log
 
       - name: Enable CN TXN Trace
         timeout-minutes: 2
