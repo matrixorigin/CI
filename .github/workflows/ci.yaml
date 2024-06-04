@@ -41,10 +41,17 @@ jobs:
           echo "apikey=${{ secrets.S3APIKEY }}" >> $GITHUB_ENV
           echo "apisecret=${{ secrets.S3APISECRET }}" >> $GITHUB_ENV
           echo "bucket=${{ secrets.S3BUCKET }}" >> $GITHUB_ENV
+          # set ut workdir
+          echo "UT_WORKDIR=${{ github.workspace }}" >> $GITHUB_ENV
       - name: Unit Testing
         run: |
           cd $GITHUB_WORKSPACE && make clean && make config
           make ut UT_PARALLEL=6
+      - name: Print Result
+        continue-on-error: true
+        run: |
+          cd $UT_WORKDIR;
+          find scratch -name "**-UT-Count.out" -exec cat {} \;
 
   ut-mac-x86:
     if: ${{ !github.event.pull_request.draft }}
@@ -68,10 +75,17 @@ jobs:
           echo "apikey=${{ secrets.S3APIKEY }}" >> $GITHUB_ENV
           echo "apisecret=${{ secrets.S3APISECRET }}" >> $GITHUB_ENV
           echo "bucket=${{ secrets.S3BUCKET }}" >> $GITHUB_ENV
+          # set ut workdir
+          echo "UT_WORKDIR=${{ github.workspace }}" >> $GITHUB_ENV
       - name: Unit Testing
         run: |
           cd $GITHUB_WORKSPACE && make clean && make config
           make ut UT_PARALLEL=6
+      - name: Print Result
+        continue-on-error: true
+        run: |
+          cd $UT_WORKDIR;
+          find scratch -name "**-UT-Count.out" -exec cat {} \;
 
   sca:
     runs-on: ubuntu-22.04
