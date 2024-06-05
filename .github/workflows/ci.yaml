@@ -48,6 +48,7 @@ jobs:
           cd $GITHUB_WORKSPACE && make clean && make config
           make ut UT_PARALLEL=6
       - name: Print Result
+        if: ${{ always() }}
         continue-on-error: true
         run: |
           cd $UT_WORKDIR;
@@ -82,6 +83,7 @@ jobs:
           cd $GITHUB_WORKSPACE && make clean && make config
           make ut UT_PARALLEL=6
       - name: Print Result
+        if: ${{ always() }}
         continue-on-error: true
         run: |
           cd $UT_WORKDIR;
