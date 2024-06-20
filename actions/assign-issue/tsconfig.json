@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "commonjs",
+    "esModuleInterop": true,
+    //    "declaration": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "outDir": "./lib",
+    "rootDir": "./src",
+    "skipLibCheck": true
+  },
+  "exclude": ["node_modules", "**/*.test.ts"]
+}
