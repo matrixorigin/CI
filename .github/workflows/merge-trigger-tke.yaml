@@ -89,6 +89,9 @@ jobs:
             kubectl get matrixonecluster -n mo-checkin-regression-${{ github.event.pull_request.number }} | awk 'NR>1{system("kubectl delete matrixonecluster/"$1" -n mo-checkin-regression-${{ github.event.pull_request.number }}")}'
             sleep 60s;
           fi
+          if [ "$(kubectl get cm -n mo-checkin-regression-${{ github.event.pull_request.number }} | grep -c "proxy-env")" -ne 0 ]; then
+            kubectl delete cm -n mo-checkin-regression-${{ github.event.pull_request.number }} proxy-env;
+          fi
           kubectl get bucket -n mo-checkin-regression-${{ github.event.pull_request.number }} | grep bucket | awk '{system("kubectl delete bucket/"$1" -n mo-checkin-regression-${{ github.event.pull_request.number }}")}'                
       - name: Prepare Registry Token
         run: |
@@ -114,6 +117,7 @@ jobs:
           cat $GITHUB_WORKSPACE/matrixone/optools/mo_checkin_regression/mo_checkin_regression_tke.yaml
       - name: Create MO Cluster
         run: |
+          kubectl create cm -n mo-checkin-regression-${{ github.event.pull_request.number }} proxy-env --from-literal=https_proxy="${https_proxy}" --from-literal=http_proxy="${http_proxy}" --from-literal=no_proxy="${no_proxy}";
           kubectl -n mo-checkin-regression-${{ github.event.pull_request.number }} apply -f $GITHUB_WORKSPACE/matrixone/optools/mo_checkin_regression/mo_checkin_regression_tke.yaml
           sleep 100s
           while true; do
