@@ -19,18 +19,20 @@ func main() {
 	//issueNumber := 1
 	//token := "xxxxxxx"
 	//assignees := "Rosyrain"
-
+	//labelData := `["needs-review","no-pull_request"]`
 	baseURL := config.GetBaseURL()
 	owner := config.GetOwner()
 	repo := config.GetRepository()
 	issueNumber := config.GetIssueNumber() // 你要检查的issue编号
 	token := config.GetGithubToken()       // 从环境变量中获取GitHub访问令牌
 	assignees := config.GetAssignees()
+	labelData := config.GetLabels()
 
+	fmt.Println("owner:", owner)
 	hasRelatedPR := false // 是否存在关联pr
 
 	// 构建请求URL
-	issueURL := fmt.Sprintf("%s/repos/%s/%s/issues/%d/timeline", baseURL, owner, repo, issueNumber)
+	issueURL := fmt.Sprintf("%s/repos/%s/issues/%d/timeline", baseURL, repo, issueNumber)
 
 	// 创建请求头，包含认证信息
 	issueResp, err := ihttp.Request("GET", issueURL, token, nil, "")
@@ -74,21 +76,19 @@ func main() {
 	if !hasRelatedPR {
 		// 如果没有关联的pull request，给issue添加标签并转交给sukki37
 		// 添加标签
-		labelURL := fmt.Sprintf("%s/repos/%s/%s/issues/%d/labels", baseURL, owner, repo, issueNumber)
-		labelData := `["needs-review","no-pull_request"]`
-
+		labelURL := fmt.Sprintf("%s/repos/%s/issues/%d/labels", baseURL, repo, issueNumber)
 		labelResp, err := ihttp.Request("POST", labelURL, token, bytes.NewReader([]byte(labelData)), "application/json")
 		if err != nil {
-			panic(fmt.Sprintf("Error adding label:%v", err))
+			panic(fmt.Sprintf("Error adding label,err:%v", err))
 		}
 		if labelResp.StatusCode != http.StatusOK {
-			panic(fmt.Sprintf("labelURL http.Request failed,err:%v", err))
+			panic(fmt.Sprintf("labelURL http.Request failed,labelStatusCode:%d", labelResp.StatusCode))
 		}
 		defer labelResp.Body.Close()
 		fmt.Printf("Add labels %s successfully.\n", labelData)
 
 		// 转交给sukki37
-		assigneeURL := fmt.Sprintf("%s/repos/%s/%s/issues/%d/assignees", baseURL, owner, repo, issueNumber)
+		assigneeURL := fmt.Sprintf("%s/repos/%s/issues/%d/assignees", baseURL, repo, issueNumber)
 		assigneeData := map[string]string{"assignees": assignees}
 		jsonData, err := json.Marshal(assigneeData)
 
@@ -103,7 +103,7 @@ func main() {
 		fmt.Printf("Issue labeled and assigned to %s successfully.\n", assignees)
 
 		//重新打开issue
-		reopenURL := fmt.Sprintf("%s/repos/%s/%s/issues/%d", baseURL, owner, repo, issueNumber)
+		reopenURL := fmt.Sprintf("%s/repos/%s/issues/%d", baseURL, repo, issueNumber)
 		reopenData := map[string]string{"state": "open"}
 		jsonData, err = json.Marshal(reopenData)
 		if err != nil {

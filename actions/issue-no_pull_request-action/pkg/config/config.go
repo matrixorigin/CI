@@ -7,4 +7,5 @@ const (
 	EnvIssueNumber = "issue_number"
 	EnvGithubToken = "github_token"
 	EnvAssignees   = "assignees"
+	EnvLabels      = "labels"
 )

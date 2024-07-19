@@ -21,6 +21,11 @@ inputs:
   assignees:
     description: Designated person to whom the issue needs to be assigned
     required: true
+  labels:
+    description: Added labels content
+    required: false
+    default: '["label_one","label_two"]'
+
 runs:
   using: docker
   image: Dockerfile

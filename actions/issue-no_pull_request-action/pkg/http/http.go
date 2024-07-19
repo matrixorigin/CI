@@ -15,7 +15,7 @@ func Request(method, url, token string, data io.Reader, contentType string) (res
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", fmt.Sprintf("token %s", token))
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}

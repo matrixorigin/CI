@@ -38,3 +38,7 @@ func GetGithubToken() string {
 func GetAssignees() string {
 	return github.MustGetInput(EnvAssignees)
 }
+
+func GetLabels() string {
+	return github.MustGetInput(EnvLabels)
+}
