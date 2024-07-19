@@ -282,3 +282,15 @@ jobs:
           msgtype: text
           mentioned_list: '["@all"]'
           content: ${{ env.Detail }}
+  check_issues_noRelatedPR:
+    runs-on: ubuntu-latest
+    if: github.actor != 'suki77'
+    steps:
+      - name: Check closed issues without PR
+        with:
+          OWNER: ${{ github.repository_owner }}
+          REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          GITHUB_TOKEN: ${{ secrets.TOKEN }}
+          ASSIGNEES: suki77
+        uses: Rosyrain/CI/actions/issue-no_pull_request-action@main
