@@ -282,15 +282,15 @@ jobs:
           msgtype: text
           mentioned_list: '["@all"]'
           content: ${{ env.Detail }}
-  check_issues_noRelatedPR:
+  issue-no-PR:
     runs-on: ubuntu-latest
-    if: github.actor != 'suki77'
+    if: ${{ github.event_name == 'issues' && github.event.action == 'closed' && github.actor != 'sukki77' }}
     steps:
       - name: Check closed issues without PR
         with:
-          OWNER: ${{ github.repository_owner }}
-          REPOSITORY: ${{ github.repository }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-          GITHUB_TOKEN: ${{ secrets.TOKEN }}
-          ASSIGNEES: suki77
-        uses: Rosyrain/CI/actions/issue-no_pull_request-action@main
+          OWNER: ${{ github.repository_owner }} # 获取执行该作业的仓库作者 形如: matrixorigin
+          REPOSITORY: ${{ github.repository }}  # 获取执行该作业的仓库名 形如: matrixorigin/CI
+          ISSUE_NUMBER: ${{ github.event.issue.number }}  # 获取当前操作的issue number
+          GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}  # 获取github action token操作权限
+          ASSIGNEES: sukki77  #issue指定分配对象
+        uses: matrixorigin/CI/actions/issue-no-PR@main
