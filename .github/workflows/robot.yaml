@@ -293,4 +293,5 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number }}  # 获取当前操作的issue number
           GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}  # 获取github action token操作权限
           ASSIGNEES: sukki77  #issue指定分配对象
+          LABELS: '["needs-review","no-pull_request"]'  #相关自定义label配置
         uses: matrixorigin/CI/actions/issue-no-PR@main
