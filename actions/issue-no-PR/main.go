@@ -20,6 +20,7 @@ func main() {
 	//token := "xxxxxxx"
 	//assignees := "Rosyrain"
 	//labelData := `["needs-review","no-pull_request"]`
+
 	baseURL := config.GetBaseURL()
 	owner := config.GetOwner()
 	repo := config.GetRepository()
@@ -68,7 +69,6 @@ func main() {
 				hasRelatedPR = true
 				break
 			}
-			continue
 		}
 	}
 
