@@ -1,0 +1,34 @@
+name: issue-no_pull_request-action
+author: rosyrain
+description: When an issue is closed, if there is no associated pull_request, the labels are automatically added and assigned to the specified member.
+inputs:
+  base_url:
+    description: The github rest-api base url
+    required: false
+    default: https://api.github.com
+  owner:
+    description: The owner of the repository
+    required: true
+  repository:
+    description: The repository`s name
+    required: true
+  issue_number:
+    description: The closed issue number
+    required: true
+  github_token:
+    description: Get the github token to get the operation permission.
+    required: true
+  assignees:
+    description: Designated person to whom the issue needs to be assigned
+    required: true
+  labels:
+    description: Added labels content
+    required: false
+    default: '["label_one","label_two"]'
+
+runs:
+  using: docker
+  image: Dockerfile
+branding:
+  icon: arrow-up
+  color: blue
