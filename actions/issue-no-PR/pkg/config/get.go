@@ -42,3 +42,7 @@ func GetAssignees() string {
 func GetLabels() string {
 	return github.MustGetInput(EnvLabels)
 }
+
+func GetLabelsNeed() string {
+	return github.MustGetInput(EnvLabelsNeed)
+}

@@ -287,11 +287,22 @@ jobs:
     if: ${{ github.event_name == 'issues' && github.event.action == 'closed' && github.actor != 'sukki37' }}
     steps:
       - name: Check closed issues without PR
+        id: step1
         with:
           OWNER: ${{ github.repository_owner }} # 获取执行该作业的仓库作者 形如: matrixorigin
           REPOSITORY: ${{ github.repository }}  # 获取执行该作业的仓库名 形如: matrixorigin/CI
           ISSUE_NUMBER: ${{ github.event.issue.number }}  # 获取当前操作的issue number
           GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}  # 获取github action token操作权限
           ASSIGNEES: sukki37  #issue指定分配对象
-          LABELS: '["needs-review","no-pull_request"]'  #相关自定义label配置
+          LABELS: '["no-pr-linked"]'  #相关自定义label配置
+          LABELS_NEED: '["tech-request","feature","Feature","kind/feature","attention/feature-incomplete","bug/ut","Bug fix","kind/bug","kind/subtask","kind/tech-request"]' # 需要处理的特殊标签
         uses: matrixorigin/CI/actions/issue-no-PR@main
+      - name: WeChat Work notification
+        if: ${{ failure() || cancelled() || steps.step1.outputs.send == 'yes' }}
+        id: notification
+        uses: chf007/action-wechat-work@master
+        env:
+          WECHAT_WORK_BOT_WEBHOOK: ${{secrets.WECHAT_WORK_BOT_WEBHOOK}}
+        with:
+          msgtype: markdown
+          content: "MO Close Issue Without PR: [${{ github.event.issue.number }}](${{ github.event.issue.html_url }})\nAction Link: [Link](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\nCreator:<@${{ github.event.issue.user.login }}>"

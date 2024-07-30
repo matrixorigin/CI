@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"issue-no_pull-request-action/module"
 	"issue-no_pull-request-action/pkg/config"
+	"issue-no_pull-request-action/pkg/github"
 	ihttp "issue-no_pull-request-action/pkg/http"
 	"net/http"
+	"strings"
 )
 
 func main() {
@@ -15,11 +18,12 @@ func main() {
 	//Examples of parameters are as follows
 	//baseURL := "https://api.github.com"
 	//owner := "Rosyrain"
-	//repo := "github_action_test"
-	//issueNumber := 1
+	//repo := "rosyrain/github_action_test"
+	//issueNumber := 21
 	//token := "xxxxxxx"
 	//assignees := "Rosyrain"
-	//labelData := `["needs-review","no-pull_request"]`
+	//labelData := `["no-pr-linked"]`
+	//labelsNeed := `["tech-request","feature","Feature","kind/feature","attention/feature-incomplete","bug/ut","Bug fix","kind/bug","kind/subtask","kind/tech-request"]`
 
 	baseURL := config.GetBaseURL()
 	owner := config.GetOwner()
@@ -28,10 +32,12 @@ func main() {
 	token := config.GetGithubToken()       // 从环境变量中获取GitHub访问令牌
 	assignees := config.GetAssignees()
 	labelData := config.GetLabels()
+	labelsNeed := config.GetLabelsNeed()
 
 	fmt.Println("owner:", owner)
 	hasRelatedPR := false // 是否存在关联pr
 
+	// 1.获取issue时间线判断是否存在pr
 	// 构建请求URL
 	issueURL := fmt.Sprintf("%s/repos/%s/issues/%d/timeline", baseURL, repo, issueNumber)
 
@@ -72,8 +78,51 @@ func main() {
 		}
 	}
 
-	//如果不存在关联pr
-	if !hasRelatedPR {
+	//2.判断是否为指定labels
+	labelNeedURL := fmt.Sprintf("%s/repos/%s/issues/%d/labels", baseURL, repo, issueNumber)
+	labelNeedResp, err := ihttp.Request("GET", labelNeedURL, token, nil, "")
+	if err != nil {
+		panic(fmt.Sprintf("labelNeedUrl http.Request failed,err:%v", err))
+	}
+	if labelNeedResp.StatusCode != http.StatusOK {
+		panic(fmt.Sprintf("connect labelNeedUrl failed,resp.statusCode:%d", labelNeedResp.StatusCode))
+	}
+	defer labelNeedResp.Body.Close()
+
+	lbody, err := io.ReadAll(labelNeedResp.Body)
+	if err != nil {
+		panic(fmt.Sprintf("Error reading issue labels response body:%v", err))
+	}
+
+	var labels []module.Label
+	err = json.Unmarshal(lbody, &labels)
+	if err != nil {
+		panic(fmt.Sprintf("Error unmarshalling JSON:%v", err))
+	}
+
+	// 去除方括号和引号，然后按逗号分割为字符串切片
+	labelsNeedStr := strings.Trim(labelsNeed, `[]`)
+	labelsNeedSlice := strings.Split(labelsNeedStr, ",")
+
+	// 创建一个映射来快速检查是否存在相同的标签
+	needMap := make(map[string]bool)
+	for _, need := range labelsNeedSlice {
+		// new need, strings.Trim不会修改原值，会返回一个新值
+		nneed := strings.Trim(need, `"`)
+		needMap[nneed] = true
+	}
+
+	hasSame := false
+	for _, label := range labels {
+		if needMap[label.Name] {
+			hasSame = true
+			fmt.Printf("Same label found: %s\n", label.Name)
+			break
+		}
+	}
+
+	//3.进行加标签转交指定人员
+	if !hasRelatedPR && hasSame {
 		// 如果没有关联的pull request，给issue添加标签并转交给sukki37
 		// 添加标签
 		labelURL := fmt.Sprintf("%s/repos/%s/issues/%d/labels", baseURL, repo, issueNumber)
@@ -119,7 +168,13 @@ func main() {
 		}
 		defer reopenResp.Body.Close()
 		fmt.Printf("Issue %d reopen successfully.\n", issueNumber)
+		if err := github.SetOutput("send", "yes"); err != nil {
+			fmt.Println("set outputs failed")
+		}
 	} else {
-		fmt.Println("Issue has related pull requests, no action taken.")
+		fmt.Println("Issue has related pull requests or don`t find need issue, no action taken.")
+		if err := github.SetOutput("send", "no"); err != nil {
+			fmt.Println("set outputs failed")
+		}
 	}
 }

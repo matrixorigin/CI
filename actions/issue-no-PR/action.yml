@@ -24,7 +24,13 @@ inputs:
   labels:
     description: Added labels content
     required: false
-    default: '["label_one","label_two"]'
+    default: '["no-pr-linked"]'
+  labels_need:
+    description: Special labels that need to be handled
+    default: '["tech-request","feature","Feature","kind/feature","attention/feature-incomplete","bug/ut","Bug fix","kind/bug","kind/subtask","kind/tech-request"]'
+outputs:
+  send:
+    description: Whether to send a notification
 
 runs:
   using: docker

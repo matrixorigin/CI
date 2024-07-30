@@ -8,4 +8,5 @@ const (
 	EnvGithubToken = "github_token"
 	EnvAssignees   = "assignees"
 	EnvLabels      = "labels"
+	EnvLabelsNeed  = "labels_need"
 )
