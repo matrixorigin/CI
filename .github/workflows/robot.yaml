@@ -305,4 +305,4 @@ jobs:
           WECHAT_WORK_BOT_WEBHOOK: ${{secrets.WECHAT_WORK_BOT_WEBHOOK}}
         with:
           msgtype: markdown
-          content: "MO Close Issue Without PR: [${{ github.event.issue.number }}](${{ github.event.issue.html_url }})\nAction Link: [Link](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\nCreator:<@${{ github.event.issue.user.login }}>"
+          content: "MO Close Issue Without PR: [${{ github.event.issue.number }}](${{ github.event.issue.html_url }})\nCreator:<@${{ github.event.issue.user.login }}>"
