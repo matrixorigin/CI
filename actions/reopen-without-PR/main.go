@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"issue-no_pull-request-action/module"
-	"issue-no_pull-request-action/pkg/config"
-	"issue-no_pull-request-action/pkg/github"
-	ihttp "issue-no_pull-request-action/pkg/http"
 	"net/http"
+	"reopen-without-PR/module"
+	"reopen-without-PR/pkg/config"
+	"reopen-without-PR/pkg/github"
+	ihttp "reopen-without-PR/pkg/http"
 	"strings"
 )
 
@@ -22,8 +22,8 @@ func main() {
 	//issueNumber := 21
 	//token := "xxxxxxx"
 	//assignees := "Rosyrain"
-	//labelData := `["no-pr-linked"]`
-	//labelsNeed := `["tech-request","feature","Feature","kind/feature","attention/feature-incomplete","bug/ut","Bug fix","kind/bug","kind/subtask","kind/tech-request"]`
+	//labelData := `no-pr-linked-test2,test3`
+	//labelsNeed := `tech-request,feature,Feature,kind/feature,attention/feature-incomplete,bug/ut,Bug fix,kind/bug,kind/subtask,kind/tech-request`
 
 	baseURL := config.GetBaseURL()
 	owner := config.GetOwner()
@@ -101,15 +101,12 @@ func main() {
 	}
 
 	// 去除方括号和引号，然后按逗号分割为字符串切片
-	labelsNeedStr := strings.Trim(labelsNeed, `[]`)
-	labelsNeedSlice := strings.Split(labelsNeedStr, ",")
+	labelsNeedSlice := strings.Split(labelsNeed, ",")
 
 	// 创建一个映射来快速检查是否存在相同的标签
 	needMap := make(map[string]bool)
 	for _, need := range labelsNeedSlice {
-		// new need, strings.Trim不会修改原值，会返回一个新值
-		nneed := strings.Trim(need, `"`)
-		needMap[nneed] = true
+		needMap[need] = true
 	}
 
 	hasSame := false
@@ -126,7 +123,12 @@ func main() {
 		// 如果没有关联的pull request，给issue添加标签并转交给sukki37
 		// 添加标签
 		labelURL := fmt.Sprintf("%s/repos/%s/issues/%d/labels", baseURL, repo, issueNumber)
-		labelResp, err := ihttp.Request("POST", labelURL, token, bytes.NewReader([]byte(labelData)), "application/json")
+		labelSlice := strings.Split(labelData, ",")
+		jsonData, err := json.Marshal(labelSlice)
+		if err != nil {
+			panic("json.Marshal labelSlice failed")
+		}
+		labelResp, err := ihttp.Request("POST", labelURL, token, bytes.NewReader(jsonData), "application/json")
 		if err != nil {
 			panic(fmt.Sprintf("Error adding label,err:%v", err))
 		}
@@ -139,8 +141,10 @@ func main() {
 		// 转交给sukki37
 		assigneeURL := fmt.Sprintf("%s/repos/%s/issues/%d/assignees", baseURL, repo, issueNumber)
 		assigneeData := map[string]string{"assignees": assignees}
-		jsonData, err := json.Marshal(assigneeData)
-
+		jsonData, err = json.Marshal(assigneeData)
+		if err != nil {
+			panic("json.Marshal assigneeData failed")
+		}
 		assigneeResp, err := ihttp.Request("POST", assigneeURL, token, bytes.NewReader(jsonData), "application/json")
 		if err != nil {
 			panic(fmt.Sprintf("Error creating assignee request:%v", err))
@@ -156,9 +160,8 @@ func main() {
 		reopenData := map[string]string{"state": "open"}
 		jsonData, err = json.Marshal(reopenData)
 		if err != nil {
-			panic(fmt.Sprintf("Error marshaling JSON:%v", err))
+			panic("json.Marshal reopenData failed")
 		}
-
 		reopenResp, err := ihttp.Request("PATCH", reopenURL, token, bytes.NewReader(jsonData), "application/json")
 		if err != nil {
 			panic(fmt.Sprintf("Error creating reopen request:%v", err))

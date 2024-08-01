@@ -1,4 +1,4 @@
-module issue-no_pull-request-action
+module reopen-without-PR
 
 go 1.22.3
 

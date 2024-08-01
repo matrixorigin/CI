@@ -282,21 +282,23 @@ jobs:
           msgtype: text
           mentioned_list: '["@all"]'
           content: ${{ env.Detail }}
-  issue-no-PR:
+  reopen-without-PR:
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'issues' && github.event.action == 'closed' && github.actor != 'sukki37' }}
     steps:
-      - name: Check closed issues without PR
+      - name: Reopen Issue Without PR
         id: step1
+        env:
+          BASE_URL: https://api.github.com
         with:
           OWNER: ${{ github.repository_owner }} # 获取执行该作业的仓库作者 形如: matrixorigin
           REPOSITORY: ${{ github.repository }}  # 获取执行该作业的仓库名 形如: matrixorigin/CI
           ISSUE_NUMBER: ${{ github.event.issue.number }}  # 获取当前操作的issue number
           GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}  # 获取github action token操作权限
           ASSIGNEES: sukki37  #issue指定分配对象
-          LABELS: '["no-pr-linked"]'  #相关自定义label配置
-          LABELS_NEED: '["tech-request","feature","Feature","kind/feature","attention/feature-incomplete","bug/ut","Bug fix","kind/bug","kind/subtask","kind/tech-request"]' # 需要处理的特殊标签
-        uses: matrixorigin/CI/actions/issue-no-PR@main
+          LABELS: 'no-pr-linked'  #相关自定义label配置 形如 label1,label2
+          LABELS_NEED: 'tech-request,feature,Feature,kind/feature,attention/feature-incomplete,bug/ut,Bug fix,kind/bug,kind/subtask,kind/tech-request'  # 指定需要排查的标签 label1,label2,...
+        uses: matrixorigin/CI/actions/reopen-without-PR@main
       - name: WeChat Work notification
         if: ${{ failure() || cancelled() || steps.step1.outputs.send == 'yes' }}
         id: notification

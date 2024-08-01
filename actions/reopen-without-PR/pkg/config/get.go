@@ -2,12 +2,13 @@ package config
 
 import (
 	"fmt"
-	"issue-no_pull-request-action/pkg/github"
+	"os"
+	"reopen-without-PR/pkg/github"
 	"strconv"
 )
 
 func GetBaseURL() string {
-	return github.MustGetInput(EnvBaseURL)
+	return os.Getenv("BASE_URL")
 }
 
 func GetOwner() string {
