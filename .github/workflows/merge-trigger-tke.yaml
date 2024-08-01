@@ -64,7 +64,7 @@ jobs:
           # adjust for go 1.22.3
           sed -i 's#FROM golang:1.22.3-bookworm as builder#FROM ccr.ccs.tencentyun.com/mo-infra/golang:1.22.3-bookworm as builder#g' optools/images/Dockerfile
 
-          docker build -t $TAGS -f optools/images/Dockerfile . --build-arg GOPROXY='https://goproxy.cn,direct'
+          docker build -t $TAGS -f optools/images/Dockerfile . --build-arg GOPROXY='https://goproxy.io,direct'
           docker push $TAGS
   setup_mo_test_env:
     if: ${{ always() && !cancelled() && needs.docker_image_build.result == 'success' }}
