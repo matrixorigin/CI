@@ -127,7 +127,7 @@ jobs:
           setup-java: false
       - name: Build MatrixOne
         run: |
-          export GOPROXY='https://goproxy.cn,direct'
+          export GOPROXY='http://goproxy.goproxy.svc.cluster.local'
           cd $GITHUB_WORKSPACE/head && make clean && make debug
           git rev-parse --short HEAD
       - name: Start MO
