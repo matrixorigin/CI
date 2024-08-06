@@ -23,7 +23,7 @@ const correponding = new Map<string,number>([
     ["matrixonecloud",18],
     ])
 // if assignees' team include any special team, we will add not delete any project
-const specialTeams = new Array<string>("mo-qa-team")
+const specialTeams = new Array<string>("qa")
 // if assignees include any special user, we will add default project to this issue
 const specialUsers = new Array<string>("matrix-meow")
 
@@ -43,7 +43,6 @@ function parseRepoInfo(fullName: string) {
 
 function getTargetProjects(teams: Set<string>, corr: Map<string,string>) {
     let result = new Set<string>()
-    let itemResult = new Map<string, string[]>()
     teams.forEach((team) => {
         let nodeID = corr.get(team)
         if (nodeID === undefined) {
@@ -51,6 +50,7 @@ function getTargetProjects(teams: Set<string>, corr: Map<string,string>) {
         }
         result.add(nodeID)
     })
+    core.info(`target projects is ${Array.from(result.values())}`)
     return Array.from(result.values())
 }
 
@@ -220,8 +220,10 @@ async function main() {
         const targetTeams = await getTeamForUser(owner,assignees as string[])
         const totalTeams = new Set<string>()
         targetTeams.forEach((item) => { item.forEach((t) => { totalTeams.add(t) }) })
+        core.info(`target total teams is: ${totalTeams}`)
         const targetProjects = getTargetProjects(totalTeams,corrProjectNodeIDs)
         addedProject = targetProjects.filter((p) => { return !nowProjects.includes(p) })
+        core.info(`will added projects is: ${addedProject}`)
 
         // check special team
         let included = false
