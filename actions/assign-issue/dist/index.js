@@ -41,10 +41,10 @@ const correponding = new Map([
     ["compute-group-1", 33],
     ["compute-group-2", 36],
     ["storage-group", 35],
-    ["mo-cloud-team", 18],
+    ["matrixonecloud", 18],
 ]);
 // if assignees' team include any special team, we will add not delete any project
-const specialTeams = new Array("mo-qa-team");
+const specialTeams = new Array("qa");
 // if assignees include any special user, we will add default project to this issue
 const specialUsers = new Array("matrix-meow");
 function parseRepoInfo(fullName) {
@@ -61,7 +61,6 @@ function parseRepoInfo(fullName) {
 }
 function getTargetProjects(teams, corr) {
     let result = new Set();
-    let itemResult = new Map();
     teams.forEach((team) => {
         let nodeID = corr.get(team);
         if (nodeID === undefined) {
@@ -69,6 +68,7 @@ function getTargetProjects(teams, corr) {
         }
         result.add(nodeID);
     });
+    core.info(`target projects is ${Array.from(result.values())}`);
     return Array.from(result.values());
 }
 async function getProjectNodeID(organization, projectNumber) {
@@ -210,8 +210,10 @@ async function main() {
         const targetTeams = await getTeamForUser(owner, assignees);
         const totalTeams = new Set();
         targetTeams.forEach((item) => { item.forEach((t) => { totalTeams.add(t); }); });
+        core.info(`target total teams is: ${totalTeams}`);
         const targetProjects = getTargetProjects(totalTeams, corrProjectNodeIDs);
         addedProject = targetProjects.filter((p) => { return !nowProjects.includes(p); });
+        core.info(`will added projects is: ${addedProject}`);
         // check special team
         let included = false;
         for (let t of totalTeams.keys()) {

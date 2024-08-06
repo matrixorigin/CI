@@ -115,7 +115,7 @@ jobs:
         name: Add Label for Assignee Role
         with:
           github-token: ${{ secrets.TOKEN_ACTION }}
-          correspondence: "{\"mo-qa-team\":\"phase/testing\"}"
+          correspondence: "{\"qa\":\"phase/testing\"}"
 
   nightly-check:
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
