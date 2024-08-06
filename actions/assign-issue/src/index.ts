@@ -20,6 +20,7 @@ const correponding = new Map<string,number>([
     ["MO Cloud",18],
     ["MO AI",22],
     ["MOEngine-Compute-1",33],
+    ["MOEngine-Compute-2",36],
     ["MOEngine-Storage",35],
     ])
 // if assignees' team include any special team, we will add not delete any project
