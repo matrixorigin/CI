@@ -25,7 +25,7 @@ on:
 
 jobs:
   docker_image_build:
-    runs-on: amd64-mo-guangzhou-dind
+    runs-on: amd64-mo-shanghai-dind
     if: ${{ github.event.pull_request.merged == true }}
     timeout-minutes: 120
     name: BUILD MO DOCKER IMAGE
