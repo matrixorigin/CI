@@ -21,6 +21,7 @@ const correponding = new Map<string,number>([
     ["compute-group-2",36],
     ["storage-group",35],
     ["matrixonecloud",18],
+    ["us-group",13],
     ])
 // if assignees' team include any special team, we will add not delete any project
 const specialTeams = new Array<string>("qa")
@@ -50,7 +51,7 @@ function getTargetProjects(teams: Set<string>, corr: Map<string,string>) {
         }
         result.add(nodeID)
     })
-    core.info(`target projects is ${Array.from(result.values())}`)
+    core.debug(`target projects is ${Array.from(result.values())}`)
     return Array.from(result.values())
 }
 
@@ -72,12 +73,12 @@ async function getProjectNodeID(organization: string,projectNumber:number) {
         }
     }
     const result = await ocClient.graphql(query) as resp;
-    core.info(`project number: ${projectNumber} ==> node id: ${result.organization.projectV2.id}`);
+    core.debug(`project number: ${projectNumber} ==> node id: ${result.organization.projectV2.id}`);
     return result.organization.projectV2.id
 }
 
 async function getIssueContent(owner: string, repo: string,issueNumber: number) {
-    core.info(`start get content for issue ${issueNumber} in repo ${owner}/${repo}`)
+    core.debug(`start get content for issue ${issueNumber} in repo ${owner}/${repo}`)
     const {data:result} = await ocClient.rest.issues.get({
         owner: owner,
         repo: repo,
@@ -87,7 +88,7 @@ async function getIssueContent(owner: string, repo: string,issueNumber: number) 
 }
 
 async function listIssueRelatedProjects(owner: string, repo: string, issueNumber: number) {
-    core.info(`start get projects for issue ${issueNumber} in repo ${owner}/${repo}`);
+    core.debug(`start get projects for issue ${issueNumber} in repo ${owner}/${repo}`);
     const query = `
         query {
           repository(owner:"${owner}", name:"${repo}") {
@@ -169,7 +170,7 @@ async function addProject(projectNodeID: string, issueNodeID: string) {
                   }
             }
           `;
-    core.info(`add project ${projectNodeID} for issue ${issueNodeID}`);
+    core.debug(`add project ${projectNodeID} for issue ${issueNodeID}`);
     await ocClient.graphql(query)
 }
 
@@ -181,7 +182,7 @@ async function removeProject(projectNodeID: string, itemID: string) {
                   }
             }
           `;
-    core.info(`remove item ${itemID} from project ${projectNodeID}`);
+    core.debug(`remove item ${itemID} from project ${projectNodeID}`);
     await ocClient.graphql(query)
 }
 
@@ -220,10 +221,10 @@ async function main() {
         const targetTeams = await getTeamForUser(owner,assignees as string[])
         const totalTeams = new Set<string>()
         targetTeams.forEach((item) => { item.forEach((t) => { totalTeams.add(t) }) })
-        core.info(`target total teams is: ${totalTeams}`)
+        core.debug(`target total teams is: ${totalTeams}`)
         const targetProjects = getTargetProjects(totalTeams,corrProjectNodeIDs)
         addedProject = targetProjects.filter((p) => { return !nowProjects.includes(p) })
-        core.info(`will added projects is: ${addedProject}`)
+        core.debug(`will added projects is: ${addedProject}`)
 
         // check special team
         let included = false
