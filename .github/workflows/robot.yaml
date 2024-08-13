@@ -35,7 +35,7 @@ jobs:
     steps:
       - name: Issue Add  Milestone
         if: contains(github.event.issue.labels.*.name, 'kind/bug')
-        uses: guguducken/milestone-add-action@check_mill_exist
+        uses: matrixorigin/CI/actions/milestone-add-action@main
         with:
           action-token: ${{ secrets.TOKEN_ACTION }}
           milestone: "1.3.0"
