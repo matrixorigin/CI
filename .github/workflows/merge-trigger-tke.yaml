@@ -90,6 +90,9 @@ jobs:
             sleep 60s;
           fi
           kubectl get bucket -n mo-checkin-regression-${{ github.event.pull_request.number }} | grep bucket | awk '{system("kubectl delete bucket/"$1" -n mo-checkin-regression-${{ github.event.pull_request.number }}")}';
+          if [ "$(kubectl get cm -n mo-checkin-regression-${{ github.event.pull_request.number }} | grep -c "proxy-env")" -ne 0 ]; then
+            kubectl delete cm -n mo-checkin-regression-${{ github.event.pull_request.number }} proxy-env;
+          fi
       - name: Prepare Registry Token
         run: |
           # set docker login info
