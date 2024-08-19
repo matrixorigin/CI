@@ -562,7 +562,7 @@ jobs:
       # start sysbench test
       - name: Start OLTP Mixed Test With 100 Threads
         if: ${{ always() && !cancelled() }}
-        timeout-minutes: 30
+        timeout-minutes: 40
         run: |
           set -uo pipefail
           export LC_ALL="C.UTF-8"
