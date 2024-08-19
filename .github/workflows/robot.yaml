@@ -127,6 +127,8 @@ jobs:
           path: ./matrixone
       - name: Set up Go
         uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          setup-java: false
       - name: Set Variables
         run: |
           echo "ut_report='UT-Report.out'" >> $GITHUB_ENV
@@ -139,6 +141,7 @@ jobs:
           echo "ut_excluded_pkg='pkg/pb\|pkg/sql/parsers/goyacc\|yaccpar'" >> $GITHUB_ENV
           echo "bvt_excluded_pkg='pkg/pb\|yaccpar'" >> $GITHUB_ENV
           echo 'GOPROXY=http://goproxy.goproxy.svc.cluster.local|https://goproxy.cn|direct' >> $GITHUB_ENV
+          echo "$JAVA_HOME/bin" >> $GITHUB_PATH;
       - name: Clone test-tool repository
         uses: actions/checkout@v4
         with:
