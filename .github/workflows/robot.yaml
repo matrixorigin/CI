@@ -119,7 +119,7 @@ jobs:
 
   nightly-check:
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
-    runs-on: aws-arm64-runner
+    runs-on: amd64-mo-shanghai-4xlarge32
     steps:
       - uses: actions/checkout@v4
         with:
@@ -138,6 +138,7 @@ jobs:
           echo "bvt_html_coverage='bvt_coverage.html'" >> $GITHUB_ENV
           echo "ut_excluded_pkg='pkg/pb\|pkg/sql/parsers/goyacc\|yaccpar'" >> $GITHUB_ENV
           echo "bvt_excluded_pkg='pkg/pb\|yaccpar'" >> $GITHUB_ENV
+          echo 'GOPROXY=http://goproxy.goproxy.svc.cluster.local|https://goproxy.cn|direct' >> $GITHUB_ENV
       - name: Clone test-tool repository
         uses: actions/checkout@v4
         with:
