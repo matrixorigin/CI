@@ -269,7 +269,7 @@ jobs:
       - name: WeChat Work notification
         if: ${{ always() && !cancelled() }}
         id: notification
-        uses: chf007/action-wechat-work@master
+        uses: guguducken/action-wechat-work@master
         env:
           WECHAT_WORK_BOT_WEBHOOK: ${{secrets.WECHAT_WORK_BOT_WEBHOOK}}
         with:
@@ -279,7 +279,7 @@ jobs:
       - name: WeChat Work notification
         if: ${{ always() && !cancelled() }}
         id: detail-notification
-        uses: chf007/action-wechat-work@master
+        uses: guguducken/action-wechat-work@master
         env:
           WECHAT_WORK_BOT_WEBHOOK: ${{secrets.WECHAT_WORK_BOT_WEBHOOK}}
         with:
