@@ -35,10 +35,10 @@ jobs:
     steps:
       - name: Issue Add  Milestone
         if: contains(github.event.issue.labels.*.name, 'kind/bug')
-        uses: guguducken/milestone-add-action@check_mill_exist
+        uses: matrixorigin/CI/actions/milestone-add-action@main
         with:
           action-token: ${{ secrets.TOKEN_ACTION }}
-          milestone: "1.2.0"
+          milestone: "1.3.0"
 
   check-bvt-issue:
     if: github.event_name == 'issues' && github.event.action == 'closed'
@@ -115,11 +115,11 @@ jobs:
         name: Add Label for Assignee Role
         with:
           github-token: ${{ secrets.TOKEN_ACTION }}
-          correspondence: "{\"mo-qa-team\":\"phase/testing\"}"
+          correspondence: "{\"qa\":\"phase/testing\"}"
 
   nightly-check:
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
-    runs-on: aws-arm64-runner
+    runs-on: amd64-mo-shanghai-4xlarge32
     steps:
       - uses: actions/checkout@v4
         with:
@@ -127,6 +127,8 @@ jobs:
           path: ./matrixone
       - name: Set up Go
         uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          setup-java: false
       - name: Set Variables
         run: |
           echo "ut_report='UT-Report.out'" >> $GITHUB_ENV
@@ -138,6 +140,8 @@ jobs:
           echo "bvt_html_coverage='bvt_coverage.html'" >> $GITHUB_ENV
           echo "ut_excluded_pkg='pkg/pb\|pkg/sql/parsers/goyacc\|yaccpar'" >> $GITHUB_ENV
           echo "bvt_excluded_pkg='pkg/pb\|yaccpar'" >> $GITHUB_ENV
+          echo 'GOPROXY=http://goproxy.goproxy.svc.cluster.local|https://goproxy.cn|direct' >> $GITHUB_ENV
+          echo "$JAVA_HOME/bin" >> $GITHUB_PATH;
       - name: Clone test-tool repository
         uses: actions/checkout@v4
         with:
@@ -265,7 +269,7 @@ jobs:
       - name: WeChat Work notification
         if: ${{ always() && !cancelled() }}
         id: notification
-        uses: chf007/action-wechat-work@master
+        uses: guguducken/action-wechat-work@master
         env:
           WECHAT_WORK_BOT_WEBHOOK: ${{secrets.WECHAT_WORK_BOT_WEBHOOK}}
         with:
@@ -275,7 +279,7 @@ jobs:
       - name: WeChat Work notification
         if: ${{ always() && !cancelled() }}
         id: detail-notification
-        uses: chf007/action-wechat-work@master
+        uses: guguducken/action-wechat-work@master
         env:
           WECHAT_WORK_BOT_WEBHOOK: ${{secrets.WECHAT_WORK_BOT_WEBHOOK}}
         with:
