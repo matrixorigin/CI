@@ -1,0 +1,27 @@
+name: rm-labels
+author: rosyrain
+description: remove specified labels
+inputs:
+  repository:
+    description: The repository`s name
+    required: true
+  issue_number:
+    description: The closed issue number
+    required: true
+  github_token:
+    description: Get the github token to get the operation permission.
+    required: true
+  labels:
+    description: delete labels content
+    required: false
+    default: 'needs-triage'
+outputs:
+  send:
+    description: Whether to send a notification
+
+runs:
+  using: docker
+  image: Dockerfile
+branding:
+  icon: arrow-up
+  color: blue
