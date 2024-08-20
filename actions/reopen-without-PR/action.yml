@@ -1,0 +1,36 @@
+name: Reopen issue Without PR
+author: rosyrain
+description: When an issue is closed, if there is no associated pull_request, the labels are automatically added and assigned to the specified member.
+inputs:
+  owner:
+    description: The owner of the repository
+    required: true
+  repository:
+    description: The repository`s name
+    required: true
+  issue_number:
+    description: The closed issue number
+    required: true
+  github_token:
+    description: Get the github token to get the operation permission.
+    required: true
+  assignees:
+    description: Designated person to whom the issue needs to be assigned
+    required: true
+  labels:
+    description: Added labels content
+    required: false
+    default: 'no-pr-linked'
+  labels_need:
+    description: Special labels that need to be handled
+    default: 'tech-request,feature,Feature,kind/feature,attention/feature-incomplete,bug/ut,Bug fix,kind/bug,kind/subtask,kind/tech-request'
+outputs:
+  send:
+    description: Whether to send a notification
+
+runs:
+  using: docker
+  image: Dockerfile
+branding:
+  icon: arrow-up
+  color: blue
