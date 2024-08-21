@@ -15,9 +15,6 @@ inputs:
     description: delete labels content
     required: false
     default: 'needs-triage'
-outputs:
-  send:
-    description: Whether to send a notification
 
 runs:
   using: docker
