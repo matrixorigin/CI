@@ -243,7 +243,7 @@ jobs:
           echo "$JAVA_HOME/bin" >> $GITHUB_PATH
       - name: Generate MO-Tester Config and Start BVT Test
         if: ${{ always() && !cancelled() }}
-        timeout-minutes: 30
+        timeout-minutes: 40
         run: |
           export LC_ALL="C.UTF-8"
           locale
