@@ -289,21 +289,17 @@ jobs:
 
   issue-rm-labels:
     - name: Remove labels
-      if: ${{ github.event_name == 'issues' && github.event.action == 'assigned' && github.event.assignee.login!= 'matrix-meow' }}
+      if: ${{ github.event_name == 'issues' && github.event.action == 'assigned' }}
       steps:
         - name: Remove Labels
           uses: matrixorigin/CI/actions/rm-labels@main
           id: step1
           env:
-            BASE_URL: https://api.github.com
+            BASE_URL: ${{ github.api_url }}
           with:
-            REPOSITORY: ${{ github.repository }}  # 获取执行该作业的仓库名 形如: matrixorigin/CI
-            ISSUE_NUMBER: ${{ github.event.issue.number }}  # 获取当前操作的issue number
-            GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}  # 获取github action token操作权限
-            LABELS: 'needs-triage'  #相关自定义label配置 形如 label1,label2
-        - name: Output Info
-          if: ${{ steps.step1.outputs.send == 'yes' }}
-          id: notification
-          run: |
-            echo "assigned to ${{ github.event.assignee.login }}"
-            echo "delete label success... ..."
+            repository: ${{ github.repository }}  # 获取执行该作业的仓库名 形如: matrixorigin/CI
+            issue_number: ${{ github.event.issue.number }}  # 获取当前操作的issue number
+            github_token: ${{ secrets.TOKEN_ACTION }}  # 获取github action token操作权限
+            labels: 'needs-triage'  #要删除的label标签 形如 label1,label2,...
+            current_assignee: ${{ github.event.assignee.login }}
+            blacklist: 'matrix-meow'  #黑名单形如: user1,user2,...

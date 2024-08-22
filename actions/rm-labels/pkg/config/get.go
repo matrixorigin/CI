@@ -32,14 +32,14 @@ func GetGithubToken() string {
 	return github.MustGetInput(EnvGithubToken)
 }
 
-func GetAssignees() string {
-	return github.MustGetInput(EnvAssignees)
+func GetCurrentAssignee() string {
+	return github.MustGetInput(EnvCurrentAssignee)
 }
 
 func GetLabels() string {
 	return github.MustGetInput(EnvLabels)
 }
 
-func GetLabelsNeed() string {
-	return github.MustGetInput(EnvLabelsNeed)
+func GetBlackList() string {
+	return github.MustGetInput(EnvBlacklist)
 }

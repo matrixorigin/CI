@@ -15,7 +15,13 @@ inputs:
     description: delete labels content
     required: false
     default: 'needs-triage'
-
+  current_assignee:
+    description: The assignee name
+    required: true
+  blacklist:
+    description: The blacklist name
+    required: true
+    default: 'matrix-meow'
 runs:
   using: docker
   image: Dockerfile

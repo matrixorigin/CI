@@ -20,7 +20,7 @@ func Request(method, url, token string, data io.Reader, contentType string) (bod
 		req.Header.Set("Content-Type", contentType)
 	}
 
-	fmt.Sprintf("==========\nurl: %s\nmethod:%s\n==========")
+	fmt.Printf("\n==========\nurl: %s\nmethod:%s\n==========\n", url, method)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -28,6 +28,10 @@ func Request(method, url, token string, data io.Reader, contentType string) (bod
 	}
 
 	if !(resp.StatusCode >= 200 && resp.StatusCode < 400) {
+		if resp.StatusCode == 404 {
+			fmt.Printf("the label is not found\n")
+			return nil, nil
+		}
 		return nil, fmt.Errorf("resp.StatusCode is not correct: %v", resp.StatusCode)
 	}
 
