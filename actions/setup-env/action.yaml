@@ -4,7 +4,7 @@ inputs:
   go-version:
     description: 'version of golang'
     required: false
-    default: "1.22.3"
+    default: "1.23.0"
   setup-java:
     description: 'version of golang'
     required: false
