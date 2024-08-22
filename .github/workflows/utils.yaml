@@ -187,7 +187,8 @@ jobs:
       - name: Compress Coverage Files
         run: |
           cd $GITHUB_WORKSPACE/coverage_downloads
-          zip -r coverage_files.zip ut_coverage.out bvt_coverage.out diff.patch
+          sort ut_coverage.out | uniq -u > ut_coverage_sort.out
+          zip -r coverage_files.zip ut_coverage_sort.out bvt_coverage.out diff.patch
       - name: Upload Compressed Files
         uses: actions/upload-artifact@v4
         with:
