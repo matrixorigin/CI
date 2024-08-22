@@ -96,7 +96,7 @@ jobs:
           echo "origin current_branch: $current_branch"
           
           git fetch upstream $target_branch --depth=1
-          #git fetch origin $current_branch --depth=1
+          git fetch origin $current_branch --depth=1
           
           git diff upstream/$target_branch origin/$current_branch > diff.patch
 
