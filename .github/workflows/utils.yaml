@@ -228,11 +228,11 @@ jobs:
           name: python-result-files
           path: ${{ github.workspace }}/coverage_downloads/python_result_files.zip
           retention-days: 7
-      - name: get code quality reports
+      - name: Compress code quality reports
         if: ${{ always() && !cancelled() }}
         run: |
           cd $GITHUB_WORKSPACE/matrixone
-#          zip -r code_quality_reports.zip ${{ env.bvt_html_coverage }} ${{ env.ut_html_coverage }} coverage_report.txt UT-Report.out $GITHUB_WORKSPACE/matrixone/mo-service.log
+          # zip -r code_quality_reports.zip ${{ env.bvt_html_coverage }} ${{ env.ut_html_coverage }} coverage_report.txt UT-Report.out $GITHUB_WORKSPACE/matrixone/mo-service.log
           zip -r code_quality_reports.zip ${{ env.bvt_html_coverage }} ${{ env.ut_html_coverage }} UT-Report.out $GITHUB_WORKSPACE/matrixone/mo-service.log
 
       - uses: actions/upload-artifact@v4
