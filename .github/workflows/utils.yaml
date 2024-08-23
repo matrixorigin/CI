@@ -222,11 +222,12 @@ jobs:
           cp $GITHUB_WORKSPACE/pr_coverage.out $GITHUB_WORKSPACE/coverage_downloads/pr_coverage.out
           cd $GITHUB_WORKSPACE/coverage_downloads
           zip -r python_result_files.zip merged_coverage.out pr_coverage.out
-      - name: upload python result file
+      - name: Upload Python result file
         uses: actions/upload-artifact@v4
         with:
           name: python-result-files
           path: ${{ github.workspace }}/coverage_downloads/python_result_files.zip
+          retention-days: 7
       - name: get code quality reports
         if: ${{ always() && !cancelled() }}
         run: |
