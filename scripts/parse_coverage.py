@@ -40,7 +40,7 @@ def merge_coverage_files(output_path, *coverage_files):
                     
                     # 确保每个代码块只计数一次
                     if key not in merged_coverage:
-                        merged_coverage[key] = 1
+                        merged_coverage[key] = 1 if executed_count>0 else 0
                         total_blocks += 1
                         if executed_count > 0:
                             covered_blocks += 1
@@ -117,9 +117,11 @@ def parse_diff(diff_path):
 def parse_coverage_and_generate_report(coverage_path, modified_lines, output_path='pr_coverage.out'):
     """解析coverage.out文件，计算覆盖率并生成覆盖率报告"""
     logging.info(f"Starting to parse coverage file: {coverage_path}")
-    total_modified_lines = 0
-    covered_lines = set()
+    total_modified_blocks = 0
+    covered_blocks = set()
     seen_blocks = set()  # 用于跟踪已经处理过的代码块范围
+
+    logging.debug(f"[modified_lines]{modified_lines}")
 
     try:
         with open(output_path, 'w') as pr_cov_file:
@@ -136,7 +138,7 @@ def parse_coverage_and_generate_report(coverage_path, modified_lines, output_pat
 
                     file_name = normalize_path(parts[0])
                     line_info = parts[1].split()[0]
-                    executed_count = int(parts[1].split()[1])
+                    executed_count = int(parts[1].split()[-1])
 
                     # 处理行范围
                     line_range = line_info.split(',')
@@ -159,23 +161,25 @@ def parse_coverage_and_generate_report(coverage_path, modified_lines, output_pat
                     if file_name in modified_lines:
                         for modified_line in modified_lines[file_name]:
                             if start_line <= modified_line <= end_line:
-                                if line not in covered_lines:
-                                    total_modified_lines += 1
+                                if line not in covered_blocks:
+                                    total_modified_blocks += 1
                                 if executed_count > 0:
-                                    covered_lines.add(line)
+                                    if line.endswith("0"):
+                                        logging.error(f"[Error Count]{line},{executed_count}")
+                                    covered_blocks.add(line)
                                 else:
                                     logging.info(f"[Not Covered line]{modified_line}")
                                 pr_cov_file.write(line)
-                                #break
+                                break
                     
     except Exception as e:
         logging.error(f"Error parsing coverage file or generating report: {e}")
         raise
 
-    coverage_percentage = (len(covered_lines) / total_modified_lines) if total_modified_lines > 0 else 0
-    
-    
-    return total_modified_lines, len(covered_lines), coverage_percentage
+    logging.debug(f"[covered_lines][{total_modified_blocks}]"+'\n'.join(covered_blocks))
+
+    coverage_percentage = (len(covered_blocks) / total_modified_blocks) if total_modified_blocks > 0 else 0   
+    return total_modified_blocks, len(covered_blocks), coverage_percentage
 
 def normalize_path(path, prefix='github.com/matrixorigin/matrixone/'):
     """移除特定前缀，规范化路径"""
@@ -203,7 +207,6 @@ def diff_coverage(diff_path, coverage_path, output_path='pr_coverage.out'):
     except Exception as e:
         logging.error(f"An error occurred during the process: {e}")
         return 0,0,0
-
 
 
 
