@@ -196,7 +196,6 @@ jobs:
           path: ${{ github.workspace }}/coverage_downloads/coverage_files.zip
           retention-days: 7
 
-
       - name: Set up Python environment
         uses: actions/setup-python@v4
         with:
@@ -215,33 +214,28 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE
           python $GITHUB_WORKSPACE/parse_coverage.py -coverage_files $GITHUB_WORKSPACE/matrixone/ut_coverage.out $GITHUB_WORKSPACE/matrixone/bvt_coverage.out -diff_path $GITHUB_WORKSPACE/matrixone/diff.patch
-      - name: Compress Python result file
-        run: |
-          cd $GITHUB_WORKSPACE
-          cp $GITHUB_WORKSPACE/merged_coverage.out $GITHUB_WORKSPACE/coverage_downloads/merged_coverage.out
-          cp $GITHUB_WORKSPACE/pr_coverage.out $GITHUB_WORKSPACE/coverage_downloads/pr_coverage.out
-          cd $GITHUB_WORKSPACE/coverage_downloads
-          zip -r python_result_files.zip merged_coverage.out pr_coverage.out
-      - name: Upload Python result file
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-result-files
-          path: ${{ github.workspace }}/coverage_downloads/python_result_files.zip
-          retention-days: 7
-      - name: Compress code quality reports
-        if: ${{ always() && !cancelled() }}
+
+      - name: Compress final result files
         run: |
           cd $GITHUB_WORKSPACE/matrixone
-          # zip -r code_quality_reports.zip ${{ env.bvt_html_coverage }} ${{ env.ut_html_coverage }} coverage_report.txt UT-Report.out $GITHUB_WORKSPACE/matrixone/mo-service.log
-          zip -r code_quality_reports.zip ${{ env.bvt_html_coverage }} ${{ env.ut_html_coverage }} UT-Report.out $GITHUB_WORKSPACE/matrixone/mo-service.log
-
-      - uses: actions/upload-artifact@v4
+          cp $GITHUB_WORKSPACE/pr_coverage.out $GITHUB_WORKSPACE/matrixone/pr_coverage.out
+          go tool cover -o pr_coverage.html -html=pr_coverage.out
+          
+          cd $GITHUB_WORKSPACE
+          cp $GITHUB_WORKSPACE/matrixone/pr_coverage.html $GITHUB_WORKSPACE/coverage_downloads/pr_coverage.html
+          cp $GITHUB_WORKSPACE/pr_coverage.out $GITHUB_WORKSPACE/coverage_downloads/pr_coverage.out
+          cp $GITHUB_WORKSPACE/merged_coverage.out $GITHUB_WORKSPACE/coverage_downloads/merged_coverage.out
+          
+          cd $GITHUB_WORKSPACE/coverage_downloads
+          zip -r final_result_files.zip pr_coverage.html pr_coverage.out merged_coverage.out
+      - name: Upload final result files
+        uses: actions/upload-artifact@v4
         if: ${{ always() && !cancelled() }}
         continue-on-error: true
         with:
-          name: daily-code-quality-reports
+          name: final-result-files
           path: |
-            ${{ github.workspace }}/matrixone/code_quality_reports.zip
+            ${{ github.workspace }}/coverage_downloads/final_result_files.zip
           retention-days: 7
       - uses: actions/upload-artifact@v4
         if: ${{ failure() }}
