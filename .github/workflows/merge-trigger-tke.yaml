@@ -153,7 +153,7 @@ jobs:
         run: |
           export MYSQL_PWD=111;
           for i in {1..300}; do
-            if mysql -h ${{ steps.get_mo_addr.outputs.mo_svc_ip }} -P 6001 -u dump -e "select mo_ctl('cn', 'txn-trace', 'add-txn user dump');select mo_ctl('cn', 'txn-trace', 'add-txn user admin');select mo_ctl('cn', 'txn-trace', 'add-txn connection sql-executor,0');select mo_ctl('cn', 'txn-trace', 'enable txn');select mo_ctl('cn', 'txn-trace', 'enable data');"; then
+            if mysql -h ${{ steps.get_mo_addr.outputs.mo_svc_ip }} -P 6001 -u dump -e "select mo_ctl('cn', 'txn-trace', 'add-txn user dump');select mo_ctl('cn', 'txn-trace', 'add-txn user admin');select mo_ctl('cn', 'txn-trace', 'add-txn connection sql-executor,0');select mo_ctl('cn', 'txn-trace', 'enable txn');select mo_ctl('cn', 'txn-trace', 'enable data');select mo_ctl('cn', 'txn-trace', 'enable txn-action');select mo_ctl('cn', 'txn-trace', 'add-statement cost 10s');"; then
               break;
             fi
           sleep 1;
