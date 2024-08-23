@@ -201,75 +201,40 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'  # 使用Python 3.9版本
-      - name: checkout for python file
+      - name: Checkout for Python file
         uses: actions/checkout@v3
         with:
           repository: matrixorigin/CI
           fetch-depth: "0"
           path: CI
-      - name: get python file
+      - name: Get Python file
         run: |
           cd $GITHUB_WORKSPACE
           cp $GITHUB_WORKSPACE/CI/scripts/parse_coverage.py $GITHUB_WORKSPACE/parse_coverage.py
-      - name: Run coverage script
+      - name: Run coverage Python script
         run: |
           cd $GITHUB_WORKSPACE
           python $GITHUB_WORKSPACE/parse_coverage.py -coverage_files $GITHUB_WORKSPACE/matrixone/ut_coverage.out $GITHUB_WORKSPACE/matrixone/bvt_coverage.out -diff_path $GITHUB_WORKSPACE/matrixone/diff.patch
+      - name: Compress Python result file
+        run: |
+          cd $GITHUB_WORKSPACE
+          cp $GITHUB_WORKSPACE/merged_coverage.out $GITHUB_WORKSPACE/coverage_downloads/merged_coverage.out
+          cp $GITHUB_WORKSPACE/pr_coverage.out $GITHUB_WORKSPACE/coverage_downloads/pr_coverage.out
+          cd $GITHUB_WORKSPACE/coverage_downloads
+          zip -r python_result_files.zip merged_coverage.out pr_coverage.out
+      - name: upload python result file
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-result-files
+          path: ${{ github.workspace }}/coverage_downloads/python_result_files.zip
+          retention-days: 7
 
-      - name: Coverage Calculate
+      - name: get code quality reports
         if: ${{ always() && !cancelled() }}
         run: |
           cd $GITHUB_WORKSPACE/matrixone
-          echo "UT_CODE_COVERAGE: $(awk 'BEGIN {covered_line=0;all_line=0} {if ($3>=1 && !($1 in covered)) {covered[$1] = $2; covered_line+=$2;} if (!($1 in all)) { all[$1] = $2; all_line+=$2;}} END {print covered_line/all_line}' ${{ env.ut_coverage }})" > coverage_report.txt
-          echo "BVT_CODE_COVERAGE: $(awk 'BEGIN {covered_line=0;all_line=0} {if ($3>=1 && !($1 in covered)) {covered[$1] = $2; covered_line+=$2;} if (!($1 in all)) { all[$1] = $2; all_line+=$2;}} END {print covered_line/all_line}' ${{ env.bvt_coverage }})"  >> coverage_report.txt
-          echo "UT_CODE_COVERAGE=$(awk 'BEGIN {covered_line=0;all_line=0} {if ($3>=1 && !($1 in covered)) {covered[$1] = $2; covered_line+=$2;} if (!($1 in all)) { all[$1] = $2; all_line+=$2;}} END {print covered_line/all_line}' ${{ env.ut_coverage }})" >> $GITHUB_ENV
-          echo "BVT_CODE_COVERAGE=$(awk 'BEGIN {covered_line=0;all_line=0} {if ($3>=1 && !($1 in covered)) {covered[$1] = $2; covered_line+=$2;} if (!($1 in all)) { all[$1] = $2; all_line+=$2;}} END {print covered_line/all_line}' ${{ env.bvt_coverage }})" >> $GITHUB_ENV
-          coverage="$(cat ${{ env.ut_coverage }} ${{ env.bvt_coverage }} | awk 'BEGIN {covered_line=0;all_line=0} {if ($3>=1 && !($1 in covered)) {covered[$1] = $2; covered_line+=$2;} if (!($1 in all)) { all[$1] = $2; all_line+=$2;}} END {print covered_line/all_line}')"
-          echo "Overall Coverage: ${coverage}"  >> coverage_report.txt
-          echo "GENERAL_CODE_COVERAGE=${coverage}" >> $GITHUB_ENV
-          pkgs=$(go list ./pkg/... | awk -v FS='/' -v OFS='/' '{if ($5=="vm" || $5=="sql") print $4,$5,$6"/"; else print $4,$5"/"}' | sort -u | grep -v ${{ env.ut_excluded_pkg }} | grep -v '//')
-          echo -e "\n------------ut detail coverage----------"  >> coverage_report.txt
-          echo "" > ut_tmp.txt
-          for pkg in ${pkgs[@]}
-          do
-          if [ "$(cat ${{ env.ut_coverage }} |grep $pkg | grep -v "grep" | wc -l)" -gt 0 ];
-          then
-              c="$(cat ${{ env.ut_coverage }} |grep $pkg|awk 'BEGIN {covered_line=0;all_line=0} {if ($3>=1 && !($1 in covered)) {covered[$1] = $2; covered_line+=$2;} if (!($1 in all)) { all[$1] = $2; all_line+=$2;}} END {print covered_line/all_line}')";
-              echo -e "${pkg}:\t${c}" >> ut_tmp.txt;
-          else
-              echo -e "${pkg}:\t0" >> ut_tmp.txt;
-          fi
-          done
-          cat ut_tmp.txt | sort -k 1 -k 2n  >> coverage_report.txt
-          pkgs=$(go list ./pkg/... | awk -v FS='/' -v OFS='/' '{if ($5=="vm" || $5=="sql") print $4,$5,$6"/"; else print $4,$5"/"}' | sort -u | grep -v ${{ env.bvt_excluded_pkg }} | grep -v '//')
-          echo -e "\n------------bvt detail coverage----------" >> coverage_report.txt
-          echo "" > bvt_tmp.txt
-          for pkg in ${pkgs[@]}
-          do
-          if [ "$(cat ${{ env.bvt_coverage }} |grep $pkg | grep -v "grep" | wc -l)" -gt 0 ];
-          then
-              c="$(cat ${{ env.bvt_coverage }} |grep $pkg|awk 'BEGIN {covered_line=0;all_line=0} {if ($3>=1 && !($1 in covered)) {covered[$1] = $2; covered_line+=$2;} if (!($1 in all)) { all[$1] = $2; all_line+=$2;}} END {print covered_line/all_line}')";
-              echo -e "${pkg}:\t${c}" >> bvt_tmp.txt;
-          else
-              echo -e "${pkg}:\t0" >> bvt_tmp.txt;
-          fi
-          done
-          cat bvt_tmp.txt | sort -k 1 -k 2n >> coverage_report.txt
-          # zip -r code_quality_reports.zip ${{ env.bvt_html_coverage }} ${{ env.ut_html_coverage }} coverage_report.txt lint.out UT-Report.out
-          zip -r code_quality_reports.zip ${{ env.bvt_html_coverage }} ${{ env.ut_html_coverage }} coverage_report.txt UT-Report.out $GITHUB_WORKSPACE/matrixone/mo-service.log
-
-      - name: Generate Notice Content
-        if: ${{ always() && !cancelled() }}
-        run: |
-          cd $GITHUB_WORKSPACE/matrixone
-          cat coverage_report.txt
-          echo "Today=$(date -d now +%Y-%m-%d)" >> $GITHUB_ENV
-          echo "Url=${{ github.event.repository.html_url }}/actions/runs/${{ github.run_id }}" >> $GITHUB_ENV
-          echo 'Detail<<EOF' >> $GITHUB_ENV
-          cat coverage_report.txt >> $GITHUB_ENV
-          echo 'EOF' >> $GITHUB_ENV
-
-
+#          zip -r code_quality_reports.zip ${{ env.bvt_html_coverage }} ${{ env.ut_html_coverage }} coverage_report.txt UT-Report.out $GITHUB_WORKSPACE/matrixone/mo-service.log
+          zip -r code_quality_reports.zip ${{ env.bvt_html_coverage }} ${{ env.ut_html_coverage }} UT-Report.out $GITHUB_WORKSPACE/matrixone/mo-service.log
 
       - uses: actions/upload-artifact@v4
         if: ${{ always() && !cancelled() }}
