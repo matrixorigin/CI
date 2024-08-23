@@ -120,7 +120,6 @@ def parse_coverage_and_generate_report(coverage_path, modified_lines, output_pat
     total_modified_lines = 0
     covered_lines = set()
     seen_blocks = set()  # 用于跟踪已经处理过的代码块范围
-    tmp_count = 0
 
     try:
         with open(output_path, 'w') as pr_cov_file:
@@ -163,7 +162,6 @@ def parse_coverage_and_generate_report(coverage_path, modified_lines, output_pat
                                 if line not in covered_lines:
                                     total_modified_lines += 1
                                 if executed_count > 0:
-                                    tmp_count += 1
                                     covered_lines.add(line)
                                 else:
                                     logging.info(f"[Not Covered line]{modified_line}")
