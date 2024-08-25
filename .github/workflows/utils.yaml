@@ -186,7 +186,7 @@ jobs:
           cp $GITHUB_WORKSPACE/matrixone/diff.patch $GITHUB_WORKSPACE/coverage_downloads/diff.patch
           
           cd $GITHUB_WORKSPACE/coverage_downloads
-          sort ut_coverage.out | uniq -u > ut_coverage_sort.out
+          sort ut_coverage.out | uniq > ut_coverage_sort.out
           zip -r coverage_files.zip ut_coverage_sort.out bvt_coverage.out diff.patch
           zip -r ut_origin_files.zip ut_coverage.out
 
