@@ -75,9 +75,9 @@ jobs:
             echo "safe_label=0" >> $GITHUB_OUTPUT;
           fi
 
-  ut_coverage:
+  pr_coverage:
     if: ${{ needs.check_organization_user.outputs.safe_label == '1' || needs.check_organization_user.outputs.in_org == '1' }}
-    name: PR Unit Test Coverage
+    name: PR Unit and BVT Test Coverage
     needs: [check_organization_user]
     runs-on: ubuntu-22.04
     steps:
