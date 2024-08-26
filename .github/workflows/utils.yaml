@@ -216,8 +216,20 @@ jobs:
           python $GITHUB_WORKSPACE/parse_coverage.py -coverage_files $GITHUB_WORKSPACE/matrixone/ut_coverage.out $GITHUB_WORKSPACE/matrixone/bvt_coverage.out -diff_path $GITHUB_WORKSPACE/matrixone/diff.patch
 
       - name: Compress final result files
+        id: compress_result
         if: ${{ always() && !cancelled() }}
         run: |
+          cd $GITHUB_WORKSPACE
+          if [ ! -f "$GITHUB_WORKSPACE/pr_coverage.out" ]; then
+            echo "pr_coverage.out does not exist."
+            echo "The code block has not changed,skip the remaining steps."
+            echo "file_exists=false" >> $GITHUB_OUTPUT
+            exit 1
+          else
+            echo "pr_coverage.out exists."
+            echo "file_exists=true" >> $GITHUB_OUTPUT
+          fi
+
           cd $GITHUB_WORKSPACE/matrixone
           cp $GITHUB_WORKSPACE/pr_coverage.out $GITHUB_WORKSPACE/matrixone/pr_coverage.out
           go tool cover -o pr_coverage.html -html=pr_coverage.out
@@ -231,7 +243,7 @@ jobs:
           zip -r final_result_files.zip pr_coverage.html pr_coverage.out merged_coverage.out
       - name: Upload final result files
         uses: actions/upload-artifact@v4
-        if: ${{ always() && !cancelled() }}
+        if: ${{ always() && !cancelled() && steps.compress_result.outputs.file_exists == 'true' }}
         continue-on-error: true
         with:
           name: final-result-files
