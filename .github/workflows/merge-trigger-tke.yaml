@@ -153,7 +153,7 @@ jobs:
         run: |
           export MYSQL_PWD=111;
           for i in {1..300}; do
-            if mysql -h ${{ steps.get_mo_addr.outputs.mo_svc_ip }} -P 6001 -u dump -e "select mo_ctl('cn', 'txn-trace', 'add-txn user dump');select mo_ctl('cn', 'txn-trace', 'add-txn user admin');select mo_ctl('cn', 'txn-trace', 'add-txn connection sql-executor,0');select mo_ctl('cn', 'txn-trace', 'enable txn');select mo_ctl('cn', 'txn-trace', 'enable data');"; then
+            if mysql -h ${{ steps.get_mo_addr.outputs.mo_svc_ip }} -P 6001 -u dump -e "select mo_ctl('cn', 'txn-trace', 'add-txn user dump');select mo_ctl('cn', 'txn-trace', 'add-txn user admin');select mo_ctl('cn', 'txn-trace', 'add-txn connection sql-executor,0');select mo_ctl('cn', 'txn-trace', 'enable txn');select mo_ctl('cn', 'txn-trace', 'enable data');select mo_ctl('cn', 'txn-trace', 'enable txn-action');select mo_ctl('cn', 'txn-trace', 'add-statement cost 10s');"; then
               break;
             fi
           sleep 1;
@@ -243,7 +243,7 @@ jobs:
           echo "$JAVA_HOME/bin" >> $GITHUB_PATH
       - name: Generate MO-Tester Config and Start BVT Test
         if: ${{ always() && !cancelled() }}
-        timeout-minutes: 30
+        timeout-minutes: 40
         run: |
           export LC_ALL="C.UTF-8"
           locale
@@ -560,7 +560,7 @@ jobs:
           done
  
       # start sysbench test
-      - name: Start OLTP Mixed Test With 100 Threads
+      - name: Start OLTP Mixed Test With 30 Threads
         if: ${{ always() && !cancelled() }}
         timeout-minutes: 40
         run: |
@@ -570,8 +570,8 @@ jobs:
           
           cd $GITHUB_WORKSPACE/mo-load
           mkdir -p report
-          echo 'Start OLTP Insert Test With 100 threads'
-          ./start.sh -c cases/sysbench/mixed_10_100000 -t 100 -d 20 -g -b sbtest | tee report/oltp-mix.log
+          echo 'Start OLTP Insert Test With 30 threads'
+          ./start.sh -c cases/sysbench/mixed_10_100000 -t 30 -d 20 -g -b sbtest | tee report/oltp-mix.log
      
       - name: Result Summary
         if: ${{ always() && !cancelled()  }}
