@@ -221,8 +221,7 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE
           if [ ! -f "$GITHUB_WORKSPACE/pr_coverage.out" ]; then
-            echo "pr_coverage.out does not exist."
-            echo "The code block has not changed,skip the remaining steps."
+            echo "pr_coverage.out does not exist.The code block has not changed,skip the remaining steps."
             echo "file_exists=false" >> $GITHUB_OUTPUT
             exit 1
           else
