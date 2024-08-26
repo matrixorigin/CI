@@ -124,7 +124,7 @@ jobs:
           path: ./mo-tester
           ref: main
       - name: Start Unit Test
-        timeout-minutes: 120
+        timeout-minutes: 45
         run: |
           cd $GITHUB_WORKSPACE/matrixone
           test_scope=$(go list ./... | grep -v 'driver\|engine/aoe\|engine/memEngine\|pkg/catalog')
@@ -144,6 +144,7 @@ jobs:
           go build -cover "$GOLDFLAGS" -o mo-service ./cmd/mo-service/
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/matrixone launch
       - name: Start BVT Test
+        timeout-minutes: 30
         if: ${{ always() && !cancelled() }}
         id: bvt_on_pr_version
         run: |
