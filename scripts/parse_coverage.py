@@ -89,6 +89,10 @@ def parse_diff(diff_path):
                         logging.info(f"Ignoring non-Go file: {current_file}")
                         current_file = None  # 忽略非 .go 文件
                         continue
+                    elif current_file.endswith('.pb.go'):
+                        logging.info(f"Ignoring auto-generated Go file: {current_file}")
+                        current_file = None  # 忽略*.pb.go 文件
+                        continue
                     logging.info(f"Processing file: {current_file}")
                 elif line.startswith('@@ ') and current_file:
                     # 解析 @@ 行，获取新文件的起始行号
