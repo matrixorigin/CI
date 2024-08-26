@@ -288,6 +288,7 @@ jobs:
           content: ${{ env.Detail }}
 
   issue-rm-labels:
+    runs-on: ubuntu-latest
     if: ${{ github.event_name == 'issues' && github.event.action == 'assigned' }}
     steps:
       - name: Remove Labels
