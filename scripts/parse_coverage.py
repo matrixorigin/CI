@@ -91,7 +91,7 @@ def parse_diff(diff_path):
                         continue
                     elif current_file.endswith('.pb.go'):
                         logging.info(f"Ignoring auto-generated Go file: {current_file}")
-                        current_file = None  # 忽略非 .go 文件
+                        current_file = None  # 忽略*.pb.go 文件
                         continue
                     logging.info(f"Processing file: {current_file}")
                 elif line.startswith('@@ ') and current_file:
