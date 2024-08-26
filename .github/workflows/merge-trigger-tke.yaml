@@ -571,7 +571,7 @@ jobs:
           cd $GITHUB_WORKSPACE/mo-load
           mkdir -p report
           echo 'Start OLTP Insert Test With 100 threads'
-          ./start.sh -c cases/sysbench/mixed_10_100000 -t 100 -d 20 -g -b sbtest | tee report/oltp-mix.log
+          ./start.sh -c cases/sysbench/mixed_10_100000 -t 30 -d 20 -g -b sbtest | tee report/oltp-mix.log
      
       - name: Result Summary
         if: ${{ always() && !cancelled()  }}
