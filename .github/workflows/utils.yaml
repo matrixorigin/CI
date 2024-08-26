@@ -189,19 +189,12 @@ jobs:
           cd $GITHUB_WORKSPACE/coverage_downloads
           sort ut_coverage.out | uniq > ut_coverage_sort.out
           zip -r coverage_files.zip ut_coverage_sort.out bvt_coverage.out diff.patch
-          zip -r ut_origin_files.zip ut_coverage.out
 
       - name: Upload Compressed Files
         uses: actions/upload-artifact@v4
         with:
           name: coverage-files
           path: ${{ github.workspace }}/coverage_downloads/coverage_files.zip
-          retention-days: 7
-      - name: Upload origin ut_coverage.out
-        uses: actions/upload-artifact@v4
-        with:
-          name: origin-ut-coverage-files
-          path: ${{ github.workspace }}/coverage_downloads/ut_origin_files.zip
           retention-days: 7
       - name: Set up Python environment
         uses: actions/setup-python@v4
@@ -223,6 +216,7 @@ jobs:
           python $GITHUB_WORKSPACE/parse_coverage.py -coverage_files $GITHUB_WORKSPACE/matrixone/ut_coverage.out $GITHUB_WORKSPACE/matrixone/bvt_coverage.out -diff_path $GITHUB_WORKSPACE/matrixone/diff.patch
 
       - name: Compress final result files
+        if: ${{ always() && !cancelled() }}
         run: |
           cd $GITHUB_WORKSPACE/matrixone
           cp $GITHUB_WORKSPACE/pr_coverage.out $GITHUB_WORKSPACE/matrixone/pr_coverage.out
@@ -243,14 +237,6 @@ jobs:
           name: final-result-files
           path: |
             ${{ github.workspace }}/coverage_downloads/final_result_files.zip
-          retention-days: 7
-      - uses: actions/upload-artifact@v4
-        if: ${{ failure() }}
-        continue-on-error: true
-        with:
-          name: daily-test-reports
-          path: |
-            ${{ github.workspace }}/matrixone
           retention-days: 7
 
   pr-size-label:
