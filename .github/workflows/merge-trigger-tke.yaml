@@ -560,7 +560,7 @@ jobs:
           done
  
       # start sysbench test
-      - name: Start OLTP Mixed Test With 100 Threads
+      - name: Start OLTP Mixed Test With 30 Threads
         if: ${{ always() && !cancelled() }}
         timeout-minutes: 40
         run: |
@@ -570,7 +570,7 @@ jobs:
           
           cd $GITHUB_WORKSPACE/mo-load
           mkdir -p report
-          echo 'Start OLTP Insert Test With 100 threads'
+          echo 'Start OLTP Insert Test With 30 threads'
           ./start.sh -c cases/sysbench/mixed_10_100000 -t 30 -d 20 -g -b sbtest | tee report/oltp-mix.log
      
       - name: Result Summary
