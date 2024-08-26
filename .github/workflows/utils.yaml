@@ -79,7 +79,7 @@ jobs:
     if: ${{ needs.check_organization_user.outputs.safe_label == '1' || needs.check_organization_user.outputs.in_org == '1' }}
     name: PR Unit and BVT Test Coverage
     needs: [check_organization_user]
-    runs-on: ubuntu-22.04
+    runs-on: amd64-mo-guangzhou-2xlarge16
     steps:
       - uses: actions/checkout@v4
         with:
@@ -104,7 +104,7 @@ jobs:
       - name: Set up Go and JAVA
         uses: matrixorigin/CI/actions/setup-env@main
         with:
-          setup-java: true
+          setup-java: false
       - name: Set Variables
         run: |
           echo "ut_report='UT-Report.out'" >> $GITHUB_ENV
@@ -116,6 +116,10 @@ jobs:
           echo "bvt_html_coverage='bvt_coverage.html'" >> $GITHUB_ENV
           echo "ut_excluded_pkg='pkg/pb\|pkg/sql/parsers/goyacc\|yaccpar'" >> $GITHUB_ENV
           echo "bvt_excluded_pkg='pkg/pb\|yaccpar'" >> $GITHUB_ENV
+
+      - name: Set JAVA PATH
+        run: |
+          echo "$JAVA_HOME/bin" >> $GITHUB_PATH
 
       - name: Clone test-tool repository
         uses: actions/checkout@v4
@@ -206,7 +210,7 @@ jobs:
         uses: actions/checkout@v3
         with:
           repository: matrixorigin/CI
-          fetch-depth: "0"
+          fetch-depth: "1"
           path: CI
       - name: Get Python file
         run: |
@@ -218,9 +222,19 @@ jobs:
           python $GITHUB_WORKSPACE/parse_coverage.py -coverage_files $GITHUB_WORKSPACE/matrixone/ut_coverage.out $GITHUB_WORKSPACE/matrixone/bvt_coverage.out -diff_path $GITHUB_WORKSPACE/matrixone/diff.patch
 
       - name: Compress final result files
+        id: compress_result
         if: ${{ always() && !cancelled() }}
         continue-on-error: true
         run: |
+          cd $GITHUB_WORKSPACE
+          if [ ! -f "$GITHUB_WORKSPACE/pr_coverage.out" ]; then
+            echo "pr_coverage.out does not exist.The code block has not changed,skip the remaining steps."
+            echo "file_exists=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "file_exists=true" >> $GITHUB_OUTPUT
+          
           cd $GITHUB_WORKSPACE/matrixone
           cp $GITHUB_WORKSPACE/pr_coverage.out $GITHUB_WORKSPACE/matrixone/pr_coverage.out
           go tool cover -o pr_coverage.html -html=pr_coverage.out
@@ -234,7 +248,7 @@ jobs:
           zip -r final_result_files.zip pr_coverage.html pr_coverage.out merged_coverage.out
       - name: Upload final result files
         uses: actions/upload-artifact@v4
-        if: ${{ always() && !cancelled() }}
+        if: ${{ always() && !cancelled() && steps.compress_result.outputs.file_exists == 'true' }}
         continue-on-error: true
         with:
           name: final-result-files
