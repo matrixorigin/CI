@@ -104,7 +104,7 @@ jobs:
       - name: Set up Go and JAVA
         uses: matrixorigin/CI/actions/setup-env@main
         with:
-          setup-java: true
+          setup-java: false
       - name: Set Variables
         run: |
           echo "ut_report='UT-Report.out'" >> $GITHUB_ENV
@@ -116,6 +116,10 @@ jobs:
           echo "bvt_html_coverage='bvt_coverage.html'" >> $GITHUB_ENV
           echo "ut_excluded_pkg='pkg/pb\|pkg/sql/parsers/goyacc\|yaccpar'" >> $GITHUB_ENV
           echo "bvt_excluded_pkg='pkg/pb\|yaccpar'" >> $GITHUB_ENV
+
+      - name: Set JAVA PATH
+        run: |
+          echo "$JAVA_HOME/bin" >> $GITHUB_PATH
 
       - name: Clone test-tool repository
         uses: actions/checkout@v4
@@ -223,12 +227,11 @@ jobs:
           if [ ! -f "$GITHUB_WORKSPACE/pr_coverage.out" ]; then
             echo "pr_coverage.out does not exist.The code block has not changed,skip the remaining steps."
             echo "file_exists=false" >> $GITHUB_OUTPUT
-            exit 1
-          else
-            echo "pr_coverage.out exists."
-            echo "file_exists=true" >> $GITHUB_OUTPUT
+            exit 0
           fi
-
+          
+          echo "file_exists=true" >> $GITHUB_OUTPUT
+          
           cd $GITHUB_WORKSPACE/matrixone
           cp $GITHUB_WORKSPACE/pr_coverage.out $GITHUB_WORKSPACE/matrixone/pr_coverage.out
           go tool cover -o pr_coverage.html -html=pr_coverage.out
