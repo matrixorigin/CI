@@ -92,7 +92,7 @@ jobs:
           cd $GITHUB_WORKSPACE/matrixone
           retry_times=5
           delay=5
-          url="https://github.com/matrixorigin/matrixone/pull/${{ github.event.pull_request.number }}.diff"
+          url="https://github.com/${{ github.event.pull_request.base.repo.full_name }}/pull/${{ github.event.pull_request.number }}.diff"
           
           for ((i=1; i<=$retry_times; i++)); do
             response=$(curl --max-time 10 -o /dev/null -w "%{http_code}" $url)
