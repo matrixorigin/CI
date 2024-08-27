@@ -10,7 +10,6 @@ logging.basicConfig(
     format='%(asctime)s - %(filename)s - line %(lineno)d - %(levelname)s - %(message)s'
 )
 
-
 def merge_coverage_files(output_path, *coverage_files):
     """合并多个coverage.out文件，代码块只要在一个文件中命中就算命中，并计算覆盖率"""
 
@@ -41,7 +40,7 @@ def merge_coverage_files(output_path, *coverage_files):
 
                     # 确保每个代码块只计数一次
                     if key not in merged_coverage:
-                        merged_coverage[key] = 1 if executed_count > 0 else 0
+                        merged_coverage[key] = 1 if executed_count>0 else 0
                         total_blocks += 1
                         if executed_count > 0:
                             covered_blocks += 1
@@ -56,8 +55,7 @@ def merge_coverage_files(output_path, *coverage_files):
 
     # 计算覆盖率
     coverage_percentage = (covered_blocks / total_blocks) if total_blocks > 0 else 0
-    logging.info(
-        f"Total code blocks: {total_blocks}, Covered blocks: {covered_blocks}, Coverage: {coverage_percentage}%")
+    logging.info(f"Total code blocks: {total_blocks}, Covered blocks: {covered_blocks}, Coverage: {coverage_percentage}%")
 
     # 将合并后的结果写入输出文件
     try:
@@ -65,8 +63,7 @@ def merge_coverage_files(output_path, *coverage_files):
             out_file.write('mode: set\n')
             for key, executed_count in merged_coverage.items():
                 file_name, line_info, block_size = key
-                out_file.write(
-                    f'{file_name}:{line_info} {block_size} {executed_count}\n')  # `0` can be the default number for ignored value
+                out_file.write(f'{file_name}:{line_info} {block_size} {executed_count}\n')  # `0` can be the default number for ignored value
     except Exception as e:
         logging.error(f"Error writing merged coverage file: {e}")
         raise
@@ -75,8 +72,7 @@ def merge_coverage_files(output_path, *coverage_files):
 
     return total_blocks, covered_blocks, coverage_percentage
 
-
-def parse_diff(diff_path,pass_files):
+def parse_diff(diff_path, pass_files):
     """解析diff文件，获取新增和修改的行号和列范围，仅处理 .go 文件"""
     logging.info(f"Starting to parse diff file: {diff_path}")
     modified_lines = {}
@@ -94,15 +90,17 @@ def parse_diff(diff_path,pass_files):
                         current_file = None  # 忽略非 .go 文件
                         continue
                     elif current_file.endswith('.pb.go'):
-                        logging.info(f"Ignoring auto-generated Go file: {current_file}")
+                        logging.info(f"Ignoring auto-generated pb.go file: {current_file}")
                         current_file = None  # 忽略自动生成的 .go 文件
                         continue
+                   elif 'pkg/frontend/test' in current_file:
+                        logging.info(f"Ignoring auto-generated test go file: {current_file}")
+                        current_file = None  # 忽略自动生成的 .go 文件
                     # 忽略特殊 .go 文件
                     if any(current_file.endswith(f) for f in pass_files):
                         logging.info(f"Ignoring special Go file: {current_file}")
                         current_file = None  # 忽略特殊的 .go 文件
                         continue
-
                     logging.info(f"Processing file: {current_file}")
 
                 elif line.startswith('@@ ') and current_file:
@@ -125,20 +123,17 @@ def parse_diff(diff_path,pass_files):
                             last_non_space = new_line.rindex(stripped_line[-1]) + 1
 
                             # 校正列号，忽略行首的结构符号和无效代码部分
-                            while first_non_space <= last_non_space and not is_valid_code_segment(
-                                    new_line[first_non_space - 1]):
+                            while first_non_space <= last_non_space and not is_valid_code_segment(new_line[first_non_space - 1]):
                                 first_non_space += 1
 
-                            while last_non_space >= first_non_space and not is_valid_code_segment(
-                                    new_line[last_non_space - 1]):
+                            while last_non_space >= first_non_space and not is_valid_code_segment(new_line[last_non_space - 1]):
                                 last_non_space -= 1
 
                             # 只有在确实有有效代码的情况下才记录
                             if first_non_space <= last_non_space:
                                 if current_file not in modified_lines:
                                     modified_lines[current_file] = []
-                                modified_lines[current_file].append(
-                                    (current_line_number, first_non_space, last_non_space))
+                                modified_lines[current_file].append((current_line_number, first_non_space, last_non_space))
 
                         current_line_number += 1
 
@@ -149,9 +144,7 @@ def parse_diff(diff_path,pass_files):
     except Exception as e:
         logging.error(f"Error parsing diff file: {e}")
         raise
-    logging.info(f"{modified_lines}")
     return modified_lines
-
 
 def get_modified_columns(old_line, new_line):
     """快速获取行内的修改列号"""
@@ -168,7 +161,6 @@ def get_modified_columns(old_line, new_line):
         modified_columns.extend(range(min_len + 1, len(new_line) + 1))
 
     return modified_columns
-
 
 def parse_coverage_and_generate_report(coverage_path, modified_lines, output_path='pr_coverage.out'):
     """解析coverage.out文件，计算覆盖率并生成覆盖率报告"""
@@ -257,11 +249,10 @@ def parse_coverage_and_generate_report(coverage_path, modified_lines, output_pat
         logging.error(f"Error parsing coverage file or generating report: {e}")
         raise
 
-    logging.debug(f"[covered_lines][{total_modified_blocks}]" + '\n'.join(covered_blocks))
+    logging.debug(f"[covered_lines][{total_modified_blocks}]"+'\n'.join(covered_blocks))
 
     coverage_percentage = (len(covered_blocks) / total_modified_blocks) if total_modified_blocks > 0 else 0
     return total_modified_blocks, len(covered_blocks), coverage_percentage
-
 
 def normalize_path(path, prefix='github.com/matrixorigin/matrixone/'):
     """移除特定前缀，规范化路径"""
@@ -269,19 +260,18 @@ def normalize_path(path, prefix='github.com/matrixorigin/matrixone/'):
         return path[len(prefix):]
     return os.path.normpath(path)
 
-
-def diff_coverage(diff_path, coverage_path,pass_files, output_path='pr_coverage.out'):
+def diff_coverage(diff_path, coverage_path, pass_files, output_path='pr_coverage.out'):
     try:
         # 解析diff文件，获取修改和新增的行号
-        modified_lines = parse_diff(diff_path,pass_files)
+        modified_lines = parse_diff(diff_path, pass_files)
 
         if len(modified_lines) == 0:
             logging.info("No go file changes")
-            return 0, 0, 1
+            return 0,0,1
 
         # 解析coverage.out文件，计算覆盖率并生成覆盖率报告
-        total_modified_lines, covered_modified_lines, coverage_percentage = parse_coverage_and_generate_report(
-            coverage_path, modified_lines, output_path)
+        total_modified_lines, covered_modified_lines, coverage_percentage = parse_coverage_and_generate_report(coverage_path, modified_lines, output_path)
+
 
         # 输出结果
         logging.info(f"PR Coverage Report Generated: {output_path}")
@@ -289,8 +279,7 @@ def diff_coverage(diff_path, coverage_path,pass_files, output_path='pr_coverage.
 
     except Exception as e:
         logging.error(f"An error occurred during the process: {e}")
-        return 0, 0, 0
-
+        return 0,0,0
 
 def is_valid_code_segment(segment):
     """判断一个代码片段是否包含有效的代码（忽略结构符号、关键字和空白）"""
@@ -341,17 +330,14 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    total_blocks, covered_blocks, coverage_percentage = merge_coverage_files('merged_coverage.out',
-                                                                             *args.coverage_files)
-    logging.info(
-        f"Total modified blocks: {total_blocks}, Covered blocks: {covered_blocks}, Coverage: {coverage_percentage:.2f}%")
+    total_blocks, covered_blocks, coverage_percentage = merge_coverage_files('merged_coverage.out', *args.coverage_files)
+    logging.info(f"Total modified blocks: {total_blocks}, Covered blocks: {covered_blocks}, Coverage: {coverage_percentage:.2f}%")
 
     # 调用主函数
     diff_path = args.diff_path  # 可以根据实际情况修改路径
     coverage_path = 'merged_coverage.out'  # 可以根据实际情况修改路径
     total_modified_lines, covered_modified_lines, coverage_percentage = diff_coverage(diff_path, coverage_path,args.pass_files)
-    logging.info(
-        f"total_modified_lines: {total_modified_lines}, covered_modified_lines: {covered_modified_lines}, coverage_percentage:{coverage_percentage}")
+    logging.info(f"total_modified_lines: {total_modified_lines}, covered_modified_lines: {covered_modified_lines}, coverage_percentage:{coverage_percentage}")
 
     if coverage_percentage <= args.minimal_coverage:
         logging.warning(f"The code coverage:{coverage_percentage} is below {args.minimal_coverage}, not approved.")
