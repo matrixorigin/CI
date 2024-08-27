@@ -286,6 +286,24 @@ jobs:
           msgtype: text
           mentioned_list: '["@all"]'
           content: ${{ env.Detail }}
+
+  issue-rm-labels:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'issues' && github.event.action == 'assigned' }}
+    steps:
+      - name: Remove Labels
+        uses: matrixorigin/CI/actions/rm-labels@main
+        id: step1
+        env:
+          BASE_URL: ${{ github.api_url }}
+        with:
+          repository: ${{ github.repository }}  # 获取执行该作业的仓库名 形如: matrixorigin/CI
+          issue_number: ${{ github.event.issue.number }}  # 获取当前操作的issue number
+          github_token: ${{ secrets.TOKEN_ACTION }}  # 获取github action token操作权限
+          labels: 'needs-triage'  #要删除的label标签 形如 label1,label2,...
+          current_assignee: ${{ github.event.assignee.login }}
+          blacklist: 'matrix-meow'  #黑名单形如: user1,user2,...
+
   reopen-without-PR:
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'issues' && github.event.action == 'closed' && github.actor != 'sukki37' }}

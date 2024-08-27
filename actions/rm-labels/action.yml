@@ -1,0 +1,30 @@
+name: rm-labels
+author: rosyrain
+description: remove specified labels
+inputs:
+  repository:
+    description: The repository`s name
+    required: true
+  issue_number:
+    description: The closed issue number
+    required: true
+  github_token:
+    description: Get the github token to get the operation permission.
+    required: true
+  labels:
+    description: delete labels content
+    required: false
+    default: 'needs-triage'
+  current_assignee:
+    description: The assignee name
+    required: true
+  blacklist:
+    description: The blacklist name
+    required: true
+    default: 'matrix-meow'
+runs:
+  using: docker
+  image: Dockerfile
+branding:
+  icon: arrow-up
+  color: blue
