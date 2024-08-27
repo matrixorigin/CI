@@ -73,7 +73,7 @@ def merge_coverage_files(output_path, *coverage_files):
     return total_blocks, covered_blocks, coverage_percentage
 
 def parse_diff(diff_path):
-    """解析diff文件，获取新增和修改的行号，仅处理 .go 文件"""
+    """解析diff文件，获取新增和修改的行号和列范围，仅处理 .go 文件"""
     logging.info(f"Starting to parse diff file: {diff_path}")
     modified_lines = {}
 
@@ -91,22 +91,44 @@ def parse_diff(diff_path):
                         continue
                     elif current_file.endswith('.pb.go'):
                         logging.info(f"Ignoring auto-generated Go file: {current_file}")
-                        current_file = None  # 忽略*.pb.go 文件
+                        current_file = None  # 忽略自动生成的 .go 文件
                         continue
                     logging.info(f"Processing file: {current_file}")
+                
                 elif line.startswith('@@ ') and current_file:
                     # 解析 @@ 行，获取新文件的起始行号
                     match = re.match(r'@@ -\d+,\d+ \+(\d+),\d+ @@', line)
                     if match:
                         current_line_number = int(match.group(1))  # 新增代码块的起始行号
                         logging.info(f"New file starting line number: {current_line_number}")
+                
                 elif line.startswith('+') and current_file:
-                    # 处理新增和修改的行
+                    # 处理新增和修改的行，确保它是有效代码
                     if current_line_number is not None:
-                        if current_file not in modified_lines:
-                            modified_lines[current_file] = []
-                        modified_lines[current_file].append(current_line_number)
+                        # 获取当前行内容
+                        new_line = line[1:]
+                        
+                        # 计算第一个和最后一个有效代码字符的位置
+                        stripped_line = new_line.strip()
+                        if stripped_line:
+                            first_non_space = new_line.index(stripped_line[0]) + 1
+                            last_non_space = new_line.rindex(stripped_line[-1]) + 1
+
+                            # 校正列号，忽略行首的结构符号和无效代码部分
+                            while first_non_space <= last_non_space and not is_valid_code_segment(new_line[first_non_space - 1]):
+                                first_non_space += 1
+
+                            while last_non_space >= first_non_space and not is_valid_code_segment(new_line[last_non_space - 1]):
+                                last_non_space -= 1
+                            
+                            # 只有在确实有有效代码的情况下才记录
+                            if first_non_space <= last_non_space:
+                                if current_file not in modified_lines:
+                                    modified_lines[current_file] = []
+                                modified_lines[current_file].append((current_line_number, first_non_space, last_non_space))
+
                         current_line_number += 1
+                
                 elif not line.startswith('-') and current_file:
                     # 处理未修改的行，递增行号
                     if current_line_number is not None:
@@ -114,9 +136,24 @@ def parse_diff(diff_path):
     except Exception as e:
         logging.error(f"Error parsing diff file: {e}")
         raise
-
-    logging.info("Finished parsing diff file")
+    logging.info(f"{modified_lines}")
     return modified_lines
+
+def get_modified_columns(old_line, new_line):
+    """快速获取行内的修改列号"""
+    min_len = min(len(old_line), len(new_line))
+    modified_columns = []
+
+    # 查找修改的列号
+    for i in range(min_len):
+        if old_line[i] != new_line[i]:
+            modified_columns.append(i + 1)
+    
+    # 如果新行更长，补充剩余部分的列号
+    if len(new_line) > min_len:
+        modified_columns.extend(range(min_len + 1, len(new_line) + 1))
+    
+    return modified_columns
 
 def parse_coverage_and_generate_report(coverage_path, modified_lines, output_path='pr_coverage.out'):
     """解析coverage.out文件，计算覆盖率并生成覆盖率报告"""
@@ -153,28 +190,53 @@ def parse_coverage_and_generate_report(coverage_path, modified_lines, output_pat
                     try:
                         start_line = int(line_range[0].split('.')[0])
                         end_line = int(line_range[1].split('.')[0])
+                        start_column = int(line_range[0].split('.')[1])
+                        end_column = int(line_range[1].split('.')[1])
                     except ValueError as e:
                         logging.warning(f"Error parsing line range in coverage file: {e}")
                         continue
 
-                    if (file_name, (start_line, end_line)) in seen_blocks:
+                    if (file_name, (start_line, end_line, start_column, end_column)) in seen_blocks:
                         continue
 
-                    seen_blocks.add((file_name, (start_line, end_line)))
+                    seen_blocks.add((file_name, (start_line, end_line, start_column, end_column)))
 
                     if file_name in modified_lines:
-                        for modified_line in modified_lines[file_name]:
-                            if start_line <= modified_line <= end_line:
+                        for modified_line, mincol, maxcol in modified_lines[file_name]:
+                            # 判断是否在行范围内
+                            if start_line < modified_line < end_line:
+                                # 整行被覆盖，无需检查列号
                                 if line not in covered_blocks:
                                     total_modified_blocks += 1
                                 if executed_count > 0:
-                                    if line.endswith("0"):
-                                        logging.error(f"[Error Count]{line},{executed_count}")
                                     covered_blocks.add(line)
-                                else:
-                                    logging.info(f"[Not Covered line]{modified_line}")
                                 pr_cov_file.write(line)
                                 break
+                            # 检查边界行的列号范围
+                            elif modified_line == start_line and modified_line == end_line:
+                                if not (mincol > end_column or maxcol < start_column):
+                                    if line not in covered_blocks:
+                                        total_modified_blocks += 1
+                                    if executed_count > 0:
+                                        covered_blocks.add(line)
+                                    pr_cov_file.write(line)
+                                    break
+                            elif modified_line == start_line and modified_line != end_line:
+                                if start_column < maxcol:
+                                    if line not in covered_blocks:
+                                        total_modified_blocks += 1
+                                    if executed_count > 0:
+                                        covered_blocks.add(line)
+                                    pr_cov_file.write(line)
+                                    break
+                            elif modified_line == end_line and modified_line != start_line:
+                                if end_column > mincol:
+                                    if line not in covered_blocks:
+                                        total_modified_blocks += 1
+                                    if executed_count > 0:
+                                        covered_blocks.add(line)
+                                    pr_cov_file.write(line)
+                                    break
                     
     except Exception as e:
         logging.error(f"Error parsing coverage file or generating report: {e}")
@@ -212,7 +274,16 @@ def diff_coverage(diff_path, coverage_path, output_path='pr_coverage.out'):
         logging.error(f"An error occurred during the process: {e}")
         return 0,0,0
 
-
+def is_valid_code_segment(segment):
+    """判断一个代码片段是否包含有效的代码（忽略结构符号、关键字和空白）"""
+    stripped_segment = segment.strip()
+    # 忽略单独的结构符号、关键字、控制语句等
+    if stripped_segment in {'{', '}', '(', ')', 'else', 'if', 'for', 'while', 'switch', 'case', 'default'}:
+        return False
+    # 忽略空白行和注释行
+    if not stripped_segment or stripped_segment.startswith("//") or stripped_segment.startswith("#"):
+        return False
+    return True
 
 
 if __name__ == "__main__":
