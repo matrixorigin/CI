@@ -90,7 +90,11 @@ def parse_diff(diff_path):
                         current_file = None  # 忽略非 .go 文件
                         continue
                     elif current_file.endswith('.pb.go'):
-                        logging.info(f"Ignoring auto-generated Go file: {current_file}")
+                        logging.info(f"Ignoring auto-generated pb.go file: {current_file}")
+                        current_file = None  # 忽略自动生成的 .go 文件
+                        continue
+                    elif 'pkg/frontend/test' in current_file:
+                        logging.info(f"Ignoring auto-generated test go file: {current_file}")
                         current_file = None  # 忽略自动生成的 .go 文件
                         continue
                     logging.info(f"Processing file: {current_file}")
@@ -136,7 +140,6 @@ def parse_diff(diff_path):
     except Exception as e:
         logging.error(f"Error parsing diff file: {e}")
         raise
-    logging.info(f"{modified_lines}")
     return modified_lines
 
 def get_modified_columns(old_line, new_line):
