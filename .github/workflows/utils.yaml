@@ -90,17 +90,7 @@ jobs:
       - name: Generate diff.patch
         run: |
           cd $GITHUB_WORKSPACE/matrixone
-          git remote add upstream https://github.com/matrixorigin/matrixone.git
-          target_branch="${{ github.event.pull_request.base.ref }}"
-          current_branch="${{ github.event.pull_request.head.ref }}"
-          echo "upstream target_branch: $target_branch"
-          echo "origin current_branch: $current_branch"
-          
-          git fetch upstream $target_branch --depth=1
-          git fetch origin $current_branch --depth=1
-          
-          git diff upstream/$target_branch origin/$current_branch > diff.patch
-
+          curl -L "https://github.com/matrixorigin/matrixone/pull/${{ github.event.pull_request.number }}.diff" > diff.patch
       - name: Set up Go and JAVA
         uses: matrixorigin/CI/actions/setup-env@main
         with:
