@@ -91,27 +91,19 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/matrixone
           retry_times=5
-          delay=5
-          url="https://patch-diff.githubusercontent.com/raw/${{ github.event.pull_request.base.repo.full_name }}/pull/${{ github.event.pull_request.number }}.diff"
-          
-          for ((i=1; i<=$retry_times; i++)); do
-            response=$(curl --max-time 10 -o /dev/null -w "%{http_code}" $url)
-            echo "respCode: $response"
-            if [ "$response" == "200" ];then
-                curl -L -s $url > diff.patch
-                if [ -f "$GITHUB_WORKSPACE/matrixone/diff.patch" ];then
-                echo "Get diff.patch success..."
-                break
-              fi
+          delay=3
+          url="https://github.com/${{ github.event.pull_request.base.repo.full_name }}/pull/${{ github.event.pull_request.number }}.diff"
+          for ((i = 1; i <= retry_times; i++)); do
+            echo "url: $url"
+            if curl -f --max-time 10 -L -o diff.patch $url;then
+              echo "Get diff.patch success..."
+              exit 0
             fi
             echo "Get diff.patch failed...Retrying in 3 seconds..."
             sleep $delay
           done
-
-          if [ "$i" -gt $retry_times ]; then
-              echo "Max retries reached. Failed."
-              exit 1
-          fi
+          echo "Max retries reached. Failed."
+          exit 1
 
       - name: Set up Go and JAVA
         uses: matrixorigin/CI/actions/setup-env@main
