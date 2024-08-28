@@ -72,11 +72,14 @@ def merge_coverage_files(output_path, *coverage_files):
     
     return total_blocks, covered_blocks, coverage_percentage
 
-def parse_diff(diff_path, pass_files):
+def parse_diff(diff_path, ignore_path):
     """解析diff文件，获取新增和修改的行号和列范围，仅处理 .go 文件"""
     logging.info(f"Starting to parse diff file: {diff_path}")
     modified_lines = {}
 
+    logging.info(f"load skip files: {ignore_path}")
+    skip_files_endswith, skip_files_contains, include_files_endswith, include_files_contains = load_ignore_files(
+        ignore_path)
     current_file = None
     current_line_number = None
 
@@ -85,38 +88,25 @@ def parse_diff(diff_path, pass_files):
             for line in diff_file:
                 if line.startswith('+++ b/'):
                     current_file = normalize_path(line[6:].strip(), '')
-                    if not current_file.endswith('.go'):
-                        logging.info(f"Ignoring non-Go file: {current_file}")
-                        current_file = None  # 忽略非 .go 文件
-                        continue
-                    elif current_file.endswith('.pb.go'):
-                        logging.info(f"Ignoring auto-generated pb.go file: {current_file}")
-                        current_file = None  # 忽略自动生成的 .go 文件
-                        continue
-                    elif 'pkg/frontend/test' in current_file:
-                        logging.info(f"Ignoring auto-generated test go file: {current_file}")
-                        current_file = None  # 忽略自动生成的 .go 文件
-                        continue
-                    # 忽略特殊 .go 文件
-                    elif any(current_file.endswith(f) for f in pass_files):
-                        logging.info(f"Ignoring special Go file: {current_file}")
-                        current_file = None  # 忽略特殊的 .go 文件
+                    if should_ignore_file(current_file, skip_files_endswith, skip_files_contains,
+                                          include_files_endswith, include_files_contains):
+                        current_file = None
                         continue
                     logging.info(f"Processing file: {current_file}")
-
+                
                 elif line.startswith('@@ ') and current_file:
                     # 解析 @@ 行，获取新文件的起始行号
                     match = re.match(r'@@ -\d+,\d+ \+(\d+),\d+ @@', line)
                     if match:
                         current_line_number = int(match.group(1))  # 新增代码块的起始行号
                         logging.info(f"New file starting line number: {current_line_number}")
-
+                
                 elif line.startswith('+') and current_file:
                     # 处理新增和修改的行，确保它是有效代码
                     if current_line_number is not None:
                         # 获取当前行内容
                         new_line = line[1:]
-
+                        
                         # 计算第一个和最后一个有效代码字符的位置
                         stripped_line = new_line.strip()
                         if stripped_line:
@@ -129,7 +119,7 @@ def parse_diff(diff_path, pass_files):
 
                             while last_non_space >= first_non_space and not is_valid_code_segment(new_line[last_non_space - 1]):
                                 last_non_space -= 1
-
+                            
                             # 只有在确实有有效代码的情况下才记录
                             if first_non_space <= last_non_space:
                                 if current_file not in modified_lines:
@@ -137,7 +127,7 @@ def parse_diff(diff_path, pass_files):
                                 modified_lines[current_file].append((current_line_number, first_non_space, last_non_space))
 
                         current_line_number += 1
-
+                
                 elif not line.startswith('-') and current_file:
                     # 处理未修改的行，递增行号
                     if current_line_number is not None:
@@ -156,11 +146,11 @@ def get_modified_columns(old_line, new_line):
     for i in range(min_len):
         if old_line[i] != new_line[i]:
             modified_columns.append(i + 1)
-
+    
     # 如果新行更长，补充剩余部分的列号
     if len(new_line) > min_len:
         modified_columns.extend(range(min_len + 1, len(new_line) + 1))
-
+    
     return modified_columns
 
 def parse_coverage_and_generate_report(coverage_path, modified_lines, output_path='pr_coverage.out'):
@@ -245,14 +235,14 @@ def parse_coverage_and_generate_report(coverage_path, modified_lines, output_pat
                                         covered_blocks.add(line)
                                     pr_cov_file.write(line)
                                     break
-
+                    
     except Exception as e:
         logging.error(f"Error parsing coverage file or generating report: {e}")
         raise
 
     logging.debug(f"[covered_lines][{total_modified_blocks}]"+'\n'.join(covered_blocks))
 
-    coverage_percentage = (len(covered_blocks) / total_modified_blocks) if total_modified_blocks > 0 else 0
+    coverage_percentage = (len(covered_blocks) / total_modified_blocks) if total_modified_blocks > 0 else 0   
     return total_modified_blocks, len(covered_blocks), coverage_percentage
 
 def normalize_path(path, prefix='github.com/matrixorigin/matrixone/'):
@@ -261,10 +251,10 @@ def normalize_path(path, prefix='github.com/matrixorigin/matrixone/'):
         return path[len(prefix):]
     return os.path.normpath(path)
 
-def diff_coverage(diff_path, coverage_path, pass_files, output_path='pr_coverage.out'):
+def diff_coverage(diff_path, coverage_path, output_path='pr_coverage.out', ignore_path='.ignore'):
     try:
         # 解析diff文件，获取修改和新增的行号
-        modified_lines = parse_diff(diff_path, pass_files)
+        modified_lines = parse_diff(diff_path, ignore_path)
 
         if len(modified_lines) == 0:
             logging.info("No go file changes")
@@ -273,7 +263,7 @@ def diff_coverage(diff_path, coverage_path, pass_files, output_path='pr_coverage
         # 解析coverage.out文件，计算覆盖率并生成覆盖率报告
         total_modified_lines, covered_modified_lines, coverage_percentage = parse_coverage_and_generate_report(coverage_path, modified_lines, output_path)
 
-
+        
         # 输出结果
         logging.info(f"PR Coverage Report Generated: {output_path}")
         return total_modified_lines, covered_modified_lines, coverage_percentage
@@ -293,42 +283,94 @@ def is_valid_code_segment(segment):
         return False
     return True
 
+def load_ignore_files(ignore_file_path):
+    skip_files_endswith = []
+    skip_files_contains = []
+    include_files_endswith = []
+    include_files_contains = []
+
+    try:
+        with open(ignore_file_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith('#') or not line:
+                    continue
+                parts = line.split(" ", 1)
+                if len(parts) < 2:
+                    continue
+                rule_type = parts[0]
+                pattern = parts[1].strip()
+
+                if rule_type == "e":
+                    skip_files_endswith.append(pattern)
+                elif rule_type == "c":
+                    skip_files_contains.append(pattern)
+                elif rule_type == "!e":
+                    include_files_endswith.append(pattern)
+                elif rule_type == "!c":
+                    include_files_contains.append(pattern)
+                else:
+                    logging.warning(f"Unknown rule type in ignore file: {line}")
+    except Exception as e:
+        logging.error(f"Error reading ignore file {ignore_file_path}: {e}")
+        raise
+
+    return skip_files_endswith, skip_files_contains, include_files_endswith, include_files_contains
+
+
+def should_ignore_file(file_path, skip_files_endswith, skip_files_contains, include_files_endswith,
+                       include_files_contains):
+    # 忽略优先级
+    # 1.以 .go 结尾的文件不忽略
+    # 2.以 pb.go 结尾的文件忽略
+    # 3.包含特殊字串的文件忽略
+    # 4.包含特殊字串的文件不忽略
+
+    for suffix in include_files_endswith:
+        if file_path.endswith(suffix):
+            for s in skip_files_endswith:
+                if file_path.endswith(s):
+                    logging.info(f"Ignoring {s} file by endswith: {file_path}")
+                    return True
+
+            # 检查文件名是否包含某个子串
+            for substring in skip_files_contains:
+                if substring in file_path:
+                    logging.info(f"Ignoring {substring} file by contains: {file_path}")
+                    return True
+
+            for substring in include_files_contains:
+                if substring in file_path:
+                    return False
+            return False
+    logging.info(f"Ignoring non-Go file: {file_path}")
+    return True
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Merge coverage files and calculate coverage based on diff.")
 
     parser.add_argument(
-        '-coverage_files',
-        nargs='+',
+        '-coverage_files', 
+        nargs='+', 
         required=True,
         help='List of coverage.out files to merge.'
     )
 
     parser.add_argument(
-        '-diff_path',
-        type=str,
-        default='diff.patch',
+        '-diff_path', 
+        type=str, 
+        default='diff.patch', 
         help='Path to the diff file. Default is "diff.patch".'
     )
 
     parser.add_argument(
-        '-minimal_coverage',
-        type=float,
-        default=0.75,
+        '-minimal_coverage', 
+        type=float, 
+        default=0.75, 
         help='Minimal coverage percentage required. Default to 0.75.'
     )
-
-    parser.add_argument(
-        '-pass_files',
-        type=str,  # 改为str类型
-        nargs='+',  # 允许接收多个参数，并将其作为列表返回
-        default=[
-            'pkg/sql/parsers/dialect/mysql/mysql_sql.go',
-            'pkg/sql/parsers/dialect/mysql/mysql_sql.y',
-        ],
-        help='Special go files that need to be skipped.'
-    )
-
+    
     args = parser.parse_args()
 
     total_blocks, covered_blocks, coverage_percentage = merge_coverage_files('merged_coverage.out', *args.coverage_files)
@@ -337,7 +379,7 @@ if __name__ == "__main__":
     # 调用主函数
     diff_path = args.diff_path  # 可以根据实际情况修改路径
     coverage_path = 'merged_coverage.out'  # 可以根据实际情况修改路径
-    total_modified_lines, covered_modified_lines, coverage_percentage = diff_coverage(diff_path, coverage_path,args.pass_files)
+    total_modified_lines, covered_modified_lines, coverage_percentage = diff_coverage(diff_path, coverage_path)
     logging.info(f"total_modified_lines: {total_modified_lines}, covered_modified_lines: {covered_modified_lines}, coverage_percentage:{coverage_percentage}")
 
     if coverage_percentage <= args.minimal_coverage:
