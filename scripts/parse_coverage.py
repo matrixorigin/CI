@@ -247,7 +247,7 @@ def parse_coverage_and_generate_report(coverage_path, modified_lines, output_pat
 
     logging.debug(f"[covered_lines][{total_modified_blocks}]"+'\n'.join(covered_blocks))
 
-    coverage_percentage = (len(covered_blocks) / total_modified_blocks) if total_modified_blocks > 0 else 0   
+    coverage_percentage = (len(covered_blocks) / total_modified_blocks) if total_modified_blocks > 0 else 1   
     return total_modified_blocks, len(covered_blocks), coverage_percentage
 
 def normalize_path(path, prefix='github.com/matrixorigin/matrixone/'):
@@ -260,6 +260,7 @@ def diff_coverage(diff_path, coverage_path, output_path='pr_coverage.out'):
     try:
         # 解析diff文件，获取修改和新增的行号
         modified_lines = parse_diff(diff_path)
+        logging.debug(f"[modified_lines]{modified_lines}")
 
         if len(modified_lines) == 0:
             logging.info("No go file changes")
