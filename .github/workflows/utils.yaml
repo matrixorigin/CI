@@ -206,10 +206,6 @@ jobs:
           name: coverage-files
           path: ${{ github.workspace }}/coverage_downloads/coverage_files.zip
           retention-days: 7
-      - name: Set up Python environment
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'  # 使用Python 3.9版本
       - name: Checkout for Python file
         uses: actions/checkout@v3
         with:
