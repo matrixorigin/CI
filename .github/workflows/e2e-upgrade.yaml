@@ -116,7 +116,8 @@ jobs:
           else 
             cat ./etc/launch/tn.toml     
           fi
-          ./optools/run_bvt.sh $GITHUB_WORKSPACE/workspace launch
+          ./optools/run_bvt.sh $GITHUB_WORKSPACE/workspace launch;
+          sleep 60;
 
       - name: Start BVT Test for Head Branch
         id: bvt_on_latest_head_version
@@ -222,7 +223,8 @@ jobs:
           mv $GITHUB_WORKSPACE/upstream/mo-service .
           mv $GITHUB_WORKSPACE/upstream/optools .
 
-          ./optools/run_bvt.sh $GITHUB_WORKSPACE/workspace launch
+          ./optools/run_bvt.sh $GITHUB_WORKSPACE/workspace launch;
+          sleep 60;
 
       - name: Clone test-tool repository
         uses: actions/checkout@v4
@@ -282,7 +284,7 @@ jobs:
           else 
             cat ./etc/launch/tn.toml     
           fi
-          ./optools/run_bvt.sh $GITHUB_WORKSPACE/workspace launch
+          ./optools/run_bvt.sh $GITHUB_WORKSPACE/workspace launch;
           sleep 60;
 
       - name: Start BVT Test for Head Ref
