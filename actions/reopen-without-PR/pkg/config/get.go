@@ -2,17 +2,16 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"reopen-without-PR/pkg/github"
 	"strconv"
 )
 
 func GetBaseURL() string {
-	return os.Getenv("BASE_URL")
+	return github.MustGetInput(EnvBaseURL)
 }
 
-func GetOwner() string {
-	return github.MustGetInput(EnvOwner)
+func GetIssueOwner() string {
+	return github.MustGetInput(EnvIssueOwner)
 }
 
 func GetRepository() string {
@@ -40,10 +39,18 @@ func GetAssignees() string {
 	return github.MustGetInput(EnvAssignees)
 }
 
-func GetLabels() string {
+func GetAddLabels() string {
 	return github.MustGetInput(EnvLabels)
 }
 
 func GetLabelsNeed() string {
 	return github.MustGetInput(EnvLabelsNeed)
+}
+
+func GetWhiteList() string {
+	return github.MustGetInput(EnvWhitelist)
+}
+
+func GetCloseUser() string {
+	return github.MustGetInput(EnvCloseUser)
 }

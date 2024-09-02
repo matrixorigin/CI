@@ -310,14 +310,15 @@ jobs:
     steps:
       - name: Reopen Issue Without PR
         id: step1
-        env:
-          BASE_URL: https://api.github.com
         with:
-          OWNER: ${{ github.repository_owner }} # 获取执行该作业的仓库作者 形如: matrixorigin
-          REPOSITORY: ${{ github.repository }}  # 获取执行该作业的仓库名 形如: matrixorigin/CI
-          ISSUE_NUMBER: ${{ github.event.issue.number }}  # 获取当前操作的issue number
-          GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}  # 获取github action token操作权限
-          ASSIGNEES: sukki37  #issue指定分配对象
+          whitelist: 'sukki77,fengttt,aressu1985' # 白名单成员 可以无条件删除带有特殊标签的issue
+          issue_owner: ${{ github.event.issue.user.login }} # issue的打开者 当满足存在关联pr时允许关闭
+          close_user: ${{ github.event.sender.login }}  # 当前关闭issue的操作者
+          github_token: ${{ secrets.TOKEN_ACTION }}  # 获取github action token操作权限
+          base_url: ${{ github.api_url }}
+          repository: ${{ github.repository }}  # 获取执行该作业的仓库名 形如: matrixorigin/CI
+          issue_number: ${{ github.event.issue.number }}  # 获取当前操作的issue number
+          assignees: 'sukki37'  #issue指定分配对象
           LABELS: 'no-pr-linked'  #相关自定义label配置 形如 label1,label2
           LABELS_NEED: 'tech-request,feature,Feature,kind/feature,attention/feature-incomplete,bug/ut,Bug fix,kind/bug,kind/subtask,kind/tech-request'  # 指定需要排查的标签 label1,label2,...
         uses: matrixorigin/CI/actions/reopen-without-PR@main
