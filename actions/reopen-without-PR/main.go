@@ -189,42 +189,53 @@ func main() {
 
 	// 1.获取issue时间线判断是否存在pr
 	// 构建请求URL
-	issueURL := fmt.Sprintf("%s/repos/%s/issues/%d/timeline", baseURL, repo, issueNumber)
+	for page := 1; page <= 100; page++ {
+		fmt.Printf("get issue info,page=%d,per_page=30\n", page)
+		issueURL := fmt.Sprintf("%s/repos/%s/issues/%d/timeline?page=%d&per_page=30", baseURL, repo, issueNumber, page)
 
-	// 创建请求头，包含认证信息
-	issueResp, err := ihttp.Request("GET", issueURL, token, nil, "")
-	if err != nil {
-		panic(fmt.Sprintf("issueUrl http.Request failed,err:%v", err))
-	}
-	if issueResp.StatusCode != http.StatusOK {
-		panic(fmt.Sprintf("connect issueUrl failed,resp.statusCode:%d", issueResp.StatusCode))
-	}
-	defer issueResp.Body.Close()
-	fmt.Printf("get issue %d info successfully.\n", issueNumber)
+		// 创建请求头，包含认证信息
+		issueResp, err := ihttp.Request("GET", issueURL, token, nil, "")
+		if err != nil {
+			panic(fmt.Sprintf("issueUrl http.Request failed,err:%v", err))
+		}
+		if issueResp.StatusCode != http.StatusOK {
+			panic(fmt.Sprintf("connect issueUrl failed,resp.statusCode:%d", issueResp.StatusCode))
+		}
+		defer issueResp.Body.Close()
+		fmt.Printf("get issue %d info successfully.\n", issueNumber)
 
-	// 解析响应内容（这里省略了具体的解析过程，你可以根据需要自行处理）
-	// 检查issue是否有关联的pull request
-	body, err := io.ReadAll(issueResp.Body)
-	if err != nil {
-		panic(fmt.Sprintf("Error reading issue response body:%v", err))
-	}
-	var issueData []interface{}
-	err = json.Unmarshal(body, &issueData)
-	if err != nil {
-		panic(fmt.Sprintf("Error unmarshalling JSON:%v", err))
-	}
+		// 解析响应内容（这里省略了具体的解析过程，你可以根据需要自行处理）
+		// 检查issue是否有关联的pull request
+		body, err := io.ReadAll(issueResp.Body)
+		if err != nil {
+			panic(fmt.Sprintf("Error reading issue response body:%v", err))
+		}
+		var issueData []interface{}
+		err = json.Unmarshal(body, &issueData)
+		if err != nil {
+			panic(fmt.Sprintf("Error unmarshalling JSON:%v", err))
+		}
 
-	for _, data := range issueData {
-		dataMap := data.(map[string]interface{})
-		typeEvent := dataMap["event"]
-		if typeEvent == "cross-referenced" {
-			sourceMap := dataMap["source"].(map[string]interface{})
-			issueMap := sourceMap["issue"].(map[string]interface{})
-			_, ok := issueMap["pull_request"]
-			if ok {
-				hasRelatedPR = true
-				break
+		// 如果获取到到数据为空，则说明已经全部获取了，退出循环
+		if len(issueData) == 0 {
+			break
+		}
+
+		for _, data := range issueData {
+			dataMap := data.(map[string]interface{})
+			typeEvent := dataMap["event"]
+			if typeEvent == "cross-referenced" {
+				sourceMap := dataMap["source"].(map[string]interface{})
+				issueMap := sourceMap["issue"].(map[string]interface{})
+				_, ok := issueMap["pull_request"]
+				if ok {
+					hasRelatedPR = true
+					break
+				}
 			}
+		}
+		if hasRelatedPR {
+			break
 		}
 	}
 
