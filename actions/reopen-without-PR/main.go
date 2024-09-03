@@ -190,8 +190,8 @@ func main() {
 	// 1.获取issue时间线判断是否存在pr
 	// 构建请求URL
 	for page := 1; page <= 100; page++ {
-		fmt.Printf("get issue info,page=%d,per_page=30\n", page)
-		issueURL := fmt.Sprintf("%s/repos/%s/issues/%d/timeline?page=%d&per_page=30", baseURL, repo, issueNumber, page)
+		fmt.Printf("get issue info,page=%d,per_page=100\n", page)
+		issueURL := fmt.Sprintf("%s/repos/%s/issues/%d/timeline?page=%d&per_page=100", baseURL, repo, issueNumber, page)
 
 		// 创建请求头，包含认证信息
 		issueResp, err := ihttp.Request("GET", issueURL, token, nil, "")
