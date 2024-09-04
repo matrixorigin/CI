@@ -3,6 +3,7 @@ import os
 import sys
 import logging
 import argparse
+import fnmatch
 
 # 设置日志配置
 logging.basicConfig(
@@ -78,8 +79,7 @@ def parse_diff(diff_path, ignore_path):
     modified_lines = {}
 
     logging.info(f"load skip files: {ignore_path}")
-    skip_files_endswith, skip_files_contains, include_files_endswith, include_files_contains = load_ignore_files(
-        ignore_path)
+    ignore_patterns, include_patterns = parse_ignore_file(ignore_path)
     current_file = None
     current_line_number = None
 
@@ -88,8 +88,7 @@ def parse_diff(diff_path, ignore_path):
             for line in diff_file:
                 if line.startswith('+++ b/'):
                     current_file = normalize_path(line[6:].strip(), '')
-                    if should_ignore_file(current_file, skip_files_endswith, skip_files_contains,
-                                          include_files_endswith, include_files_contains):
+                    if should_ignore(current_file, ignore_patterns, include_patterns):
                         current_file = None
                         continue
                     logging.info(f"Processing file: {current_file}")
@@ -283,68 +282,43 @@ def is_valid_code_segment(segment):
         return False
     return True
 
-def load_ignore_files(ignore_file_path):
-    skip_files_endswith = []
-    skip_files_contains = []
-    include_files_endswith = []
-    include_files_contains = []
+def parse_ignore_file(ignore_file_path):
+    ignore_patterns = []
+    include_patterns = []
 
     try:
-        with open(ignore_file_path, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith('#') or not line:
-                    continue
-                parts = line.split(" ", 1)
-                if len(parts) < 2:
-                    continue
-                rule_type = parts[0]
-                pattern = parts[1].strip()
-
-                if rule_type == "e":
-                    skip_files_endswith.append(pattern)
-                elif rule_type == "c":
-                    skip_files_contains.append(pattern)
-                elif rule_type == "!e":
-                    include_files_endswith.append(pattern)
-                elif rule_type == "!c":
-                    include_files_contains.append(pattern)
-                else:
-                    logging.warning(f"Unknown rule type in ignore file: {line}")
+        with open(ignore_file_path, "r")as f:
+            ignore_file_content = f.read()
     except Exception as e:
         logging.error(f"Error reading ignore file {ignore_file_path}: {e}")
         raise
 
-    return skip_files_endswith, skip_files_contains, include_files_endswith, include_files_contains
+    lines = ignore_file_content.splitlines()
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        if line.startswith('!'):
+            include_patterns.append(line[1:])
+        else:
+            ignore_patterns.append(line)
 
+    return ignore_patterns, include_patterns
 
-def should_ignore_file(file_path, skip_files_endswith, skip_files_contains, include_files_endswith,
-                       include_files_contains):
-    # 忽略优先级
-    # 1.以 .go 结尾的文件不忽略
-    # 2.以 pb.go 结尾的文件忽略
-    # 3.包含特殊字串的文件忽略
-    # 4.包含特殊字串的文件不忽略
-
-    for suffix in include_files_endswith:
-        if file_path.endswith(suffix):
-            for s in skip_files_endswith:
-                if file_path.endswith(s):
-                    logging.info(f"Ignoring {s} file by endswith: {file_path}")
+def should_ignore(filename, ignore_patterns, include_patterns):
+    for pattern in include_patterns:
+        if _matches_pattern(filename, pattern):
+            for pattern in ignore_patterns:
+                if _matches_pattern(filename, pattern):
+                    logging.info(f"Ignoring file: {filename} -- due to ignore pattern {pattern}")
                     return True
-
-            # 检查文件名是否包含某个子串
-            for substring in skip_files_contains:
-                if substring in file_path:
-                    logging.info(f"Ignoring {substring} file by contains: {file_path}")
-                    return True
-
-            for substring in include_files_contains:
-                if substring in file_path:
-                    return False
             return False
-    logging.info(f"Ignoring non-Go file: {file_path}")
+    logging.info(f"Ignoring file: {filename} -- don`t match include patterns")
     return True
+
+def _matches_pattern(filename, pattern):
+    regex = re.compile(fnmatch.translate(pattern))
+    return regex.match(filename) is not None
 
 
 if __name__ == "__main__":

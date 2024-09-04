@@ -1,18 +1,13 @@
-# 添加忽略文件规则
-# 1.以e开头表示用后缀匹配的方式进行文件忽略
-#   如：`e .go` 表示以.go结尾的文件忽略
-# 2.以c开头表示用内容匹配的方式进行文件忽略
-# 如: `c pkg/frontend/test`表示包含pkg/frontend/test字串的文件忽略
-# 3.以 `!` 表示不忽略
-# 如: `!e .go`表示以.go结尾的文件不忽略
-#     `!c pkg/frontend/test`表示包含pkg/frontend/test字串的文件不忽略
-# PS: 每一行仅包含一个忽略文件规则，请勿多写
-#     优先级 `!e` 最高且必须存在，`e c !c`同级---据此可知通过设置`!e`可对同一系列(后缀名相同)的文件进行处理忽略/不忽略处理
+# 忽略规则
+# 1.默认忽略所有的文件
+# 2.通过 `!` 进行文件的保留且优先级最高(因为条件1的存在,条件2为关键设置)
+# 3.后续不带 `!` 开头的忽略规则默认是在条件2下进行
+# 4.满足正则匹配规则
 
-#endswith 根据文件末尾进行匹配
-!e .go
-e .pb.go
+# 保留文件
+!*.go
 
-#contains 根据文件内容进行匹配
-c pkg/frontend/test
-c pkg/sql/parsers/dialect/mysql/mysql_sql.go
+# 在保留文件的基础上进行忽略
+*.pb.go
+pkg/frontend/test/*
+pkg/sql/parsers/dialect/mysql/*
