@@ -90,16 +90,20 @@ jobs:
       - name: Generate diff.patch
         run: |
           cd $GITHUB_WORKSPACE/matrixone
-          git remote add upstream https://github.com/matrixorigin/matrixone.git
-          target_branch="${{ github.event.pull_request.base.ref }}"
-          current_branch="${{ github.event.pull_request.head.ref }}"
-          echo "upstream target_branch: $target_branch"
-          echo "origin current_branch: $current_branch"
-          
-          git fetch upstream $target_branch --depth=1
-          git fetch origin $current_branch --depth=1
-          
-          git diff upstream/$target_branch origin/$current_branch > diff.patch
+          retry_times=5
+          delay=3
+          url="https://github.com/${{ github.event.pull_request.base.repo.full_name }}/pull/${{ github.event.pull_request.number }}.diff"
+          for ((i = 1; i <= retry_times; i++)); do
+            echo "url: $url"
+            if curl -f --max-time 10 -L -o diff.patch $url;then
+              echo "Get diff.patch success..."
+              exit 0
+            fi
+            echo "Get diff.patch failed...Retrying in 3 seconds..."
+            sleep $delay
+          done
+          echo "Max retries reached. Failed."
+          exit 1
 
       - name: Set up Go and JAVA
         uses: matrixorigin/CI/actions/setup-env@main
@@ -202,10 +206,6 @@ jobs:
           name: coverage-files
           path: ${{ github.workspace }}/coverage_downloads/coverage_files.zip
           retention-days: 7
-      - name: Set up Python environment
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'  # 使用Python 3.9版本
       - name: Checkout for Python file
         uses: actions/checkout@v3
         with:
