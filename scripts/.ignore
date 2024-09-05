@@ -11,3 +11,5 @@
 *.pb.go
 pkg/frontend/test/*
 pkg/sql/parsers/dialect/mysql/*
+pkg/vm/engine/tae/db/testutil/*
+pkg/vm/engine/test/*
