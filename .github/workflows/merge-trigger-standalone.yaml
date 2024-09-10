@@ -24,8 +24,11 @@ jobs:
         uses: matrixorigin/CI/actions/setup-env@main
         with:
           setup-java: false
-      - name: GO ENV
-        run: go env
+      - name: Set up Go
+        uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          setup-java: false
+          cache: true
 
       - name: Build MatrixOne
         run: |
