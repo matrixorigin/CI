@@ -86,6 +86,17 @@ jobs:
           region: ap-shanghai
           retry_times: 5
           storage_class: "MAZ_STANDARD"
+      - name: dispatch binary test
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.TOKEN_ACTION }}
+          repository: matrixorigin/mo-nightly-regression
+          event-type: binary-test
+          client-payload: '{"RUNNER": "runner-aron-shpc-2","GIT_WEBSITE": "github","MO_REPO": "${{ github.repository_owner }}","MO_VERSION": "${{ steps.get_release.outputs.tag_name }}","MO_DEPLOY_MODE": "binary","MO_BIN_URL": "https://github.com/${{ github.repository }}/releases/download/${{ steps.get_release.outputs.tag_name }}/mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64.zip","TEST_LIST": "bvt,tpcc,sysbench,ssb,tpch,customer","BVT_EXCLUDE_CASES": "","CUS_TEST_OPTION": "ddl,insert,query","CUS_DS_LIST": "cmcciot_001,dmt_001,etao_001,unre_004,slooong_003"}'
+      - name: Get binary test url
+        run: |
+          echo "you can find the binary test action on https://github.com/matrixorigin/mo-nightly-regression/actions/workflows/mo-release-test-binary.yaml "
+          echo "check in [ J_0. Set variables ]->[ Step_99. Display and output actual variables ] to see if the binary file url is correct"
 
   linux-arm64-build-job:
     runs-on: aws-arm64-runner
@@ -288,9 +299,11 @@ jobs:
         run: |
           echo ${{ steps.get_release.outputs.upload_url }}
           echo ${{ steps.get_release.outputs.tag_name }}
-      - name: Check go version
-        run: |
-          go version
+      #- name: Check go version
+      #  run: |
+      #    go version
+      - name: Set up Go
+        uses: matrixorigin/CI/actions/setup-env@release/1.2-dev
       - name: Build normal
         run: |
           make build
@@ -428,6 +441,17 @@ jobs:
           region: ap-shanghai
           retry_times: 5
           storage_class: "MAZ_STANDARD"
+      - name: dispatch binary test
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.TOKEN_ACTION }}
+          repository: matrixorigin/mo-nightly-regression
+          event-type: binary-test
+          client-payload: '{"RUNNER": "runner-aron-shpc-2","GIT_WEBSITE": "github","MO_REPO": "${{ github.repository_owner }}","MO_VERSION": "${{ steps.get_release.outputs.tag_name }}","MO_DEPLOY_MODE": "binary","MO_BIN_URL": "https://github.com/${{ github.repository }}/releases/download/${{ steps.get_release.outputs.tag_name }}/mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64.zip","TEST_LIST": "bvt,tpcc,sysbench,ssb,tpch,customer","BVT_EXCLUDE_CASES": "","CUS_TEST_OPTION": "ddl,insert,query","CUS_DS_LIST": "cmcciot_001,cmcciot_002,dmt_001,etao_001,etao_002,etao_003,etao_006,extremevision_001,guangheng_001,slooong_001,slooong_002,slooong_003,unre_001,unre_002,unre_003,unre_004,unre_005,unre_006,us_001,worthcloud_001"}'
+      - name: Get binary test url
+        run: |
+          echo "you can find the binary test action on https://github.com/matrixorigin/mo-nightly-regression/actions/workflows/mo-release-test-binary.yaml "
+          echo "check in [ J_0. Set variables ]->[ Step_99. Display and output actual variables ] to see if the binary file url is correct"
 
   musl-arm64-build-job:
     runs-on: aws-arm64-runner
