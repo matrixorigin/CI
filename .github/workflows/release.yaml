@@ -305,6 +305,8 @@ jobs:
           #go version
       - name: Set up Go
         uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          setup-java: false
       - name: Build normal
         run: |
           make build
