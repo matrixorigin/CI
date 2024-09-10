@@ -24,6 +24,7 @@ jobs:
         uses: matrixorigin/CI/actions/setup-env@release/1.2-dev
         with:
           setup-java: false
+          cache: true
       - name: GO ENV
         run: go env
 
