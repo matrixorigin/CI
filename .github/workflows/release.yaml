@@ -300,13 +300,13 @@ jobs:
         run: |
           echo ${{ steps.get_release.outputs.upload_url }}
           echo ${{ steps.get_release.outputs.tag_name }}
-      #- name: Check go version
-        #run: |
-          #go version
       - name: Set up Go
         uses: matrixorigin/CI/actions/setup-env@main
         with:
           setup-java: false
+      - name: Check go version
+        run: |
+          go version
       - name: Build normal
         run: |
           make build
