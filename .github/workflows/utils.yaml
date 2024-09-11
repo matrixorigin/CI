@@ -160,7 +160,7 @@ jobs:
       - name: Update BVT SQL Timeout
         run: |
           cd $GITHUB_WORKSPACE/mo-tester
-          sed -i "s#socketTimeout: 120000#socketTimeout: 300000#" mo.yml
+          sed -i "s/socketTimeout:.*/socketTimeout: 300000/g" mo.yml
       - name: Start BVT Test
         timeout-minutes: 30
         if: ${{ always() && !cancelled() }}
