@@ -19,6 +19,12 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
+      - name: Add cn.txn
+        run: |
+          cd $GITHUB_WORKSPACE/matrixone
+          echo "[cn.txn]" >> ./etc/launch/cn.toml
+          echo "  enable-leak-check = 1" >> ./etc/launch/cn.toml
+          echo '  max-active-ages = "2m"'>> ./etc/launch/cn.toml
       - name: Build MatrixOne
         run: |
           cd $GITHUB_WORKSPACE/head && make clean && make build
@@ -134,6 +140,12 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
+      - name: Add cn.txn
+        run: |
+          cd $GITHUB_WORKSPACE/matrixone
+          echo "[cn.txn]" >> ./etc/launch/cn.toml
+          echo "  enable-leak-check = 1" >> ./etc/launch/cn.toml
+          echo '  max-active-ages = "2m"'>> ./etc/launch/cn.toml
       - name: Build MatrixOne
         run: |
           cd $GITHUB_WORKSPACE/head && make clean && make build
@@ -210,6 +222,13 @@ jobs:
 
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
+
+      - name: Add cn.txn
+        run: |
+          cd $GITHUB_WORKSPACE/matrixone
+          echo "[cn.txn]" >> ./etc/launch/cn.toml
+          echo "  enable-leak-check = 1" >> ./etc/launch/cn.toml
+          echo '  max-active-ages = "2m"'>> ./etc/launch/cn.toml
 
       - name: Build MatrixOne
         run: |

@@ -148,6 +148,12 @@ jobs:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
+      - name: Add cn.txn
+        run: |
+          cd $GITHUB_WORKSPACE/matrixone
+          echo "[cn.txn]" >> ./etc/launch/cn.toml
+          echo "  enable-leak-check = 1" >> ./etc/launch/cn.toml
+          echo '  max-active-ages = "2m"'>> ./etc/launch/cn.toml
       - name: Start Unit Test
         timeout-minutes: 120
         run: |

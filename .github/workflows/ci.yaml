@@ -43,6 +43,12 @@ jobs:
           echo "bucket=${{ secrets.S3BUCKET }}" >> $GITHUB_ENV
           # set ut workdir
           echo "UT_WORKDIR=${{ github.workspace }}" >> $GITHUB_ENV
+      - name: Add cn.txn
+        run: |
+          cd $GITHUB_WORKSPACE/matrixone
+          echo "[cn.txn]" >> ./etc/launch/cn.toml
+          echo "  enable-leak-check = 1" >> ./etc/launch/cn.toml
+          echo '  max-active-ages = "2m"'>> ./etc/launch/cn.toml
       - name: Unit Testing
         run: |
           cd $GITHUB_WORKSPACE && make clean && make config
@@ -78,6 +84,12 @@ jobs:
           echo "bucket=${{ secrets.S3BUCKET }}" >> $GITHUB_ENV
           # set ut workdir
           echo "UT_WORKDIR=${{ github.workspace }}" >> $GITHUB_ENV
+      - name: Add cn.txn
+        run: |
+          cd $GITHUB_WORKSPACE/matrixone
+          echo "[cn.txn]" >> ./etc/launch/cn.toml
+          echo "  enable-leak-check = 1" >> ./etc/launch/cn.toml
+          echo '  max-active-ages = "2m"'>> ./etc/launch/cn.toml
       - name: Unit Testing
         run: |
           cd $GITHUB_WORKSPACE && make clean && make config
@@ -109,6 +121,12 @@ jobs:
         uses: matrixorigin/CI/actions/setup-env@main
         with:
           setup-java: false
+      - name: Add cn.txn
+        run: |
+          cd $GITHUB_WORKSPACE/matrixone
+          echo "[cn.txn]" >> ./etc/launch/cn.toml
+          echo "  enable-leak-check = 1" >> ./etc/launch/cn.toml
+          echo '  max-active-ages = "2m"'>> ./etc/launch/cn.toml
       - name: Prepare ENV
         run: |
           cd $GITHUB_WORKSPACE && make clean && make config && make build
