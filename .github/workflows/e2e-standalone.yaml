@@ -50,6 +50,10 @@ jobs:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
+      - name: Update BVT SQL Timeout
+        run: |
+          cd $GITHUB_WORKSPACE/mo-tester
+          sed -i "s#socketTimeout: 120000#socketTimeout: 300000#" mo.yml
       - name: Start BVT Test
         id: bvt_on_pr_version
         run: |
@@ -165,6 +169,10 @@ jobs:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
+      - name: Update BVT SQL Timeout
+        run: |
+          cd $GITHUB_WORKSPACE/mo-tester
+          sed -i "s#socketTimeout: 120000#socketTimeout: 300000#" mo.yml
       - name: Start BVT Test
         id: bvt_on_pr_version
         run: |
@@ -252,7 +260,10 @@ jobs:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
-
+      - name: Update BVT SQL Timeout
+        run: |
+          cd $GITHUB_WORKSPACE/mo-tester
+          sed -i "s#socketTimeout: 120000#socketTimeout: 300000#" mo.yml
       - name: Start BVT Test
         id: bvt_on_pr_version
         run: |

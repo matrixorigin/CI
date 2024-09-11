@@ -80,7 +80,10 @@ jobs:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
-
+      - name: Update BVT SQL Timeout
+        run: |
+          cd $GITHUB_WORKSPACE/mo-tester
+          sed -i "s#socketTimeout: 120000#socketTimeout: 300000#" mo.yml
       - name: Start BVT Test for Target Branch
         id: bvt_on_latest_main_version
         run: |
@@ -132,7 +135,10 @@ jobs:
           fi
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/workspace launch;
           sleep 60;
-
+      - name: Update BVT SQL Timeout for Head Branch
+        run: |
+          cd $GITHUB_WORKSPACE/mo-tester
+          sed -i "s#socketTimeout: 120000#socketTimeout: 300000#" mo.yml
       - name: Start BVT Test for Head Branch
         id: bvt_on_latest_head_version
         run: |
@@ -260,7 +266,10 @@ jobs:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
-
+      - name: Update BVT SQL Timeout for Release ${{ inputs.release-version }}
+        run: |
+          cd $GITHUB_WORKSPACE/mo-tester
+          sed -i "s#socketTimeout: 120000#socketTimeout: 300000#" mo.yml
       - name: Start BVT Test for Release ${{ inputs.release-version }}
         id: bvt_on_latest_main_version
         run: |
@@ -314,7 +323,10 @@ jobs:
           fi
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/workspace launch;
           sleep 60;
-
+      - name: Update BVT SQL Timeout for Head Ref
+        run: |
+          cd $GITHUB_WORKSPACE/mo-tester
+          sed -i "s#socketTimeout: 120000#socketTimeout: 300000#" mo.yml
       - name: Start BVT Test for Head Ref
         id: bvt_on_latest_head_version
         run: |
