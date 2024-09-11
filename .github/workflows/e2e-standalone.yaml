@@ -21,7 +21,7 @@ jobs:
         uses: matrixorigin/CI/actions/setup-env@main
       - name: Add cn.txn
         run: |
-          cd $GITHUB_WORKSPACE/matrixone
+          cd $GITHUB_WORKSPACE/head
           echo "[cn.txn]" >> ./etc/launch/cn.toml
           echo "  enable-leak-check = 1" >> ./etc/launch/cn.toml
           echo '  max-active-ages = "2m"'>> ./etc/launch/cn.toml
@@ -146,7 +146,7 @@ jobs:
         uses: matrixorigin/CI/actions/setup-env@main
       - name: Add cn.txn
         run: |
-          cd $GITHUB_WORKSPACE/matrixone
+          cd $GITHUB_WORKSPACE/head
           echo "[cn.txn]" >> ./etc/launch/cn.toml
           echo "  enable-leak-check = 1" >> ./etc/launch/cn.toml
           echo '  max-active-ages = "2m"'>> ./etc/launch/cn.toml
@@ -233,7 +233,7 @@ jobs:
 
       - name: Add cn.txn
         run: |
-          cd $GITHUB_WORKSPACE/matrixone
+          cd $GITHUB_WORKSPACE/head
           echo "[cn.txn]" >> ./etc/launch/cn.toml
           echo "  enable-leak-check = 1" >> ./etc/launch/cn.toml
           echo '  max-active-ages = "2m"'>> ./etc/launch/cn.toml

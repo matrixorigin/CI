@@ -67,7 +67,7 @@ jobs:
       - name: Update BVT SQL Timeout
         run: |
           cd $GITHUB_WORKSPACE/mo-tester
-          sed -i "s/socketTimeout:.*/socketTimeout: 300000/g" mo.yml
+          sed -i "" "s/socketTimeout:.*/socketTimeout: 300000/g" mo.yml
       - name: Start BVT Test
         id: bvt_on_pr_version
         run: |
@@ -158,17 +158,13 @@ jobs:
           ref: main
       - name: Set up JDK 8 for x64
         run: echo "$JAVA_HOME/bin" >> $GITHUB_PATH
-      - name: Update BVT SQL Timeout
-        run: |
-          cd $GITHUB_WORKSPACE/mo-tester
-          sed -i "s/socketTimeout:.*/socketTimeout: 300000/g" mo.yml
       - name: Start BVT Test
         id: bvt_on_pr_version
         run: |
           export LC_ALL="C.UTF-8"
           locale
           cd $GITHUB_WORKSPACE/mo-tester
-          sed -i 's/socketTimeout:.*/socketTimeout: 600000/g' mo.yml
+          sed -i 's/socketTimeout:.*/socketTimeout: 300000/g' mo.yml
           sed -i 's/  port: [0-9]*/  port: 12345/g' mo.yml
           cat mo.yml
           echo "======================================"
