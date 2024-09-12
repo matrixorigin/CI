@@ -18,8 +18,8 @@ import (
 // 2.  是否为需要处理的issue
 // 3.  对关闭该issue的用户进行身份校验
 // 3.1 若用户是白名单用户，则直接结束，不做处理
-// 3.2 若用户是issue的owner,判断是否存在对关联pr;存在则不做处理,反之
-// 3.3 若用户非issue的owner,白名单用户，则直接进行后续处理
+// 3.2 若用户是issue的owner,则直接结束，不做处理
+// 3.3 若用户非issue的owner,白名单用户，则直接进行后续处理，判断是否存在对关联pr;存在则不做处理,反之
 
 var (
 	// 设置GitHub API的基本URL和认证信息
@@ -177,14 +177,16 @@ func main() {
 	}
 
 	// 进行2.2/2.3判断  -- 已经确定非白名单用户
-	// 2.3非白名单非issue的owner直接进行处理
-	if closeUser != issueOwner {
-		fmt.Printf("closeUser %s is not issueOwner %s,will exec task...", closeUser, issueOwner)
-		task()
+	// 2.3若为issue拥有者也可以不处理
+	if closeUser == issueOwner {
+		fmt.Printf("closeUser %s is issueOwner %s", closeUser, issueOwner)
+		if err := github.SetOutput("send", "no"); err != nil {
+			fmt.Println("set outputs failed")
+		}
 		return
 	}
 
-	// 2.2 issue_owner用户处理
+	// 2.2 既不是白名单也不是issue拥有者用户处理
 	hasRelatedPR := false // 是否存在关联pr
 
 	// 1.获取issue时间线判断是否存在pr
