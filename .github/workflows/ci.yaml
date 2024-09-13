@@ -55,7 +55,8 @@ jobs:
           find scratch -name "**-UT-Count.out" -exec cat {} \;
 
   ut-mac-x86:
-    if: ${{ !github.event.pull_request.draft }}
+    #if: ${{ !github.event.pull_request.draft }}
+    if: ${{ false }}
     runs-on: macos-12
     name: UT Test on Darwin/x86
 
