@@ -24,7 +24,7 @@ const correponding = new Map<string,number>([
     ["us-group",13],
     ])
 // if assignees' team include any special team, we will add not delete any project
-const specialTeams = new Array<string>("qa")
+const specialTeams = new Array<string>("qa","pm")
 // if assignees include any special user, we will add default project to this issue
 const specialUsers = new Array<string>("matrix-meow")
 
