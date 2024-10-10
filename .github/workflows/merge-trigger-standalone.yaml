@@ -24,8 +24,7 @@ jobs:
         uses: matrixorigin/CI/actions/setup-env@main
         with:
           setup-java: false
-      - name: GO ENV
-        run: go env
+          cache: true
 
       - name: Add cn.txn
         run: |

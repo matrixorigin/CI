@@ -330,7 +330,7 @@ jobs:
           issue_number: ${{ github.event.issue.number }}  # 获取当前操作的issue number
           assignees: 'sukki37'  #issue指定分配对象
           LABELS: 'no-pr-linked'  #相关自定义label配置 形如 label1,label2
-          LABELS_NEED: 'tech-request,feature,Feature,kind/feature,attention/feature-incomplete,bug/ut,Bug fix,kind/bug,kind/subtask,kind/tech-request'  # 指定需要排查的标签 label1,label2,...
+          LABELS_NEED: 'kind/bug,Bug fix,bug_fix,bug/ut'  # 指定需要排查的标签 label1,label2,...
         uses: matrixorigin/CI/actions/reopen-without-PR@main
       - name: WeChat Work notification
         if: ${{ failure() || cancelled() || steps.step1.outputs.send == 'yes' }}

@@ -334,7 +334,7 @@ if __name__ == "__main__":
     logging.info(f"total_modified_lines: {total_modified_lines}, covered_modified_lines: {covered_modified_lines}, coverage_percentage:{coverage_percentage}")
 
     if coverage_percentage <= args.minimal_coverage:
-        logging.warning(f"The code coverage:{coverage_percentage} is below {args.minimal_coverage}, not approved.")
+        logging.warning(f"The code coverage:{coverage_percentage} is below or equal {args.minimal_coverage}, not approved.")
         sys.exit(1)
     
     logging.info(f"The code coverage:{coverage_percentage} is above {args.minimal_coverage}, pass.")
