@@ -104,9 +104,11 @@ jobs:
         if: ${{ always() }}
         continue-on-error: true
         run: |
+          set +e
           mkdir -p ${{ github.workspace }}/upload
           rm -rf ./mo-tester/.git
           rm -rf ./mo-tester/lib
+          mv ${{ github.workspace }}/head/mo-service.r1.log ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/head/mo-service.log ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/mo-tester ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/head/dump-stacks* ${{ github.workspace }}/upload/
