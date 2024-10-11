@@ -16,6 +16,7 @@ jobs:
     name: Validate GitHub Actions workflows
     permissions:
       contents: read
+    environment: ci
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
