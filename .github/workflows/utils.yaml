@@ -81,7 +81,7 @@ jobs:
     name: PR Unit and BVT Test Coverage
     needs: [check_organization_user]
     environment: ci
-    runs-on: ubuntu-22.04
+    runs-on: amd64-mo-guangzhou-2xlarge16
     steps:
       - uses: actions/checkout@v4
         with:

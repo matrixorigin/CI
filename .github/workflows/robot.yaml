@@ -126,7 +126,7 @@ jobs:
   nightly-check:
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     environment: ci
-    runs-on: ubuntu-22.04
+    runs-on: amd64-mo-guangzhou-2xlarge16
     steps:
       - uses: actions/checkout@v4
         with:
