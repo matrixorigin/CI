@@ -3,6 +3,7 @@ import os
 import sys
 import logging
 import argparse
+import fnmatch
 
 # 设置日志配置
 logging.basicConfig(
@@ -72,11 +73,13 @@ def merge_coverage_files(output_path, *coverage_files):
     
     return total_blocks, covered_blocks, coverage_percentage
 
-def parse_diff(diff_path):
+def parse_diff(diff_path, ignore_path):
     """解析diff文件，获取新增和修改的行号和列范围，仅处理 .go 文件"""
     logging.info(f"Starting to parse diff file: {diff_path}")
     modified_lines = {}
 
+    logging.info(f"load skip files: {ignore_path}")
+    ignore_patterns, include_patterns = parse_ignore_file(ignore_path)
     current_file = None
     current_line_number = None
 
@@ -85,25 +88,8 @@ def parse_diff(diff_path):
             for line in diff_file:
                 if line.startswith('+++ b/'):
                     current_file = normalize_path(line[6:].strip(), '')
-                    if not current_file.endswith('.go'):
-                        logging.info(f"Ignoring non-Go file: {current_file}")
-                        current_file = None  # 忽略非 .go 文件
-                        continue
-                    elif current_file.endswith('.pb.go'):
-                        logging.info(f"Ignoring auto-generated pb.go file: {current_file}")
-                        current_file = None  # 忽略自动生成的 .go 文件
-                        continue
-                    elif 'pkg/frontend/test' in current_file:
-                        logging.info(f"Ignoring auto-generated test go file: {current_file}")
-                        current_file = None  # 忽略自动生成的 .go 文件
-                        continue
-                    elif 'pkg/vm/engine/tae/db/testutil' in current_file:
-                        logging.info(f"Ignoring test go file: {current_file}")
-                        current_file = None  # 忽略测试 .go 文件
-                        continue
-                    elif 'pkg/vm/engine/test' in current_file:
-                        logging.info(f"Ignoring test go file: {current_file}")
-                        current_file = None  # 忽略测试 .go 文件
+                    if should_ignore(current_file, ignore_patterns, include_patterns):
+                        current_file = None
                         continue
                     logging.info(f"Processing file: {current_file}")
                 
@@ -264,10 +250,10 @@ def normalize_path(path, prefix='github.com/matrixorigin/matrixone/'):
         return path[len(prefix):]
     return os.path.normpath(path)
 
-def diff_coverage(diff_path, coverage_path, output_path='pr_coverage.out'):
+def diff_coverage(diff_path, coverage_path, output_path='pr_coverage.out', ignore_path='.ignore'):
     try:
         # 解析diff文件，获取修改和新增的行号
-        modified_lines = parse_diff(diff_path)
+        modified_lines = parse_diff(diff_path, ignore_path)
         logging.debug(f"[modified_lines]{modified_lines}")
 
         if len(modified_lines) == 0:
@@ -296,6 +282,44 @@ def is_valid_code_segment(segment):
     if not stripped_segment or stripped_segment.startswith("//") or stripped_segment.startswith("#"):
         return False
     return True
+
+def parse_ignore_file(ignore_file_path):
+    ignore_patterns = []
+    include_patterns = []
+
+    try:
+        with open(ignore_file_path, "r")as f:
+            ignore_file_content = f.read()
+    except Exception as e:
+        logging.error(f"Error reading ignore file {ignore_file_path}: {e}")
+        raise
+
+    lines = ignore_file_content.splitlines()
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        if line.startswith('!'):
+            include_patterns.append(line[1:])
+        else:
+            ignore_patterns.append(line)
+
+    return ignore_patterns, include_patterns
+
+def should_ignore(filename, ignore_patterns, include_patterns):
+    for pattern in include_patterns:
+        if _matches_pattern(filename, pattern):
+            for pattern in ignore_patterns:
+                if _matches_pattern(filename, pattern):
+                    logging.info(f"Ignoring file: {filename} -- due to ignore pattern {pattern}")
+                    return True
+            return False
+    logging.info(f"Ignoring file: {filename} -- don`t match include patterns")
+    return True
+
+def _matches_pattern(filename, pattern):
+    regex = re.compile(fnmatch.translate(pattern))
+    return regex.match(filename) is not None
 
 
 if __name__ == "__main__":
@@ -336,5 +360,5 @@ if __name__ == "__main__":
     if coverage_percentage <= args.minimal_coverage:
         logging.warning(f"The code coverage:{coverage_percentage} is below or equal {args.minimal_coverage}, not approved.")
         sys.exit(1)
-    
+
     logging.info(f"The code coverage:{coverage_percentage} is above {args.minimal_coverage}, pass.")
