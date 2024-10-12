@@ -41,6 +41,7 @@ permissions:
 
 jobs:
   dockerhub:
+    environment: ci
     runs-on: ubuntu-22.04
 
     steps:

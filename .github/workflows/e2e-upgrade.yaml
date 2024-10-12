@@ -14,6 +14,7 @@ env:
 
 jobs:
   upgrade-ci-target-linux-amd64:
+    environment: ci
     runs-on: ubuntu-22.04
     name: Compatibility Test With Target on Linux/x64(LAUNCH)
     timeout-minutes: 60
@@ -166,6 +167,7 @@ jobs:
           retention-days: 7
 
   upgrade-ci-release-linux-amd64:
+    environment: ci
     runs-on: ubuntu-22.04
     name: Compatibility Test With Release on Linux/x64(LAUNCH)
     timeout-minutes: 60

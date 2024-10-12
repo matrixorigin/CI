@@ -25,6 +25,7 @@ on:
 
 jobs:
   docker_image_build:
+    environment: ci
     runs-on: amd64-mo-shanghai-dind
     if: ${{ github.event.pull_request.merged == true }}
     timeout-minutes: 30
@@ -69,6 +70,7 @@ jobs:
   setup_mo_test_env:
     if: ${{ always() && !cancelled() && needs.docker_image_build.result == 'success' }}
     needs: docker_image_build
+    environment: ci
     runs-on: amd64-mo-guangzhou-medium8
     timeout-minutes: 40
     name: SETUP MO TEST ENV
@@ -222,6 +224,7 @@ jobs:
   bvt_test:
     if: ${{ always() && !cancelled() && needs.setup_mo_test_env.result == 'success' }}
     name: MO CHECKIN BVT TEST
+    environment: ci
     runs-on: amd64-mo-guangzhou-medium8
     needs: [setup_mo_test_env,docker_image_build]
     steps:
@@ -274,6 +277,7 @@ jobs:
   ssb_and_tpch_test:
     if: ${{ always() && !cancelled() && needs.setup_mo_test_env.result == 'success' }}
     name: MO CHECKIN SSB AND TPCH TEST
+    environment: ci
     runs-on: amd64-mo-guangzhou-2xlarge16
     needs: [setup_mo_test_env,bvt_test]
     steps:
@@ -495,6 +499,7 @@ jobs:
   sysbench_test:
     if: ${{ always() && !cancelled() && needs.setup_mo_test_env.result == 'success' }}
     name: SYSBENCH TEST
+    environment: ci
     runs-on: amd64-mo-guangzhou-2xlarge16
     needs: [setup_mo_test_env,bvt_test]
     steps:
@@ -614,6 +619,7 @@ jobs:
   tpcc_test:
     if: ${{ always() && !cancelled() && needs.setup_mo_test_env.result == 'success'}}
     name: TPCC TEST
+    environment: ci
     runs-on: amd64-mo-guangzhou-2xlarge16
     needs: [setup_mo_test_env,bvt_test]
     steps:
@@ -757,6 +763,7 @@ jobs:
   clean_up_env:
     if: ${{ always() && github.event.pull_request.merged == true }}
     name: CLEAN ENV AND NOTICE
+    environment: ci
     runs-on: amd64-mo-guangzhou-medium8
     needs: [docker_image_build,setup_mo_test_env,bvt_test,ssb_and_tpch_test,sysbench_test,tpcc_test]
     steps:
