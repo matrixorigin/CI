@@ -236,6 +236,20 @@ jobs:
           cd $GITHUB_WORKSPACE
           python $GITHUB_WORKSPACE/parse_coverage.py -coverage_files $GITHUB_WORKSPACE/matrixone/ut_coverage.out $GITHUB_WORKSPACE/matrixone/bvt_coverage.out -diff_path $GITHUB_WORKSPACE/matrixone/diff.patch
 
+      - name: Check Coverage(compare with branch main)
+        uses: matrixorigin/CI/actions/check-coverage@main
+        with:
+          type: open
+          ut_coverage_file: ${{ github.workspace }}/coverage_downloads/ut_coverage_sort.out
+          bvt_coverage_file: ${{ github.workspace }}/coverage_downloads/bvt_coverage.out
+          commit_id: ${{ github.event.pull_request.head.sha }}
+          branch: 'main'
+          mo_host: ${{ secrets.EE_DB_ADDR }}
+          mo_port: ${{ secrets.EE_DB_PORT }}
+          mo_user: ${{ secrets.EE_DB_USER }}
+          mo_password: ${{ secrets.EE_DB_PASSWORD }}
+          mo_database: ${{ secrets.EE_DB_DB }}
+
       - name: Compress final result files
         id: compress_result
         if: ${{ always() && !cancelled() }}
@@ -270,20 +284,6 @@ jobs:
           path: |
             ${{ github.workspace }}/coverage_downloads/final_result_files.zip
           retention-days: 7
-
-      - name: Check Coverage(compare with branch main)
-        uses: matrixorigin/CI/actions/check-coverage@main
-        with:
-          type: open
-          ut_coverage_file: ${{ github.workspace }}/all_middle_files/ut_coverage_sort.out
-          bvt_coverage_file: ${{ github.workspace }}/all_middle_files/bvt_coverage.out
-          commit_id: ${{ github.event.pull_request.head.sha }}
-          branch: 'main'
-          mo_host: ${{ secrets.EE_DB_ADDR }}
-          mo_port: ${{ secrets.EE_DB_PORT }}
-          mo_user: ${{ secrets.EE_DB_USER }}
-          mo_password: ${{ secrets.EE_DB_PASSWORD }}
-          mo_database: ${{ secrets.EE_DB_DB }}
 
   pr-size-label:
     runs-on: ubuntu-22.04
