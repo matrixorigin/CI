@@ -7,20 +7,11 @@ on:
       TOKEN_ACTION:
         description: "A token passed from the caller workflow"
         required: true
-      S3ENDPOINT:
-        description: "S3ENDPOINT For Test"
+      TEST_S3FS_ALIYUN:
+        description: "TEST_S3FS_ALIYUN For UT Test"
         required: true
-      S3REGION:
-        description: "S3REGION For Test"
-        required: true
-      S3APIKEY:
-        description: "S3APIKEY For Test"
-        required: true
-      S3APISECRET:
-        description: "S3APISECRET For Test"
-        required: true
-      S3BUCKET:
-        description: "S3BUCKET For Test"
+      TEST_S3FS_QCLOUD:
+        description: "TEST_S3FS_QCLOUD For UT Test"
         required: true
       DOCU_GROUP_HOOK:
         description: "DOCU_GROUP_HOOK For Notice"
@@ -137,6 +128,8 @@ jobs:
         timeout-minutes: 45
         run: |
           cd $GITHUB_WORKSPACE/matrixone
+          export TEST_S3FS_ALIYUN=${{ secrets.TEST_S3FS_ALIYUN }}
+          export TEST_S3FS_QCLOUD=${{ secrets.TEST_S3FS_QCLOUD }}
           test_scope=$(go list ./... | grep -v 'driver\|engine/aoe\|engine/memEngine\|pkg/catalog')
           make clean && make config && make cgo
           echo "ut start"
