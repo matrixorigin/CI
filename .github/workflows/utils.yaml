@@ -22,6 +22,7 @@ on:
 
 jobs:
   check_organization_user:
+    environment: ci
     runs-on: ubuntu-22.04
     outputs:
       in_org: ${{ steps.check_in_org.outputs.in_org }}
@@ -70,6 +71,7 @@ jobs:
     if: ${{ needs.check_organization_user.outputs.safe_label == '1' || needs.check_organization_user.outputs.in_org == '1' }}
     name: PR Unit and BVT Test Coverage
     needs: [check_organization_user]
+    environment: ci
     runs-on: amd64-mo-guangzhou-2xlarge16
     steps:
       - uses: actions/checkout@v4
@@ -250,6 +252,7 @@ jobs:
           retention-days: 7
 
   pr-size-label:
+    environment: ci
     runs-on: ubuntu-22.04
     needs: [check_organization_user]
     steps:
@@ -269,6 +272,7 @@ jobs:
             }
 
   docu_issue_check:
+    environment: ci
     runs-on: ubuntu-22.04
     needs: [check_organization_user]
     if: ${{ github.event.action == 'opened' }}

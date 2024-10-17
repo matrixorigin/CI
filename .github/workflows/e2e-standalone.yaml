@@ -6,6 +6,7 @@ on:
 jobs:
   bvt-linux-x86:
     if: ${{ !github.event.pull_request.draft }}
+    environment: ci
     runs-on: ubuntu-22.04
     name: e2e BVT Test on Linux/x64(LAUNCH,Optimistic)
     timeout-minutes: 90

@@ -22,6 +22,7 @@ on:
 
 jobs:
   ut-linux-x86:
+    environment: ci
     runs-on: ubuntu-22.04
     name: UT Test on Ubuntu/x86
     steps:
@@ -92,6 +93,7 @@ jobs:
   ut-mac-x86:
     #if: ${{ !github.event.pull_request.draft }}
     if: ${{ false }}
+    environment: ci
     runs-on: macos-12
     name: UT Test on Darwin/x86
 
@@ -126,6 +128,7 @@ jobs:
           find scratch -name "**-UT-Count.out" -exec cat {} \;
 
   sca:
+    environment: ci
     runs-on: ubuntu-22.04
     name: SCA Test on Ubuntu/x86
     steps:
