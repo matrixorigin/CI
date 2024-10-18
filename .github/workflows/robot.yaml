@@ -156,6 +156,7 @@ jobs:
           path: ./mo-tester
           ref: main
       - name: Start Unit Test
+        id: ut_test
         timeout-minutes: 120
         run: |
           set -o pipefail
@@ -283,7 +284,7 @@ jobs:
         with:
           msgtype: markdown
           mentioned_list: '["@all"]'
-          content: "<font color=\"warning\">Nightly Code Quality - ${{ env.Today }} </font>\nUT Coverage Summary:<font color=\"warning\">${{ env.UT_CODE_COVERAGE }}</font>\nBVT Coverage Summary:<font color=\"warning\">${{ env.BVT_CODE_COVERAGE }}</font>\nGeneral Coverage Summary:<font color=\"warning\">${{ env.GENERAL_CODE_COVERAGE }}</font>\nFor details, please visit [Action Run](${{ env.Url }})\n"
+          content: "<font color=\"warning\">Nightly Code Quality - ${{ env.Today }} </font>\nUT result:${{ steps.ut_test.conclusion }}\nBVT result:${{ steps.bvt_on_pr_version.conclusion }}\nUT Coverage Summary:<font color=\"warning\">${{ env.UT_CODE_COVERAGE }}</font>\nBVT Coverage Summary:<font color=\"warning\">${{ env.BVT_CODE_COVERAGE }}</font>\nGeneral Coverage Summary:<font color=\"warning\">${{ env.GENERAL_CODE_COVERAGE }}</font>\nFor details, please visit [Action Run](${{ env.Url }})\n"
       - name: WeChat Work notification
         if: ${{ always() && !cancelled() }}
         id: detail-notification
