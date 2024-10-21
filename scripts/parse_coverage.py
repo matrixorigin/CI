@@ -105,6 +105,18 @@ def parse_diff(diff_path):
                         logging.info(f"Ignoring test go file: {current_file}")
                         current_file = None  # 忽略测试 .go 文件
                         continue
+                    elif 'pkg/tests/service' in current_file:
+                        logging.info(f"Ignoring test go file: {current_file}")
+                        current_file = None  # 忽略测试 .go 文件
+                        continue
+                    elif 'pkg/tests/txn' in current_file:
+                        logging.info(f"Ignoring test go file: {current_file}")
+                        current_file = None  # 忽略测试 .go 文件
+                        continue
+                    elif 'pkg/tests/upgrade' in current_file:
+                        logging.info(f"Ignoring test go file: {current_file}")
+                        current_file = None  # 忽略测试 .go 文件
+                        continue
                     logging.info(f"Processing file: {current_file}")
                 
                 elif line.startswith('@@ ') and current_file:
@@ -297,6 +309,39 @@ def is_valid_code_segment(segment):
         return False
     return True
 
+def parse_file_coverage(minimal_coverage,file='./pr_coverage.out'):
+    try:
+        exec_dict=dict()
+        not_exec_dict=dict()
+        with open(file, 'r') as f:
+            for line in f:
+                if line.startswith('mode:'):
+                    continue
+                parts=line.split(':')
+                if len(parts) < 2:
+                    continue
+                file_name = normalize_path(parts[0])
+                if not exec_dict.get(file_name):
+                    exec_dict[file_name]=0
+                    not_exec_dict[file_name]=0
+                exec_status=int(parts[1].split()[-1])
+                if exec_status > 0:
+                    exec_dict[file_name]+=1
+                else:
+                    not_exec_dict[file_name]+=1
+        if len(exec_dict) != len(not_exec_dict):
+            logging.error("exec_dict and not_exec_dict length not match")
+            return
+        for i in exec_dict.keys():
+            coverage = exec_dict[i] / (exec_dict[i] + not_exec_dict[i]) * 100
+            if coverage < minimal_coverage*100:
+              logging.warning(f"filename:{file_name} ,coverage {coverage}% is blow or equal {minimal_coverage}%")
+              continue
+            logging.info(f"filename:{i},  coverage:{coverage}%")
+
+    except Exception as e:
+        logging.error(f"An error parse_file_coverage: {e}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Merge coverage files and calculate coverage based on diff.")
@@ -334,6 +379,7 @@ if __name__ == "__main__":
     logging.info(f"total_modified_lines: {total_modified_lines}, covered_modified_lines: {covered_modified_lines}, coverage_percentage:{coverage_percentage}")
 
     if coverage_percentage <= args.minimal_coverage:
+        parse_file_coverage(args.minimal_coverage)
         logging.warning(f"The code coverage:{coverage_percentage} is below or equal {args.minimal_coverage}, not approved.")
         sys.exit(1)
     
