@@ -320,8 +320,8 @@ jobs:
         timeout-minutes: 2
         id: account_for_ssb_and_tpch
         run: |
-          mysql -h ${{ needs.setup_mo_test_env.outputs.mo_svc_ip }} -P 6001 -udump -p111 -e "create account ssb_tpch_test admin_name = 'admin' identified by '111' comment 'for ssb and tpch test';"
-          echo "ssb_tpch_account=ssb_tpch_test:admin" >> $GITHUB_OUTPUT
+          #mysql -h ${{ needs.setup_mo_test_env.outputs.mo_svc_ip }} -P 6001 -udump -p111 -e "create account ssb_tpch_test admin_name = 'admin' identified by '111' comment 'for ssb and tpch test';"
+          echo "ssb_tpch_account=dump" >> $GITHUB_OUTPUT
           echo "ssb_tpch_password=111" >> $GITHUB_OUTPUT
 
       - name: Enable CN TXN Trace
