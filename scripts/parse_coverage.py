@@ -117,6 +117,10 @@ def parse_diff(diff_path):
                         logging.info(f"Ignoring test go file: {current_file}")
                         current_file = None  # 忽略测试 .go 文件
                         continue
+                    elif 'pkg/util/metric' in current_file:
+                        logging.info(f"Ignoring test go file: {current_file}")
+                        current_file = None  # 忽略测试 .go 文件
+                        continue
                     logging.info(f"Processing file: {current_file}")
                 
                 elif line.startswith('@@ ') and current_file:
