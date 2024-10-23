@@ -121,6 +121,10 @@ def parse_diff(diff_path):
                         logging.info(f"Ignoring test go file: {current_file}")
                         current_file = None  # 忽略测试 .go 文件
                         continue
+                    elif 'pkg/common/morpc/examples' in current_file:
+                        logging.info(f"Ignoring test go file: {current_file}")
+                        current_file = None  # 忽略测试 .go 文件
+                        continue
                     # 没有参与ut测试的文件进行忽略
                     elif 'driver' in current_file:
                         logging.info(f"Ignoring test go file: {current_file}")
