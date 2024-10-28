@@ -155,6 +155,12 @@ jobs:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
+      - name: Add cn.txn
+        run: |
+          cd $GITHUB_WORKSPACE/matrixone
+          echo "[cn.txn]" >> ./etc/launch/cn.toml
+          echo "  enable-leak-check = 1" >> ./etc/launch/cn.toml
+          echo '  max-active-ages = "2m"'>> ./etc/launch/cn.toml
       - name: Start Unit Test
         id: ut_test
         timeout-minutes: 120
@@ -177,6 +183,10 @@ jobs:
           export GOCOVERDIR=$GITHUB_WORKSPACE/matrixone
           go build -cover "$GOLDFLAGS" -o mo-service ./cmd/mo-service/
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/matrixone launch
+      - name: Update BVT SQL Timeout
+        run: |
+          cd $GITHUB_WORKSPACE/mo-tester
+          sed -i "s/socketTimeout:.*/socketTimeout: 300000/g" mo.yml
       - name: Start BVT Test
         if: ${{ always() && !cancelled() }}
         id: bvt_on_pr_version
