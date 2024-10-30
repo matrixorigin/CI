@@ -10,6 +10,14 @@
 # 在保留文件的基础上进行忽略
 *.pb.go
 pkg/frontend/test/*
-pkg/sql/parsers/dialect/mysql/*
 pkg/vm/engine/tae/db/testutil/*
 pkg/vm/engine/test/*
+pkg/tests/service/*
+pkg/tests/txn/*
+pkg/tests/upgrade/*
+pkg/util/metric/*
+pkg/common/morpc/examples/*
+*driver*
+*engine/aoe*
+*engine/memEngine*
+*pkg/catalog*
