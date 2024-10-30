@@ -37,7 +37,7 @@ jobs:
     steps:
       - name: Issue Add  Milestone
         if: contains(github.event.issue.labels.*.name, 'kind/bug')
-        uses: matrixorigin/CI/actions/milestone-add-action@release/2.0-dev
+        uses: matrixorigin/CI/actions/milestone-add-action@main
         with:
           action-token: ${{ secrets.TOKEN_ACTION }}
           milestone: "1.3.0"
@@ -111,13 +111,13 @@ jobs:
     if: github.event_name == 'issues' && github.event.action == 'assigned'
     steps:
       - name: assign issue
-        uses: matrixorigin/CI/actions/assign-issue@release/2.0-dev
+        uses: matrixorigin/CI/actions/assign-issue@main
         with:
           GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
           Issue_ID: ${{ github.event.issue.number }}
           GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-      - uses: matrixorigin/CI/actions/assign-role-label@release/2.0-dev
+      - uses: matrixorigin/CI/actions/assign-role-label@main
         name: Add Label for Assignee Role
         with:
           github-token: ${{ secrets.TOKEN_ACTION }}
@@ -312,7 +312,7 @@ jobs:
     if: ${{ github.event_name == 'issues' && github.event.action == 'assigned' }}
     steps:
       - name: Remove Labels
-        uses: matrixorigin/CI/actions/rm-labels@release/2.0-dev
+        uses: matrixorigin/CI/actions/rm-labels@main
         id: step1
         env:
           BASE_URL: ${{ github.api_url }}
@@ -342,7 +342,7 @@ jobs:
           assignees: 'sukki37'  #issue指定分配对象
           LABELS: 'no-pr-linked'  #相关自定义label配置 形如 label1,label2
           LABELS_NEED: 'kind/bug,Bug fix,bug_fix,bug/ut'  # 指定需要排查的标签 label1,label2,...
-        uses: matrixorigin/CI/actions/reopen-without-PR@release/2.0-dev
+        uses: matrixorigin/CI/actions/reopen-without-PR@main
       - name: WeChat Work notification
         if: ${{ failure() || cancelled() || steps.step1.outputs.send == 'yes' }}
         id: notification

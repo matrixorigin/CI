@@ -76,7 +76,7 @@ jobs:
           asset_name: mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64.zip
           asset_content_type: application/zip
       - name: Upload Artifact to COS
-        uses: matrixorigin/CI/actions/upload-artifact-oss@release/2.0-dev
+        uses: matrixorigin/CI/actions/upload-artifact-oss@main
         with:
           access_key: ${{ secrets.TENCENT_AK }}
           secret_key: ${{ secrets.TENCENT_SK }}
@@ -148,7 +148,7 @@ jobs:
           asset_name: mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64.zip
           asset_content_type: application/zip
       - name: Upload Artifact to COS
-        uses: matrixorigin/CI/actions/upload-artifact-oss@release/2.0-dev
+        uses: matrixorigin/CI/actions/upload-artifact-oss@main
         with:
           access_key: ${{ secrets.TENCENT_AK }}
           secret_key: ${{ secrets.TENCENT_SK }}
@@ -438,7 +438,7 @@ jobs:
           asset_name: mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64.zip
           asset_content_type: application/zip
       - name: Upload Artifact to COS
-        uses: matrixorigin/CI/actions/upload-artifact-oss@release/2.0-dev
+        uses: matrixorigin/CI/actions/upload-artifact-oss@main
         with:
           access_key: ${{ secrets.TENCENT_AK }}
           secret_key: ${{ secrets.TENCENT_SK }}
@@ -507,7 +507,7 @@ jobs:
           asset_name: mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64.zip
           asset_content_type: application/zip
       - name: Upload Artifact to COS
-        uses: matrixorigin/CI/actions/upload-artifact-oss@release/2.0-dev
+        uses: matrixorigin/CI/actions/upload-artifact-oss@main
         with:
           access_key: ${{ secrets.TENCENT_AK }}
           secret_key: ${{ secrets.TENCENT_SK }}
