@@ -37,10 +37,24 @@ jobs:
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
 
+      - name: Add cn.txn for head
+        run: |
+          cd $GITHUB_WORKSPACE/head
+          echo "[cn.txn]" >> ./etc/launch/cn.toml
+          echo "  enable-leak-check = 1" >> ./etc/launch/cn.toml
+          echo '  max-active-ages = "2m"'>> ./etc/launch/cn.toml
+
       - name: Build MatrixOne for head
         run: |
           cd $GITHUB_WORKSPACE/head && make clean && make build
           git rev-parse --short HEAD
+
+      - name: Add cn.txn for upstream
+        run: |
+          cd $GITHUB_WORKSPACE/upstream
+          echo "[cn.txn]" >> ./etc/launch/cn.toml
+          echo "  enable-leak-check = 1" >> ./etc/launch/cn.toml
+          echo '  max-active-ages = "2m"'>> ./etc/launch/cn.toml
 
       - name: Build MatrixOne for upstream
         run: |
@@ -67,7 +81,10 @@ jobs:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
-
+      - name: Update BVT SQL Timeout
+        run: |
+          cd $GITHUB_WORKSPACE/mo-tester
+          sed -i "s/socketTimeout:.*/socketTimeout: 300000/g" mo.yml
       - name: Start BVT Test for Target Branch
         id: bvt_on_latest_main_version
         run: |
@@ -119,7 +136,10 @@ jobs:
           fi
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/workspace launch;
           sleep 60;
-
+      - name: Update BVT SQL Timeout for Head Branch
+        run: |
+          cd $GITHUB_WORKSPACE/mo-tester
+          sed -i "s/socketTimeout:.*/socketTimeout: 300000/g" mo.yml
       - name: Start BVT Test for Head Branch
         id: bvt_on_latest_head_version
         run: |
@@ -204,10 +224,24 @@ jobs:
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
 
+      - name: Add cn.txn for head
+        run: |
+          cd $GITHUB_WORKSPACE/head
+          echo "[cn.txn]" >> ./etc/launch/cn.toml
+          echo "  enable-leak-check = 1" >> ./etc/launch/cn.toml
+          echo '  max-active-ages = "2m"'>> ./etc/launch/cn.toml
+
       - name: Build MatrixOne for head
         run: |
           cd $GITHUB_WORKSPACE/head && make clean && make build
           git rev-parse --short HEAD
+
+      - name: Add cn.txn for upstream release
+        run: |
+          cd $GITHUB_WORKSPACE/upstream
+          echo "[cn.txn]" >> ./etc/launch/cn.toml
+          echo "  enable-leak-check = 1" >> ./etc/launch/cn.toml
+          echo '  max-active-ages = "2m"'>> ./etc/launch/cn.toml
 
       - name: Build MatrixOne for upstream release
         run: |
@@ -234,7 +268,10 @@ jobs:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
-
+      - name: Update BVT SQL Timeout for Release ${{ inputs.release-version }}
+        run: |
+          cd $GITHUB_WORKSPACE/mo-tester
+          sed -i "s/socketTimeout:.*/socketTimeout: 300000/g" mo.yml
       - name: Start BVT Test for Release ${{ inputs.release-version }}
         id: bvt_on_latest_main_version
         run: |
@@ -288,7 +325,10 @@ jobs:
           fi
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/workspace launch;
           sleep 60;
-
+      - name: Update BVT SQL Timeout for Head Ref
+        run: |
+          cd $GITHUB_WORKSPACE/mo-tester
+          sed -i "s/socketTimeout:.*/socketTimeout: 300000/g" mo.yml
       - name: Start BVT Test for Head Ref
         id: bvt_on_latest_head_version
         run: |
