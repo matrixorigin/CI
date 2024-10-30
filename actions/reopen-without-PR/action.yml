@@ -1,10 +1,7 @@
-name: Reopen issue Without PR
+name: reopen-without-PR
 author: rosyrain
 description: When an issue is closed, if there is no associated pull_request, the labels are automatically added and assigned to the specified member.
 inputs:
-  owner:
-    description: The owner of the repository
-    required: true
   repository:
     description: The repository`s name
     required: true
@@ -23,7 +20,18 @@ inputs:
     default: 'no-pr-linked'
   labels_need:
     description: Special labels that need to be handled
+    required: false
     default: 'tech-request,feature,Feature,kind/feature,attention/feature-incomplete,bug/ut,Bug fix,kind/bug,kind/subtask,kind/tech-request'
+  whitelist:
+    description: whitelist who can close issue
+    required: false
+    default: "sukki77,fengttt,aressu1985"
+  issue_owner:
+    require: true
+    description: issue owner
+  close_user:
+    description: close issue user
+    require: true
 outputs:
   send:
     description: Whether to send a notification

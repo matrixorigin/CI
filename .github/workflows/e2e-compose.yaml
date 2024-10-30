@@ -6,6 +6,7 @@ on:
 jobs:
   bvt-docker-compose-push:
     if: ${{ !github.event.pull_request.draft }}
+    environment: ci
     runs-on: ubuntu-22.04
     name: multi cn e2e bvt test docker compose(Optimistic/PUSH)
     timeout-minutes: 60
@@ -68,6 +69,10 @@ jobs:
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
 
+      - name: Update BVT SQL Timeout
+        run: |
+          cd $GITHUB_WORKSPACE/mo-tester
+          sed -i "s/socketTimeout:.*/socketTimeout: 300000/g" mo.yml
       - name: Start BVT Test
         id: bvt_on_pr_version
         run: |
@@ -110,6 +115,7 @@ jobs:
 
   multi-CN-bvt-docker-compose-pessimistic:
     if: ${{ !github.event.pull_request.draft }}
+    environment: ci
     runs-on: ubuntu-22.04
     name: multi cn e2e bvt test docker compose(PESSIMISTIC)
     timeout-minutes: 60
@@ -156,6 +162,11 @@ jobs:
 
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
+
+      - name: Update BVT SQL Timeout
+        run: |
+          cd $GITHUB_WORKSPACE/mo-tester
+          sed -i "s/socketTimeout:.*/socketTimeout: 300000/g" mo.yml
 
       - name: Start BVT Test
         id: bvt_on_pr_version
