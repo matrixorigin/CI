@@ -19,7 +19,7 @@ jobs:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
       - name: Set up Go And Java
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/2.0-dev
       - name: Build MatrixOne
         run: |
           cd $GITHUB_WORKSPACE/head && make clean && make build
@@ -142,7 +142,7 @@ jobs:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
       - name: Set up Go And Java
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/2.0-dev
       - name: Build MatrixOne
         run: |
           cd $GITHUB_WORKSPACE/head && make clean && make build
@@ -230,7 +230,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
 
       - name: Set up Go And Java
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/2.0-dev
 
       - name: Build MatrixOne
         run: |

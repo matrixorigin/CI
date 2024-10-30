@@ -45,7 +45,7 @@ jobs:
           echo ${{ steps.get_release.outputs.upload_url }}
           echo ${{ steps.get_release.outputs.tag_name }}
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/2.0-dev
         with:
           setup-java: false
       - name: Build normal
@@ -76,7 +76,7 @@ jobs:
           asset_name: mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64.zip
           asset_content_type: application/zip
       - name: Upload Artifact to COS
-        uses: matrixorigin/CI/actions/upload-artifact-oss@main
+        uses: matrixorigin/CI/actions/upload-artifact-oss@release/2.0-dev
         with:
           access_key: ${{ secrets.TENCENT_AK }}
           secret_key: ${{ secrets.TENCENT_SK }}
@@ -115,7 +115,7 @@ jobs:
           echo ${{ steps.get_release.outputs.upload_url }}
           echo ${{ steps.get_release.outputs.tag_name }}
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/2.0-dev
         with:
           setup-java: false
       - name: Build normal
@@ -148,7 +148,7 @@ jobs:
           asset_name: mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64.zip
           asset_content_type: application/zip
       - name: Upload Artifact to COS
-        uses: matrixorigin/CI/actions/upload-artifact-oss@main
+        uses: matrixorigin/CI/actions/upload-artifact-oss@release/2.0-dev
         with:
           access_key: ${{ secrets.TENCENT_AK }}
           secret_key: ${{ secrets.TENCENT_SK }}
@@ -187,7 +187,7 @@ jobs:
           echo ${{ steps.get_release.outputs.upload_url }}
           echo ${{ steps.get_release.outputs.tag_name }}
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/2.0-dev
         with:
           setup-java: false
       - name: Build normal
@@ -305,7 +305,7 @@ jobs:
           echo ${{ steps.get_release.outputs.upload_url }}
           echo ${{ steps.get_release.outputs.tag_name }}
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/2.0-dev
         with:
           setup-java: false
       - name: Check go version
@@ -408,7 +408,7 @@ jobs:
           echo ${{ steps.get_release.outputs.upload_url }}
           echo ${{ steps.get_release.outputs.tag_name }}
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/2.0-dev
         with:
           setup-java: false
       - name: Build normal
@@ -438,7 +438,7 @@ jobs:
           asset_name: mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64.zip
           asset_content_type: application/zip
       - name: Upload Artifact to COS
-        uses: matrixorigin/CI/actions/upload-artifact-oss@main
+        uses: matrixorigin/CI/actions/upload-artifact-oss@release/2.0-dev
         with:
           access_key: ${{ secrets.TENCENT_AK }}
           secret_key: ${{ secrets.TENCENT_SK }}
@@ -477,7 +477,7 @@ jobs:
           echo ${{ steps.get_release.outputs.upload_url }}
           echo ${{ steps.get_release.outputs.tag_name }}
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/2.0-dev
         with:
           setup-java: false
       - name: Build normal
@@ -507,7 +507,7 @@ jobs:
           asset_name: mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64.zip
           asset_content_type: application/zip
       - name: Upload Artifact to COS
-        uses: matrixorigin/CI/actions/upload-artifact-oss@main
+        uses: matrixorigin/CI/actions/upload-artifact-oss@release/2.0-dev
         with:
           access_key: ${{ secrets.TENCENT_AK }}
           secret_key: ${{ secrets.TENCENT_SK }}

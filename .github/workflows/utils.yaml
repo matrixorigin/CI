@@ -100,7 +100,7 @@ jobs:
           exit 1
 
       - name: Set up Go and JAVA
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/2.0-dev
         with:
           setup-java: false
       - name: Set Variables
@@ -270,7 +270,7 @@ jobs:
     needs: [check_organization_user]
     steps:
       - name: size-label
-        uses: "matrixorigin/CI/actions/label-size-action@main"
+        uses: "matrixorigin/CI/actions/label-size-action@release/2.0-dev"
         with:
           size_token: ${{ secrets.TOKEN_ACTION }}
           ignore: ".md,.pb.go"
@@ -290,7 +290,7 @@ jobs:
     needs: [check_organization_user]
     if: ${{ github.event.action == 'opened' }}
     steps:
-      - uses: matrixorigin/CI/actions/pull-issue-reviewer@main
+      - uses: matrixorigin/CI/actions/pull-issue-reviewer@release/2.0-dev
         with:
           token_action: ${{ secrets.TOKEN_ACTION }}
           uri_notice: ${{ secrets.DOCU_GROUP_HOOK }}
@@ -304,7 +304,7 @@ jobs:
   #   runs-on: ubuntu-22.04
   #   if: ${{ github.event.action == 'opened' }}
   #   steps:
-  #     - uses: matrixorigin/ChatGPT-Reviewer@main
+  #     - uses: matrixorigin/ChatGPT-Reviewer@release/2.0-dev
   #       name: ChatGPT Review
   #       env:
   #         GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}

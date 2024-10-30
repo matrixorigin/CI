@@ -67,7 +67,7 @@ jobs:
           ref: main
 
       - name: Set up Go And Java
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/2.0-dev
 
       - name: Update BVT SQL Timeout
         run: |
@@ -161,7 +161,7 @@ jobs:
           ref: main
 
       - name: Set up Go And Java
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/2.0-dev
 
       - name: Update BVT SQL Timeout
         run: |

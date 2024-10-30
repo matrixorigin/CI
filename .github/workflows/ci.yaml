@@ -32,7 +32,7 @@ jobs:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/2.0-dev
         with:
           setup-java: false
       - name: Set env
@@ -104,7 +104,7 @@ jobs:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/2.0-dev
         with:
           setup-java: false
       - name: Set env
@@ -145,7 +145,7 @@ jobs:
             .github/ISSUE_TEMPLATE/*.yml
             .github/ISSUE_TEMPLATE/*.yaml
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/2.0-dev
         with:
           setup-java: false
       - name: Prepare ENV
