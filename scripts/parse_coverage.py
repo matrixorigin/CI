@@ -321,32 +321,32 @@ def _matches_pattern(filename, pattern):
     regex = re.compile(fnmatch.translate(pattern))
     return regex.match(filename) is not None
 
-def parse_file_coverage(minimal_coverage, file='./pr_coverage.out'):
+def parse_file_coverage(minimal_coverage,file='./pr_coverage.out'):
     try:
-        exec_dict = dict()
-        not_exec_dict = dict()
+        exec_dict=dict()
+        not_exec_dict=dict()
         with open(file, 'r') as f:
             for line in f:
                 if line.startswith('mode:'):
                     continue
-                parts = line.split(':')
+                parts=line.split(':')
                 if len(parts) < 2:
                     continue
                 file_name = normalize_path(parts[0])
                 if not exec_dict.get(file_name):
-                    exec_dict[file_name] = 0
-                    not_exec_dict[file_name] = 0
-                exec_status = int(parts[1].split()[-1])
+                    exec_dict[file_name]=0
+                    not_exec_dict[file_name]=0
+                exec_status=int(parts[1].split()[-1])
                 if exec_status > 0:
-                    exec_dict[file_name] += 1
+                    exec_dict[file_name]+=1
                 else:
-                    not_exec_dict[file_name] += 1
+                    not_exec_dict[file_name]+=1
         if len(exec_dict) != len(not_exec_dict):
             logging.error("exec_dict and not_exec_dict length not match")
             return
         for i in exec_dict.keys():
             coverage = exec_dict[i] / (exec_dict[i] + not_exec_dict[i]) * 100
-            if coverage < minimal_coverage * 100:
+            if coverage < minimal_coverage*100:
                 logging.warning(f"filename:{file_name} ,coverage {coverage}% is blow or equal {minimal_coverage}%")
                 continue
             logging.info(f"filename:{i},  coverage:{coverage}%")
@@ -366,19 +366,19 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        '-diff_path', 
-        type=str, 
-        default='diff.patch', 
+        '-diff_path',
+        type=str,
+        default='diff.patch',
         help='Path to the diff file. Default is "diff.patch".'
     )
 
     parser.add_argument(
-        '-minimal_coverage', 
-        type=float, 
-        default=0.75, 
+        '-minimal_coverage',
+        type=float,
+        default=0.75,
         help='Minimal coverage percentage required. Default to 0.75.'
     )
-    
+
     args = parser.parse_args()
 
     total_blocks, covered_blocks, coverage_percentage = merge_coverage_files('merged_coverage.out', *args.coverage_files)
