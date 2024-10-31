@@ -224,6 +224,7 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE
           cp $GITHUB_WORKSPACE/CI/scripts/parse_coverage.py $GITHUB_WORKSPACE/parse_coverage.py
+          cp $GITHUB_WORKSPACE/CI/scripts/.ignore $GITHUB_WORKSPACE/.ignore
       - name: Run coverage Python script
         run: |
           cd $GITHUB_WORKSPACE
