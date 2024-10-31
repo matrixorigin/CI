@@ -35,7 +35,7 @@ jobs:
           ref: ${{ github.event.pull_request.base.ref }}
 
       - name: Set up Go And Java
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/2.0-dev
 
       - name: Add cn.txn for head
         run: |
@@ -222,7 +222,7 @@ jobs:
           ref: ${{ steps.get-latest-release.outputs.tag }}
 
       - name: Set up Go And Java
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/2.0-dev
 
       - name: Add cn.txn for head
         run: |

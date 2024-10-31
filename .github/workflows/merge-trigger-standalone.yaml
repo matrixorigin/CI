@@ -22,7 +22,7 @@ jobs:
         with:
           path: ./matrixone
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/2.0-dev
         with:
           setup-java: false
           cache: true
@@ -133,7 +133,7 @@ jobs:
         with:
           path: ./head
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/2.0-dev
         with:
           setup-java: false
       - name: Add cn.txn

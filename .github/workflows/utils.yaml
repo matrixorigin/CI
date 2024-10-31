@@ -100,7 +100,7 @@ jobs:
           exit 1
 
       - name: Set up Go and JAVA
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/2.0-dev
         with:
           setup-java: false
       - name: Set Variables
