@@ -218,12 +218,14 @@ jobs:
         uses: actions/checkout@v3
         with:
           repository: matrixorigin/CI
+          ref: release/2.0-dev
           fetch-depth: "1"
           path: CI
       - name: Get Python file
         run: |
           cd $GITHUB_WORKSPACE
           cp $GITHUB_WORKSPACE/CI/scripts/parse_coverage.py $GITHUB_WORKSPACE/parse_coverage.py
+          cp $GITHUB_WORKSPACE/CI/scripts/.ignore $GITHUB_WORKSPACE/.ignore
       - name: Run coverage Python script
         run: |
           cd $GITHUB_WORKSPACE
