@@ -2,6 +2,12 @@ name:  MO Checkin Regression On TKE
 
 on:
   workflow_call:
+    inputs:
+      SEMANTIC_VERSION:
+        description: 'SEMANTIC_VERSION'
+        type: string
+        required: false
+        default: "1.3.0"
     secrets:
       TCR_USERNAME:
         description: 'TCR_USERNAME'
@@ -21,6 +27,7 @@ on:
       TOKEN_ACTION:
         description: 'TOKEN_ACTION'
         required: true
+
       
 
 jobs:
@@ -121,6 +128,9 @@ jobs:
         run: |
           kubectl create cm -n mo-checkin-regression-${{ github.event.pull_request.number }} proxy-env --from-literal=https_proxy="${https_proxy}" --from-literal=http_proxy="${http_proxy}" --from-literal=no_proxy="${no_proxy}";
           kubectl -n mo-checkin-regression-${{ github.event.pull_request.number }} apply -f $GITHUB_WORKSPACE/matrixone/optools/mo_checkin_regression/mo_checkin_regression_tke.yaml
+          # patch mo cluster semantic version
+          mo_name="$(kubectl get mo -n mo-checkin-regression-${{ github.event.pull_request.number }} | grep -v NAME | cut -d ' ' -f 1)"
+          kubectl patch mo -n mo-checkin-regression-${{ github.event.pull_request.number }} "${mo_name}" -p '{"spec":{"semanticVersion":"${{ inputs.SEMANTIC_VERSION }}"}}' --type merge
           sleep 100s
           while true; do
            if [ "$(kubectl get mo -n mo-checkin-regression-${{ github.event.pull_request.number }} | grep ${{ needs.docker_image_build.outputs.version }} | grep -iv NotReady | grep -ic Ready )" -eq 0 ]; then
