@@ -30,6 +30,7 @@ on:
 
 jobs:
   linux-amd64-build-job:
+    environment: ci
     runs-on: ubuntu-20.04
     steps:
       - name: Checkout source
@@ -99,6 +100,7 @@ jobs:
           echo "check in [ J_0. Set variables ]->[ Step_99. Display and output actual variables ] to see if the binary file url is correct"
 
   linux-arm64-build-job:
+    environment: ci
     runs-on: aws-arm64-runner
     steps:
       - name: Checkout source
@@ -159,6 +161,7 @@ jobs:
           storage_class: "MAZ_STANDARD"
 
   darwin-x86-build-job:
+    environment: ci
     runs-on: macos-latest
     steps:
       # GitHub Hosted MacOS runner cannot connect to time.apple.com, so use time.windows.com
@@ -277,6 +280,7 @@ jobs:
 
   #if the release for darwin-arm is failed, please contact guguducken to check runner status
   darwin-arm-build-job:
+    environment: ci
     runs-on: mac-arm64-mini
     steps:
       - name: Sync system time
@@ -388,6 +392,7 @@ jobs:
           security find-identity -p codesigning | grep ID | awk 'NR=1{system("security delete-identity -Z "$2)}'
 
   musl-x86-build-job:
+    environment: ci
     runs-on: ubuntu-20.04
     steps:
       - name: Checkout source
@@ -456,6 +461,7 @@ jobs:
           echo "check in [ J_0. Set variables ]->[ Step_99. Display and output actual variables ] to see if the binary file url is correct"
 
   musl-arm64-build-job:
+    environment: ci
     runs-on: aws-arm64-runner
     steps:
       - name: Checkout source
