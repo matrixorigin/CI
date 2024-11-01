@@ -346,8 +346,8 @@ def parse_file_coverage(minimal_coverage,file='./pr_coverage.out'):
             return
         for i in exec_dict.keys():
             coverage = exec_dict[i] / (exec_dict[i] + not_exec_dict[i]) * 100
-            if coverage < minimal_coverage*100:
-                logging.warning(f"filename:{file_name} ,coverage {coverage}% is blow or equal {minimal_coverage}%")
+            if coverage <= minimal_coverage*100:
+                logging.warning(f"filename:{i} ,coverage {coverage}% is blow or equal {minimal_coverage}%")
                 continue
             logging.info(f"filename:{i},  coverage:{coverage}%")
 
