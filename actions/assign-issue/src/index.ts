@@ -22,6 +22,7 @@ const correponding = new Map<string,number>([
     ["storage-group",35],
     ["matrixonecloud",18],
     ["us-group",13],
+    ["compute-group-3",68],
     ])
 // if assignees' team include any special team, we will add not delete any project
 const specialTeams = new Array<string>("qa","pm")
