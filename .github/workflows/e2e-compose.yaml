@@ -25,6 +25,7 @@ jobs:
       - name: Print Disk Usage Before Container Start
         if: ${{ always() }}
         run: |
+          set +e;
           sudo df -h /*;
           echo "===========================================";
           sudo du -hs /var/lib/docker;
@@ -67,6 +68,7 @@ jobs:
       - name: Print Disk Usage After Container Start
         if: ${{ always() }}
         run: |
+          set +e;
           sudo df -h /*;
           echo "===========================================";
           sudo du -hs /var/lib/docker;
@@ -106,6 +108,7 @@ jobs:
       - name: Print Disk Usage Before Container Shutdown
         if: ${{ always() }}
         run: |
+          set +e;
           sudo df -h /*;
           echo "===========================================";
           sudo du -hs /var/lib/docker;
@@ -161,6 +164,7 @@ jobs:
       - name: Print Disk Usage Before Container Start
         if: ${{ always() }}
         run: |
+          set +e;
           sudo df -h /*;
           echo "===========================================";
           sudo du -hs /var/lib/docker;
@@ -193,6 +197,7 @@ jobs:
       - name: Print Disk Usage After Container Start
         if: ${{ always() }}
         run: |
+          set +e;
           sudo df -h /*;
           echo "===========================================";
           sudo du -hs /var/lib/docker;
@@ -229,6 +234,7 @@ jobs:
       - name: Print Disk Usage Before Container Shutdown
         if: ${{ always() }}
         run: |
+          set +e;
           sudo df -h /*;
           echo "===========================================";
           sudo du -hs /var/lib/docker;
