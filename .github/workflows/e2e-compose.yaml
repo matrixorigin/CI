@@ -21,6 +21,15 @@ jobs:
 
       - name: Print run attempt
         run: echo "run attempt is ${{ github.run_attempt }}"
+        
+      - name: Print Disk Usage Before Container Start
+        if: ${{ always() }}
+        run: |
+          sudo df -h /*;
+          echo "===========================================";
+          sudo du -hs /var/lib/docker;
+          echo "===========================================";
+          sudo docker system df -v;
 
       - name: docker compose launch-multi-cn
         timeout-minutes: 10
@@ -55,6 +64,15 @@ jobs:
           done
           docker ps
 
+      - name: Print Disk Usage After Container Start
+        if: ${{ always() }}
+        run: |
+          sudo df -h /*;
+          echo "===========================================";
+          sudo du -hs /var/lib/docker;
+          echo "===========================================";
+          sudo docker system df -v;
+
       - name: Clone test-tool repository
         # Node.js 12 actions are deprecated.
         # For more information see:
@@ -84,6 +102,15 @@ jobs:
           echo "============================="
 
           ./run.sh -n -g -o -p $GITHUB_WORKSPACE/test/distributed/cases -s /test/distributed/resources -e pessimistic_transaction 2>&1
+
+      - name: Print Disk Usage Before Container Shutdown
+        if: ${{ always() }}
+        run: |
+          sudo df -h /*;
+          echo "===========================================";
+          sudo du -hs /var/lib/docker;
+          echo "===========================================";
+          sudo docker system df -v;
 
       - name: export log
         if: ${{ failure() || cancelled()}}
@@ -131,6 +158,15 @@ jobs:
       - name: Print run attempt
         run: echo "run attempt is ${{ github.run_attempt }}"
 
+      - name: Print Disk Usage Before Container Start
+        if: ${{ always() }}
+        run: |
+          sudo df -h /*;
+          echo "===========================================";
+          sudo du -hs /var/lib/docker;
+          echo "===========================================";
+          sudo docker system df -v;
+
       - name: docker compose launch-multi-cn
         timeout-minutes: 10
         run: |
@@ -153,6 +189,16 @@ jobs:
              sleep 1
           done
           docker ps
+
+      - name: Print Disk Usage After Container Start
+        if: ${{ always() }}
+        run: |
+          sudo df -h /*;
+          echo "===========================================";
+          sudo du -hs /var/lib/docker;
+          echo "===========================================";
+          sudo docker system df -v;
+          
       - name: Clone test-tool repository
         uses: actions/checkout@v4
         with:
@@ -179,6 +225,16 @@ jobs:
           echo "============================="
 
           ./run.sh -n -g -o -p $GITHUB_WORKSPACE/test/distributed/cases -s /test/distributed/resources -e optimistic 2>&1
+
+      - name: Print Disk Usage Before Container Shutdown
+        if: ${{ always() }}
+        run: |
+          sudo df -h /*;
+          echo "===========================================";
+          sudo du -hs /var/lib/docker;
+          echo "===========================================";
+          sudo docker system df -v;
+  
       - name: export log
         if: ${{ failure() || cancelled()}}
         run: |
