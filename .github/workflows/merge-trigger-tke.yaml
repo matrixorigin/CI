@@ -2,6 +2,12 @@ name:  MO Checkin Regression On TKE
 
 on:
   workflow_call:
+    inputs:
+      enable-txn-trace:
+        description: "enable txn trace"
+        type: boolean
+        required: false
+        default: false
     secrets:
       TCR_USERNAME:
         description: 'TCR_USERNAME'
@@ -21,7 +27,6 @@ on:
       TOKEN_ACTION:
         description: 'TOKEN_ACTION'
         required: true
-      
 
 jobs:
   docker_image_build:
@@ -152,6 +157,7 @@ jobs:
           echo "cn_ips is $cn_ips"
           echo "cn_ips=$cn_ips"  >>  $GITHUB_OUTPUT;
       - name: Add TXN Filter
+        if: ${{ inputs.enable-txn-trace }}
         run: |
           export MYSQL_PWD=111;
           for i in {1..300}; do
@@ -325,6 +331,7 @@ jobs:
           echo "ssb_tpch_password=111" >> $GITHUB_OUTPUT
 
       - name: Enable CN TXN Trace
+        if: ${{ inputs.enable-txn-trace }}
         timeout-minutes: 2
         run: |
           export MYSQL_PWD='111'
@@ -548,6 +555,7 @@ jobs:
           sleep 10
 
       - name: Enable CN TXN Trace
+        if: ${{ inputs.enable-txn-trace }}
         timeout-minutes: 2
         run: |
           export MYSQL_PWD='111'
@@ -682,6 +690,7 @@ jobs:
           ./load.sh -u ${{ steps.account_for_tpcc.outputs.tpcc_account }} -p ${{ steps.account_for_tpcc.outputs.tpcc_password }} -h ${{ needs.setup_mo_test_env.outputs.mo_svc_ip }} -c cases/02_from_cos/tpcc_50 -r -m | tee report/mo-load-data-tpcc.log
 
       - name: Enable CN TXN Trace
+        if: ${{ inputs.enable-txn-trace }}
         timeout-minutes: 2
         run: |
           export MYSQL_PWD='111'
