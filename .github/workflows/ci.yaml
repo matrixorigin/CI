@@ -116,7 +116,7 @@ jobs:
             fi
             echo "============================================"
             cat "${file}";
-            fail_ut_cases=${fail_ut_cases}$(cat "${file}" | grep "RUN" | awk '{print $3}')','
+            fail_ut_cases=${fail_ut_cases}$(basename "${file}")','
           done
           
           echo "steps.ut.conclusion: ${{ steps.ut.conclusion }}"
