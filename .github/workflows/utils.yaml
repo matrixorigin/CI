@@ -69,7 +69,7 @@ jobs:
 
   pr_coverage:
     if: ${{ needs.check_organization_user.outputs.safe_label == '1' || needs.check_organization_user.outputs.in_org == '1' }}
-    name: PR Unit and BVT Test Coverage
+    name: Coverage
     needs: [check_organization_user]
     environment: ci
     # if you change runner, must modify L117
@@ -392,7 +392,7 @@ jobs:
           echo "$JAVA_HOME/bin" >> $GITHUB_PATH
 
       # start tpcc test
-      - name: Load TPCC 1 Warehouse Data
+      - name: Load TPCC 10 Warehouse Data
         if: ${{ !cancelled() && !failure() && steps.s1.outputs.run_tpcc == 'true' }}
         timeout-minutes: 20
         id: load_tpcc_data
@@ -403,9 +403,8 @@ jobs:
           sleep 60s
           cd $GITHUB_WORKSPACE/mo-load-data
           mkdir -p report
-          ./load.sh -u ${{ steps.account_for_tpcc.outputs.tpcc_account }} -p ${{ steps.account_for_tpcc.outputs.tpcc_password }} -h 127.0.0.1 -c cases/02_from_cos/tpcc_1 -r -m | tee report/mo-load-data-tpcc.log
-
-      - name: Start TPCC 1 Warehouses 1 terminals Test
+          ./load.sh -u ${{ steps.account_for_tpcc.outputs.tpcc_account }} -p ${{ steps.account_for_tpcc.outputs.tpcc_password }} -h 127.0.0.1 -c cases/02_from_cos/tpcc_10 -r -m | tee report/mo-load-data-tpcc.log
+      - name: Start TPCC 10 Warehouses 10 terminals Test
         if: ${{ !cancelled() && !failure() && steps.load_tpcc_data.conclusion == 'success' }}
         timeout-minutes: 25
         run: |
@@ -415,23 +414,22 @@ jobs:
           
           cd $GITHUB_WORKSPACE/mo-tpcc
           mkdir -p report
-          cp props.mo props_1.mo
-          sed -i '/.*terminals=*/c\terminals=1' props_1.mo
-          sed -i '/.*warehouses=*/c\warehouses=1' props_1.mo
-          sed -i 's/tpcc/tpcc_1/g' props_1.mo
-          #sed -i 's/127.0.0.1/${{ needs.setup_mo_test_env.outputs.mo_svc_ip }}/g' props_1.mo
-          sed -i '/runMins=*/c\runMins=15' props_1.mo
-          sed -i '/.*expectedErrorCodes=*/c\expectedErrorCodes=20619,1062' props_1.mo
-          sed -i 's/user=.*/user=${{ steps.account_for_tpcc.outputs.tpcc_account }}/g' props_1.mo
-          sed -i 's/password=.*/password=${{ steps.account_for_tpcc.outputs.tpcc_password }}/g' props_1.mo
-          ./runBenchmark.sh props_1.mo | tee report/tpcc-benchmark-1-1.log
-          ./runVerify.sh props_1.mo | tee report/tpcc-verify-1-1.log
-
+          cp props.mo props_10.mo
+          sed -i '/.*terminals=*/c\terminals=10' props_10.mo
+          sed -i '/.*warehouses=*/c\warehouses=10' props_10.mo
+          sed -i 's/tpcc/tpcc_10/g' props_10.mo
+          #sed -i 's/127.0.0.1/${{ needs.setup_mo_test_env.outputs.mo_svc_ip }}/g' props_10.mo
+          sed -i '/runMins=*/c\runMins=5' props_10.mo
+          sed -i '/.*expectedErrorCodes=*/c\expectedErrorCodes=20619,1062' props_10.mo
+          sed -i 's/user=.*/user=${{ steps.account_for_tpcc.outputs.tpcc_account }}/g' props_10.mo
+          sed -i 's/password=.*/password=${{ steps.account_for_tpcc.outputs.tpcc_password }}/g' props_10.mo
+          ./runBenchmark.sh props_10.mo | tee report/tpcc-benchmark-10-10.log
+          ./runVerify.sh props_10.mo | tee report/tpcc-verify-10-10.log
       - name: Result Summary
         if: ${{ !cancelled() && !failure() && steps.s1.outputs.run_tpcc == 'true' }}
         run: |
           cd $GITHUB_WORKSPACE/mo-tpcc
-          files=("report/tpcc-benchmark-1-1.log")
+          files=("report/tpcc-benchmark-10-10.log")
           for filename in "${files[@]}"
           do
               if [ ! -f $filename ]; then
@@ -514,7 +512,7 @@ jobs:
           cd $GITHUB_WORKSPACE/mo-load
           mkdir -p report
           echo 'Start OLTP Insert Test With 10 threads'
-          ./start.sh -c cases/sysbench/mixed_10_100000 -t 10 -d 20 -g -b sbtest | tee report/oltp-mix.log
+          ./start.sh -c cases/sysbench/mixed_10_100000 -t 10 -d 5 -g -b sbtest | tee report/oltp-mix.log
 
       - name: Result Summary
         if: ${{ !cancelled() && !failure() && steps.s1.outputs.run_sysbench == 'true' }}
