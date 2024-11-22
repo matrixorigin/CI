@@ -21,7 +21,6 @@ on:
 jobs:
   Update_MOC:
     name: Update MOC
-    if: ${{ github.event.pull_request.merged == true }}
     runs-on: ubuntu-latest
     steps:
       - name: Update MOC Data
