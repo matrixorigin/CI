@@ -19,6 +19,23 @@ on:
       S3BUCKET:
         description: "S3BUCKET For Test"
         required: true
+      EE_DB_ADDR:
+        description: "matrixone cloud host"
+        required: true
+      EE_DB_PORT:
+        description: "matrixone cloud port"
+        required: true
+      EE_DB_USER:
+        description: "matrixone cloud user"
+        required: true
+      EE_DB_PASSWORD:
+        description: "matrixone cloud password"
+        required: true
+      EE_DB_DB:
+        description: "matrixone cloud db"
+        required: true
+
+
 
 jobs:
   ut-linux-x86:
@@ -26,6 +43,20 @@ jobs:
     runs-on: ubuntu-22.04
     name: UT Test on Ubuntu/x86
     steps:
+      - name: Parse Time for moc
+        id: time
+        run: |
+          export TZ='Asia/Shanghai'
+
+          #utcTime="2024-11-15T08:33:52Z"
+          action_time=${{ github.event.pull_request.head.repo.pushed_at }}
+          ACTION_TIME=$(date -d "${action_time}" '+%Y-%m-%d %H:%M:%S')
+
+          # 获取格式化的日期时间字符串
+          time=$(date '+%Y-%m-%d %H:%M:%S')
+
+          echo "ACTION_TIME=${ACTION_TIME}" >> $GITHUB_OUTPUT
+          echo "START_TIME=${time}" >> $GITHUB_OUTPUT
       - uses: actions/checkout@v4
         with:
           fetch-depth: "3"
@@ -45,6 +76,7 @@ jobs:
           # set ut workdir
           echo "UT_WORKDIR=${{ github.workspace }}" >> $GITHUB_ENV
       - name: Unit Testing
+        id: ut
         run: |
           cd $GITHUB_WORKSPACE && make clean && make config
           make ut UT_PARALLEL=6 UT_TIMEOUT=40
@@ -67,6 +99,7 @@ jobs:
           cd $GITHUB_WORKSPACE;
           find ./ut-report -name no-test.txt -exec cat {} \+;
       - name: Print Failed Packages and Tests
+        id: failed
         if: ${{ always() }}
         continue-on-error: true
         run: |
@@ -75,6 +108,7 @@ jobs:
             exit 0;
           fi
           find ./ut-report/failed -name result.txt -exec cat {} \;
+          fail_ut_cases=''
           files=($(find ./ut-report/failed | grep -v result.txt))
           for file in "${files[@]}"; do
             if [ -d "$file" ]; then
@@ -82,7 +116,25 @@ jobs:
             fi
             echo "============================================"
             cat "${file}";
+            fail_ut_cases=${fail_ut_cases}$(basename "${file}")','
           done
+          
+          echo "steps.ut.conclusion: ${{ steps.ut.conclusion }}"
+          echo "FAIL_UT_CASES=${fail_ut_cases}"
+          echo "FAIL_UT_CASES=${fail_ut_cases}" >> $GITHUB_OUTPUT
+      - name: Insert Failed UT Cases to MOC
+        if: ${{ failure() }}
+        uses: matrixorigin/CI/actions/fail-ut-case@main
+        with:
+          action_time: ${{ steps.time.outputs.ACTION_TIME }}
+          ut_cases: ${{ steps.failed.outputs.FAIL_UT_CASES }}
+          pr_link: ${{ github.event.pull_request.html_url }}
+          job_time: ${{ steps.time.outputs.START_TIME }}
+          mo_host: ${{ secrets.EE_DB_ADDR }}
+          mo_port: ${{ secrets.EE_DB_PORT }}
+          mo_user: ${{ secrets.EE_DB_USER }}
+          mo_password: ${{ secrets.EE_DB_PASSWORD }}
+          mo_database: ${{ secrets.EE_DB_DB }}
       - name: Print the Top 10 Time-Consuming Tests
         if: ${{ always() }}
         continue-on-error: true

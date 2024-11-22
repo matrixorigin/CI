@@ -2,6 +2,12 @@ name:  MO Checkin Regression On TKE
 
 on:
   workflow_call:
+    inputs:
+      enable-txn-trace:
+        description: "enable txn trace"
+        type: boolean
+        required: false
+        default: false
     secrets:
       TCR_USERNAME:
         description: 'TCR_USERNAME'
@@ -21,12 +27,11 @@ on:
       TOKEN_ACTION:
         description: 'TOKEN_ACTION'
         required: true
-      
 
 jobs:
   docker_image_build:
     environment: ci
-    runs-on: amd64-mo-guangzhou-dind  #amd64-mo-shanghai-dind
+    runs-on: amd64-mo-shanghai-dind #amd64-mo-guangzhou-dind
     if: ${{ github.event.pull_request.merged == true }}
     timeout-minutes: 30
     name: BUILD MO DOCKER IMAGE
@@ -152,6 +157,7 @@ jobs:
           echo "cn_ips is $cn_ips"
           echo "cn_ips=$cn_ips"  >>  $GITHUB_OUTPUT;
       - name: Add TXN Filter
+        if: ${{ inputs.enable-txn-trace }}
         run: |
           export MYSQL_PWD=111;
           for i in {1..300}; do
@@ -320,11 +326,12 @@ jobs:
         timeout-minutes: 2
         id: account_for_ssb_and_tpch
         run: |
-          mysql -h ${{ needs.setup_mo_test_env.outputs.mo_svc_ip }} -P 6001 -udump -p111 -e "create account ssb_tpch_test admin_name = 'admin' identified by '111' comment 'for ssb and tpch test';"
-          echo "ssb_tpch_account=ssb_tpch_test:admin" >> $GITHUB_OUTPUT
+          #mysql -h ${{ needs.setup_mo_test_env.outputs.mo_svc_ip }} -P 6001 -udump -p111 -e "create account ssb_tpch_test admin_name = 'admin' identified by '111' comment 'for ssb and tpch test';"
+          echo "ssb_tpch_account=dump" >> $GITHUB_OUTPUT
           echo "ssb_tpch_password=111" >> $GITHUB_OUTPUT
 
       - name: Enable CN TXN Trace
+        if: ${{ inputs.enable-txn-trace }}
         timeout-minutes: 2
         run: |
           export MYSQL_PWD='111'
@@ -548,6 +555,7 @@ jobs:
           sleep 10
 
       - name: Enable CN TXN Trace
+        if: ${{ inputs.enable-txn-trace }}
         timeout-minutes: 2
         run: |
           export MYSQL_PWD='111'
@@ -648,7 +656,7 @@ jobs:
           token: ${{secrets.TOKEN_ACTION}}
           path: ./mo-nightly-regression
           ref: main
-          
+
       - name: Create Account for Test
         timeout-minutes: 2
         id: account_for_tpcc
@@ -666,9 +674,9 @@ jobs:
           sed -i '/.*SECRET_ACCESS_KEY: ""*/c\SECRET_ACCESS_KEY: "${{secrets.TENCENT_SK}}"' access.yml
 
           echo "$JAVA_HOME/bin" >> $GITHUB_PATH
-    
+
      # start tpcc test
-      - name: Load TPCC 10 Warehouse Data
+      - name: Load TPCC 50 Warehouse Data
         if: ${{ always() && !cancelled() }}
         timeout-minutes: 20
         id: load_tpcc_data
@@ -679,9 +687,10 @@ jobs:
           sleep 60s
           cd $GITHUB_WORKSPACE/mo-load-data
           mkdir -p report
-          ./load.sh -u ${{ steps.account_for_tpcc.outputs.tpcc_account }} -p ${{ steps.account_for_tpcc.outputs.tpcc_password }} -h ${{ needs.setup_mo_test_env.outputs.mo_svc_ip }} -c cases/02_from_cos/tpcc_10 -r -m | tee report/mo-load-data-tpcc.log
+          ./load.sh -u ${{ steps.account_for_tpcc.outputs.tpcc_account }} -p ${{ steps.account_for_tpcc.outputs.tpcc_password }} -h ${{ needs.setup_mo_test_env.outputs.mo_svc_ip }} -c cases/02_from_cos/tpcc_50 -r -m | tee report/mo-load-data-tpcc.log
 
       - name: Enable CN TXN Trace
+        if: ${{ inputs.enable-txn-trace }}
         timeout-minutes: 2
         run: |
           export MYSQL_PWD='111'
@@ -699,7 +708,7 @@ jobs:
           sleep 1;
           done
 
-      - name: Start TPCC 10 Warehouses 100 terminals Test
+      - name: Start TPCC 50 Warehouses 50 terminals Test
         if: ${{ always() && !cancelled() && steps.load_tpcc_data.conclusion == 'success' }}
         timeout-minutes: 25
         run: |
@@ -709,23 +718,23 @@ jobs:
           
           cd $GITHUB_WORKSPACE/mo-tpcc
           mkdir -p report
-          cp props.mo props_10.mo
-          sed -i '/.*terminals=*/c\terminals=100' props_10.mo
-          sed -i '/.*warehouses=*/c\warehouses=10' props_10.mo
-          sed -i 's/tpcc/tpcc_10/g' props_10.mo
-          sed -i 's/127.0.0.1/${{ needs.setup_mo_test_env.outputs.mo_svc_ip }}/g' props_10.mo
-          sed -i '/runMins=*/c\runMins=15' props_10.mo
-          sed -i '/.*expectedErrorCodes=*/c\expectedErrorCodes=20619,1062' props_10.mo
-          sed -i 's/user=.*/user=${{ steps.account_for_tpcc.outputs.tpcc_account }}/g' props_10.mo
-          sed -i 's/password=.*/password=${{ steps.account_for_tpcc.outputs.tpcc_password }}/g' props_10.mo
-          ./runBenchmark.sh props_10.mo | tee report/tpcc-benchmark-10-100.log
-          ./runVerify.sh props_10.mo | tee report/tpcc-verify-10-100.log
-          
+          cp props.mo props_50.mo
+          sed -i '/.*terminals=*/c\terminals=50' props_50.mo
+          sed -i '/.*warehouses=*/c\warehouses=50' props_50.mo
+          sed -i 's/tpcc/tpcc_50/g' props_50.mo
+          sed -i 's/127.0.0.1/${{ needs.setup_mo_test_env.outputs.mo_svc_ip }}/g' props_50.mo
+          sed -i '/runMins=*/c\runMins=15' props_50.mo
+          sed -i '/.*expectedErrorCodes=*/c\expectedErrorCodes=20619,1062' props_50.mo
+          sed -i 's/user=.*/user=${{ steps.account_for_tpcc.outputs.tpcc_account }}/g' props_50.mo
+          sed -i 's/password=.*/password=${{ steps.account_for_tpcc.outputs.tpcc_password }}/g' props_50.mo
+          ./runBenchmark.sh props_50.mo | tee report/tpcc-benchmark-50-50.log
+          ./runVerify.sh props_50.mo | tee report/tpcc-verify-50-50.log
+
       - name: Result Summary
         if: ${{ always() && !cancelled()  }}
         run: |
           cd $GITHUB_WORKSPACE/mo-tpcc
-          files=("report/tpcc-benchmark-10-100.log")
+          files=("report/tpcc-benchmark-50-50.log")
           for filename in "${files[@]}"
           do
               if [ ! -f $filename ]; then
@@ -742,7 +751,7 @@ jobs:
               echo "..."
               tail -n 3 tmp 
           done
-      
+
       - name: Collect Upload files
         if: ${{ always() || cancelled() }}
         run: |
@@ -750,7 +759,7 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/reports/mo-tpcc
           mkdir -p $GITHUB_WORKSPACE/mo-load-data/report && cp -r $GITHUB_WORKSPACE/mo-load-data/report $GITHUB_WORKSPACE/reports/mo-load-data
           mkdir -p $GITHUB_WORKSPACE/mo-tpcc/report && cp -r $GITHUB_WORKSPACE/mo-tpcc/report $GITHUB_WORKSPACE/reports/mo-tpcc     
-      
+
       - uses: actions/upload-artifact@v4
         if: ${{ failure() || cancelled()}}
         continue-on-error: true

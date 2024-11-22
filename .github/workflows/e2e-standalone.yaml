@@ -30,6 +30,8 @@ jobs:
           echo ""  >> ./etc/launch/cn.toml
           echo '[cn.txn]' >> ./etc/launch/cn.toml
           echo 'mode = "Optimistic"' >> ./etc/launch/cn.toml
+          echo "  enable-leak-check = 1" >> ./etc/launch/cn.toml
+          echo '  max-active-ages = "2m"'>> ./etc/launch/cn.toml
           echo ""  >> ./etc/launch/tn.toml
           echo '[tn.txn]' >> ./etc/launch/tn.toml
           echo 'mode = "Optimistic"' >> ./etc/launch/tn.toml
@@ -45,6 +47,10 @@ jobs:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
+      - name: Update BVT SQL Timeout
+        run: |
+          cd $GITHUB_WORKSPACE/mo-tester
+          sed -i "s/socketTimeout:.*/socketTimeout: 300000/g" mo.yml
       - name: Start BVT Test
         id: bvt_on_pr_version
         run: |
@@ -145,6 +151,14 @@ jobs:
         run: |
           sudo bash -c 'echo -e "127.0.0.1\tcn0" >> /etc/hosts;';
           sudo bash -c 'echo -e "127.0.0.1\tcn1" >> /etc/hosts;';
+      - name: Add cn.txn
+        run: |
+          cd $GITHUB_WORKSPACE/head
+          echo "" >> ./etc/launch-dynamic-with-proxy/cn.toml.base
+          echo "" >> ./etc/launch-dynamic-with-proxy/cn.toml.base
+          echo "[cn.txn]" >> ./etc/launch-dynamic-with-proxy/cn.toml.base
+          echo "  enable-leak-check = 1" >> ./etc/launch-dynamic-with-proxy/cn.toml.base
+          echo '  max-active-ages = "2m"'>> ./etc/launch-dynamic-with-proxy/cn.toml.base
       - name: Start MO
         run: |
           sudo cat /etc/hosts | grep '127.0.0.1';
@@ -156,6 +170,10 @@ jobs:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
+      - name: Update BVT SQL Timeout
+        run: |
+          cd $GITHUB_WORKSPACE/mo-tester
+          sed -i "s/socketTimeout:.*/socketTimeout: 300000/g" mo.yml
       - name: Start BVT Test
         id: bvt_on_pr_version
         run: |
@@ -219,6 +237,13 @@ jobs:
           cd $GITHUB_WORKSPACE/head && make clean && make build
           git rev-parse --short HEAD
 
+      - name: Add cn.txn
+        run: |
+          cd $GITHUB_WORKSPACE/head
+          echo "[cn.txn]" >> ./etc/launch/cn.toml
+          echo "  enable-leak-check = 1" >> ./etc/launch/cn.toml
+          echo '  max-active-ages = "2m"'>> ./etc/launch/cn.toml
+
       - name: echo config
         run: |
           cd $GITHUB_WORKSPACE/head
@@ -236,7 +261,10 @@ jobs:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
-
+      - name: Update BVT SQL Timeout
+        run: |
+          cd $GITHUB_WORKSPACE/mo-tester
+          sed -i "s/socketTimeout:.*/socketTimeout: 300000/g" mo.yml
       - name: Start BVT Test
         id: bvt_on_pr_version
         run: |

@@ -1,0 +1,23 @@
+# 忽略规则
+# 1.默认忽略所有的文件
+# 2.通过 `!` 进行文件的保留且优先级最高(因为条件1的存在,条件2为关键设置)
+# 3.后续不带 `!` 开头的忽略规则默认是在条件2下进行
+# 4.满足正则匹配规则
+
+# 保留文件
+!*.go
+
+# 在保留文件的基础上进行忽略
+*.pb.go
+pkg/frontend/test/*
+pkg/vm/engine/tae/db/testutil/*
+pkg/vm/engine/test/*
+pkg/tests/service/*
+pkg/tests/txn/*
+pkg/tests/upgrade/*
+pkg/util/metric/*
+pkg/common/morpc/examples/*
+*driver*
+*engine/aoe*
+*engine/memEngine*
+*pkg/catalog*

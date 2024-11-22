@@ -3,6 +3,7 @@ import os
 import sys
 import logging
 import argparse
+import fnmatch
 
 # 设置日志配置
 logging.basicConfig(
@@ -72,11 +73,13 @@ def merge_coverage_files(output_path, *coverage_files):
     
     return total_blocks, covered_blocks, coverage_percentage
 
-def parse_diff(diff_path):
+def parse_diff(diff_path, ignore_path):
     """解析diff文件，获取新增和修改的行号和列范围，仅处理 .go 文件"""
     logging.info(f"Starting to parse diff file: {diff_path}")
     modified_lines = {}
 
+    logging.info(f"load skip files: {ignore_path}")
+    ignore_patterns, include_patterns = parse_ignore_file(ignore_path)
     current_file = None
     current_line_number = None
 
@@ -85,25 +88,8 @@ def parse_diff(diff_path):
             for line in diff_file:
                 if line.startswith('+++ b/'):
                     current_file = normalize_path(line[6:].strip(), '')
-                    if not current_file.endswith('.go'):
-                        logging.info(f"Ignoring non-Go file: {current_file}")
-                        current_file = None  # 忽略非 .go 文件
-                        continue
-                    elif current_file.endswith('.pb.go'):
-                        logging.info(f"Ignoring auto-generated pb.go file: {current_file}")
-                        current_file = None  # 忽略自动生成的 .go 文件
-                        continue
-                    elif 'pkg/frontend/test' in current_file:
-                        logging.info(f"Ignoring auto-generated test go file: {current_file}")
-                        current_file = None  # 忽略自动生成的 .go 文件
-                        continue
-                    elif 'pkg/vm/engine/tae/db/testutil' in current_file:
-                        logging.info(f"Ignoring test go file: {current_file}")
-                        current_file = None  # 忽略测试 .go 文件
-                        continue
-                    elif 'pkg/vm/engine/test' in current_file:
-                        logging.info(f"Ignoring test go file: {current_file}")
-                        current_file = None  # 忽略测试 .go 文件
+                    if should_ignore(current_file, ignore_patterns, include_patterns):
+                        current_file = None
                         continue
                     logging.info(f"Processing file: {current_file}")
                 
@@ -264,10 +250,10 @@ def normalize_path(path, prefix='github.com/matrixorigin/matrixone/'):
         return path[len(prefix):]
     return os.path.normpath(path)
 
-def diff_coverage(diff_path, coverage_path, output_path='pr_coverage.out'):
+def diff_coverage(diff_path, coverage_path, output_path='pr_coverage.out', ignore_path='.ignore'):
     try:
         # 解析diff文件，获取修改和新增的行号
-        modified_lines = parse_diff(diff_path)
+        modified_lines = parse_diff(diff_path, ignore_path)
         logging.debug(f"[modified_lines]{modified_lines}")
 
         if len(modified_lines) == 0:
@@ -297,31 +283,102 @@ def is_valid_code_segment(segment):
         return False
     return True
 
+def parse_ignore_file(ignore_file_path):
+    ignore_patterns = []
+    include_patterns = []
+
+    try:
+        with open(ignore_file_path, "r")as f:
+            ignore_file_content = f.read()
+    except Exception as e:
+        logging.error(f"Error reading ignore file {ignore_file_path}: {e}")
+        raise
+
+    lines = ignore_file_content.splitlines()
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        if line.startswith('!'):
+            include_patterns.append(line[1:])
+        else:
+            ignore_patterns.append(line)
+
+    return ignore_patterns, include_patterns
+
+def should_ignore(filename, ignore_patterns, include_patterns):
+    for pattern in include_patterns:
+        if _matches_pattern(filename, pattern):
+            for pattern in ignore_patterns:
+                if _matches_pattern(filename, pattern):
+                    logging.info(f"Ignoring file: {filename} -- due to ignore pattern {pattern}")
+                    return True
+            return False
+    logging.info(f"Ignoring file: {filename} -- don`t match include patterns")
+    return True
+
+def _matches_pattern(filename, pattern):
+    regex = re.compile(fnmatch.translate(pattern))
+    return regex.match(filename) is not None
+
+def parse_file_coverage(minimal_coverage,file='./pr_coverage.out'):
+    try:
+        exec_dict=dict()
+        not_exec_dict=dict()
+        with open(file, 'r') as f:
+            for line in f:
+                if line.startswith('mode:'):
+                    continue
+                parts=line.split(':')
+                if len(parts) < 2:
+                    continue
+                file_name = normalize_path(parts[0])
+                if not exec_dict.get(file_name):
+                    exec_dict[file_name]=0
+                    not_exec_dict[file_name]=0
+                exec_status=int(parts[1].split()[-1])
+                if exec_status > 0:
+                    exec_dict[file_name]+=1
+                else:
+                    not_exec_dict[file_name]+=1
+        if len(exec_dict) != len(not_exec_dict):
+            logging.error("exec_dict and not_exec_dict length not match")
+            return
+        for i in exec_dict.keys():
+            coverage = exec_dict[i] / (exec_dict[i] + not_exec_dict[i]) * 100
+            if coverage <= minimal_coverage*100:
+                logging.warning(f"filename:{i} ,coverage {coverage}% is blow or equal {minimal_coverage}%")
+                continue
+            logging.info(f"filename:{i},  coverage:{coverage}%")
+
+    except Exception as e:
+        logging.error(f"An error parse_file_coverage: {e}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Merge coverage files and calculate coverage based on diff.")
 
     parser.add_argument(
-        '-coverage_files', 
-        nargs='+', 
+        '-coverage_files',
+        nargs='+',
         required=True,
         help='List of coverage.out files to merge.'
     )
 
     parser.add_argument(
-        '-diff_path', 
-        type=str, 
-        default='diff.patch', 
+        '-diff_path',
+        type=str,
+        default='diff.patch',
         help='Path to the diff file. Default is "diff.patch".'
     )
 
     parser.add_argument(
-        '-minimal_coverage', 
-        type=float, 
-        default=0.75, 
+        '-minimal_coverage',
+        type=float,
+        default=0.75,
         help='Minimal coverage percentage required. Default to 0.75.'
     )
-    
+
     args = parser.parse_args()
 
     total_blocks, covered_blocks, coverage_percentage = merge_coverage_files('merged_coverage.out', *args.coverage_files)
@@ -334,7 +391,8 @@ if __name__ == "__main__":
     logging.info(f"total_modified_lines: {total_modified_lines}, covered_modified_lines: {covered_modified_lines}, coverage_percentage:{coverage_percentage}")
 
     if coverage_percentage <= args.minimal_coverage:
+        parse_file_coverage(args.minimal_coverage)
         logging.warning(f"The code coverage:{coverage_percentage} is below or equal {args.minimal_coverage}, not approved.")
         sys.exit(1)
-    
+
     logging.info(f"The code coverage:{coverage_percentage} is above {args.minimal_coverage}, pass.")
