@@ -18,6 +18,12 @@ on:
         required: true
       OPENAI_API_KEY:
         description: "OPENAI_API_KEY For get PR Suggestion"
+        required: false
+      TENCENT_AK:
+        description: "TENCENT_AK For UT Test"
+        required: true
+      TENCENT_SK:
+        description: "TENCENT_SK For UT Test"
         required: true
 
 jobs:
