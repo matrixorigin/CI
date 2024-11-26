@@ -236,9 +236,9 @@ jobs:
           go tool cover -o ${{ env.ut_html_coverage }} -html=${{ env.ut_coverage }}
           echo "ut_html_coverage finished"
           rm -rf ${{ env.raw_ut_coverage }}
-          #ps -aux | grep 'mo-service' | grep -v 'grep' | awk '{print $2}' | xargs kill -s SIGINT
-          #i=1 && while [ -n "$(ps -aux|grep 'mo-service' | grep -v 'grep' | awk '{print $2}')" ] && [ $i -le 300 ]; do echo "mo-service kill not finished......$i/300"; i=$(($i+1)); sleep 1s; done
-          #if [ $i -gt 300 ]; then echo 'stop mo-service failed...'; exit 1; else echo 'stop mo-service successed...'; fi
+          ps -aux | grep 'mo-service' | grep -v 'grep' | awk '{print $2}' | xargs kill -s SIGINT
+          i=1 && while [ -n "$(ps -aux|grep 'mo-service' | grep -v 'grep' | awk '{print $2}')" ] && [ $i -le 300 ]; do echo "mo-service kill not finished......$i/300"; i=$(($i+1)); sleep 1s; done
+          if [ $i -gt 300 ]; then echo 'stop mo-service failed...'; exit 1; else echo 'stop mo-service successed...'; fi
           go tool covdata textfmt -i="$GITHUB_WORKSPACE/matrixone" -o ${{ env.raw_bvt_coverage }}
           cat ${{ env.raw_bvt_coverage }} | grep -v ${{ env.bvt_excluded_pkg }} > ${{ env.bvt_coverage }}
           echo "bvt_coverage finished"
@@ -328,6 +328,11 @@ jobs:
           echo "sysbench=${{steps.s1.outputs.run_sysbench}}"
           echo "ssb=${{steps.s1.outputs.run_ssb}}"
           echo "tpch=${{steps.s1.outputs.run_tpch}}"
+
+          # start mo-service
+          cd $GITHUB_WORKSPACE/matrixone
+          ./optools/run_bvt.sh $GITHUB_WORKSPACE/matrixone launch
+
 
       - name: Clone mo-load-data Repo
         if: ${{ !cancelled() && !failure() && ( steps.s1.outputs.run_tpcc == 'true' || steps.s1.outputs.run_ssb == 'true' || steps.s1.outputs.run_tpch == 'true' ) }}
