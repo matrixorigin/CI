@@ -178,13 +178,34 @@ jobs:
           mv ${{ github.workspace }}/workspace ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/mo-tester ${{ github.workspace }}/upload/
 
+          #拆分上传
+          mkdir -p ${{ github.workspace }}/upload-1
+          mkdir -p ${{ github.workspace }}/upload-2
+          
+          mv $GITHUB_WORKSPACE/upload/mo-tester/report $GITHUB_WORKSPACE/upload-1/
+          mv $GITHUB_WORKSPACE/upload/workspace/mo-service.log $GITHUB_WORKSPACE/upload-1/
+          mv $GITHUB_WORKSPACE/upload/workspace/upstream-mo-service.log $GITHUB_WORKSPACE/upload-1/
+          
+          mv $GITHUB_WORKSPACE/upload/workspace/mo-service $GITHUB_WORKSPACE/upload-2/
+          mv $GITHUB_WORKSPACE/upload/workspace/mo-service-upstream $GITHUB_WORKSPACE/upload-2/
+          mv $GITHUB_WORKSPACE/upload/workspace/mo-data $GITHUB_WORKSPACE/upload-2/
+
       - uses: actions/upload-artifact@v4
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
           name: Compatibility-Test-Target-on-Linux-x64(LAUNCH)-reports
           path: |
-            ${{ github.workspace }}/upload
+            ${{ github.workspace }}/upload-1
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ failure() || cancelled()}}
+        continue-on-error: true
+        with:
+          name: Compatibility-Test-Target-on-Linux-x64(LAUNCH)-mo-data
+          path: |
+            ${{ github.workspace }}/upload-2
           retention-days: 7
 
   upgrade-ci-release-linux-amd64:
