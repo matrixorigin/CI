@@ -54,9 +54,18 @@ jobs:
 
           # 获取格式化的日期时间字符串
           time=$(date '+%Y-%m-%d %H:%M:%S')
-
+          
+          # action link
+          action_link="https://github.com/${{ github.event.pull_request.base.repo.full_name }}/actions/runs/${{ github.run_id }}"
+          
+          echo "ACTION_TIME=${ACTION_TIME}"
+          echo "START_TIME=${time}"
+          echo "ACTION_LINK=${action_link}"
+          
           echo "ACTION_TIME=${ACTION_TIME}" >> $GITHUB_OUTPUT
           echo "START_TIME=${time}" >> $GITHUB_OUTPUT
+          echo "ACTION_LINK=${action_link}" >> $GITHUB_OUTPUT
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: "3"
@@ -129,6 +138,7 @@ jobs:
           action_time: ${{ steps.time.outputs.ACTION_TIME }}
           ut_cases: ${{ steps.failed.outputs.FAIL_UT_CASES }}
           pr_link: ${{ github.event.pull_request.html_url }}
+          action_link: ${{ steps.time.outputs.ACTION_LINK }}
           job_time: ${{ steps.time.outputs.START_TIME }}
           mo_host: ${{ secrets.EE_DB_ADDR }}
           mo_port: ${{ secrets.EE_DB_PORT }}
