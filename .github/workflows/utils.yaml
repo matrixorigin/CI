@@ -173,7 +173,7 @@ jobs:
           setup-java: false
       - name: Set Variables
         run: |
-          echo "ut_report='UT-Report.out'" >> $GITHUB_ENV
+          echo "ut_report=UT-Report.out" >> $GITHUB_ENV
           echo "raw_ut_coverage='ut_coverage.raw'" >> $GITHUB_ENV
           echo "raw_bvt_coverage='bvt_coverage.raw'" >> $GITHUB_ENV
           echo "ut_coverage='ut_coverage.out'" >> $GITHUB_ENV
