@@ -21,6 +21,7 @@ on:
 jobs:
   Update_MOC:
     name: Update MOC
+    environment: ci
     runs-on: ubuntu-latest
     steps:
       - name: Update MOC Data
