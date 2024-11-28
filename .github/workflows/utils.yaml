@@ -230,7 +230,7 @@ jobs:
           mo_port: ${{ secrets.EE_DB_PORT }}
           mo_user: ${{ secrets.EE_DB_USER }}
           mo_password: ${{ secrets.EE_DB_PASSWORD }}
-          mo_database: 'mo_test'
+          mo_database: ${{ secrets.EE_DB_DB }}
 
       - name: Start BVT Test Service
         if: ${{ always() && !cancelled() }}
