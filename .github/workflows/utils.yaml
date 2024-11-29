@@ -370,7 +370,7 @@ jobs:
           python $GITHUB_WORKSPACE/parse_coverage.py -coverage_files $GITHUB_WORKSPACE/matrixone/ut_coverage.out $GITHUB_WORKSPACE/matrixone/bvt_coverage.out -diff_path $GITHUB_WORKSPACE/matrixone/diff.patch
 
       - name: Check Coverage(compare with branch main)
-        if: ${{ false }}
+        #if: ${{ false }}
         uses: matrixorigin/CI/actions/check-coverage@main
         with:
           type: open
