@@ -21,3 +21,6 @@ pkg/common/morpc/examples/*
 *engine/aoe*
 *engine/memEngine*
 *pkg/catalog*
+*pkg/sql/compile/remoterun.go
+*pkg/sql/compile/remoterunClient.go
+*pkg/sql/compile/remoterunServer.go
