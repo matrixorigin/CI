@@ -86,7 +86,7 @@ jobs:
     if: github.event_name == 'issues' && github.event.action == 'closed'
     steps:
       - name: Reopen Issue
-        if: github.event.issue.user.login != github.event.sender.login && github.event.action == 'closed' && github.event.sender.login != 'sukki37' && github.event.sender.login != 'aressu1985' && github.event.sender.login != 'fengttt' && github.event.sender.login != 'florashi181'
+        if: github.event.issue.user.login != github.event.sender.login && github.event.action == 'closed' && github.event.sender.login != 'sukki37' && github.event.sender.login != 'aressu1985' && github.event.sender.login != 'fengttt' && github.event.sender.login != 'allengaoo'
         uses: actions-cool/issues-helper@v3
         with:
           actions: "open-issue"
@@ -332,7 +332,7 @@ jobs:
       - name: Reopen Issue Without PR
         id: step1
         with:
-          whitelist: 'sukki37,fengttt,aressu1985' # 白名单成员 可以无条件删除带有特殊标签的issue
+          whitelist: 'sukki37,fengttt,aressu1985,allengaoo' # 白名单成员 可以无条件删除带有特殊标签的issue
           issue_owner: ${{ github.event.issue.user.login }} # issue的打开者 当满足存在关联pr时允许关闭
           close_user: ${{ github.event.sender.login }}  # 当前关闭issue的操作者
           github_token: ${{ secrets.TOKEN_ACTION }}  # 获取github action token操作权限
