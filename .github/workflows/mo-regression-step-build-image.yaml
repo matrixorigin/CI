@@ -59,9 +59,11 @@ on:
         commit_id_long:
             description: "mo full commit id"
             value: ${{ jobs.docker_image_build.outputs.commit_id_long }}
-  
+
 jobs:
   docker_image_build:
+    env:
+      DOCKER_BUILD_SUMMARY: false
     runs-on: ${{ inputs.runner }}
     timeout-minutes: ${{ inputs.time-out }}
     name: BUILD MO DOCKER IMAGE
