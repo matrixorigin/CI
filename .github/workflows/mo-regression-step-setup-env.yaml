@@ -26,6 +26,11 @@ on:
         type: string
         required: true
         default: "main"
+      sha:
+        description: "The commit (long) where the deployment file is located"
+        type: string
+        required: true
+        default: ""
       depoy-file-path:
         description: "The path where the deployment file is located"
         type: string
@@ -215,9 +220,9 @@ jobs:
                 cd $path_matrixone/matrixone && git init;
                 git remote add origin https://github.com/matrixorigin/matrixone.git;
                 git config --local gc.auto 0;
-                timeout 120 git -c protocol.version=2 fetch --no-tags --prune --progress --no-recurse-submodules --depth=1 origin +${{ github.sha }}:refs/remotes/origin/${{ github.ref_name }}
-                git checkout --progress --force -B ${{ github.ref_name }} refs/remotes/origin/${{ github.ref_name }}
-                if [ "$(git log -1 --format='%H')" == "${{ github.sha }}" ]; then
+                timeout 120 git -c protocol.version=2 fetch --no-tags --prune --progress --no-recurse-submodules --depth=1 origin +${{ inputs.sha }}:refs/remotes/origin/${{ inputs.ref }}
+                git checkout --progress --force -B ${{ inputs.ref }} refs/remotes/origin/${{ inputs.ref }}
+                if [ "$(git log -1 --format='%H')" == "${{ inputs.sha }}" ]; then
                   success="yes";
                   break;
                 fi
