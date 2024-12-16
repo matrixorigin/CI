@@ -58,7 +58,6 @@ jobs:
   setup_mo_test_env:
     runs-on: ${{ inputs.runner }}
     timeout-minutes: ${{ inputs.time-out }}
-    name: Start MatrixOne Bvt Test
     steps:
       - name: Clone Repo ${{ inputs.repo }}
         uses: actions/checkout@v4
