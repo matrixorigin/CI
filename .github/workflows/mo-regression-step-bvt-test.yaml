@@ -55,9 +55,10 @@ on:
     #     required: true
 
 jobs:
-  setup_mo_test_env:
+  start_bvt_test:
     runs-on: ${{ inputs.runner }}
     timeout-minutes: ${{ inputs.time-out }}
+    name: START BVT TEST
     steps:
       - name: Clone Repo ${{ inputs.repo }}
         uses: actions/checkout@v4

@@ -95,6 +95,7 @@ jobs:
   setup_mo_test_env:
     runs-on: ${{ inputs.runner }}
     timeout-minutes: ${{ inputs.time-out }}
+    name: SETUP MO TEST ENV
     outputs:
       mo_svc_ip: ${{ steps.get_mo_addr.outputs.mo_svc_ip }}
       cn_ips: ${{ steps.get_mo_addr.outputs.cn_ips }}
