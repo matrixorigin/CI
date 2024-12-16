@@ -71,7 +71,6 @@ jobs:
       commit_id_long: ${{ steps.prep.outputs.commit_id_long }}
     steps:
       - name: Clone Repo ${{ inputs.repo }}
-        if: ${{ always() && !cancelled() }}
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.repo }}
