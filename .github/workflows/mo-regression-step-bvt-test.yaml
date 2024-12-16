@@ -1,0 +1,111 @@
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: "GitHub Runner that runs the task"
+        type: string
+        required: false
+        default: "amd64-mo-guangzhou-medium8"
+      time-out:
+        description: "GitHub Runner TimeOut"
+        type: number
+        required: false
+        default: 40
+      host:
+        description: 'The host used by mysql to connection'
+        required: true
+        type: string
+        default: ""
+      cn_ips:
+        description: "matrixone cns' ip"
+        required: true
+        type: string
+        default: ""
+      repo:
+        description: 'matrixone repository'
+        required: true
+        type: string
+        default: "matrixorigin/matrixone"
+      ref:
+        description: 'matrixone repository branch(or commit)'
+        required: true
+        type: string
+        default: "main"
+      resource-path:
+        description: 'the resource path required by bvt to load'
+        required: true
+        type: string
+        default: "/matrixone/test/distributed/resources"
+      exclude-cases:
+        description: 'bvt exclude cases'
+        required: true
+        type: string
+        default: "optimistic"
+      upload-file-name:
+        description: 'upload report file name'
+        required: true
+        type: string
+        default: "mo-regression-bvt"
+    # secrets:
+    #   MO_USERNAME:
+    #     description: 'username used connect to matrixone'
+    #     required: true
+    #   MO_PASSWORD:
+    #     description: 'password for connect to matrixone'
+    #     required: true
+
+jobs:
+  setup_mo_test_env:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: ${{ inputs.time-out }}
+    name: SETUP MO TEST ENV
+    steps:
+      - name: Clone Repo ${{ inputs.repo }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repo }}
+          ref: ${{ inputs.ref }}
+          fetch-depth: 1
+          path: ./matrixone
+      - name: Clone Repo MO-Tester
+        uses: actions/checkout@v4
+        with:
+          repository: matrixorigin/mo-tester
+          path: ./mo-tester
+          ref: main
+      - name: Set JAVA PATH
+        run: |
+          echo "$JAVA_HOME/bin" >> $GITHUB_PATH
+      - name: Modify MO-Tester Config
+        if: ${{ always() && !cancelled() }}
+        run: |
+          sed -i "s/127.0.0.1:6001/${{ inputs.host }}:6001/" ./mo-tester/mo.yml
+          sed -i 's/socketTimeout:.*/socketTimeout: 300000/g' ./mo-tester/mo.yml
+          sed -i 's/  serverIP: "127.0.0.1"/  serverIP: "${{ inputs.cn_ips }}"/g' ./mo-tester/mo.yml
+          sed -i 's/waittime:.*/waittime: 2000/g' ./mo-tester/run.yml
+          cat ./mo-tester/mo.yml
+          echo "=========================="
+          cat ./mo-tester/run.yml
+
+      - name: Start BVT Test
+        timeout-minutes: 40
+        run: |
+          export LC_ALL="C.UTF-8"
+          locale
+          echo "=========================="
+
+          cd $GITHUB_WORKSPACE/mo-tester
+          ./run.sh -n -g -o -p $GITHUB_WORKSPACE/matrixone/test/distributed/cases -s ${{ inputs.resource-path }} -e ${{ inputs.exclude-cases }}  2>&1
+          rm -rf .git lib
+      - name: Collect Upload files
+        if: ${{ always() }}
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/reports/mo-tester
+          mkdir -p $GITHUB_WORKSPACE/mo-tester && cp -r $GITHUB_WORKSPACE/mo-tester $GITHUB_WORKSPACE/reports/mo-tester
+      - uses: actions/upload-artifact@v4
+        if: ${{ failure() }}
+        continue-on-error: true
+        with:
+          name: mo-regression-bvt
+          path: |
+              ${{ github.workspace }}/reports
