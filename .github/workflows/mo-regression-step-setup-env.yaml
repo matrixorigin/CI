@@ -115,7 +115,7 @@ jobs:
             sleep 60s;
           fi
           kubectl get bucket -n ${{ inputs.namespace }} | grep bucket | awk '{system("kubectl delete bucket/"$1" -n ${{ inputs.namespace }}")}';
-          kubectl delete ns ${{ inputs.namespace }};
+          kubectl delete ns ${{ inputs.namespace }} || exit 0;
       - name: Prepare Namespace and Secrets
         id: prepare
         run: |
