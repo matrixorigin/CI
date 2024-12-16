@@ -35,7 +35,7 @@ on:
           description: "The image registry of the stored mo"
           type: string
           required: true
-          default: "ccr.ccs.tencentyun.com"
+          default: "matrixone-dev/matrixone"
         platform:
           description: "The image platform of mo image"
           type: string
@@ -75,7 +75,6 @@ jobs:
         with:
           repository: ${{ inputs.repo }}
           ref: ${{ inputs.ref }}
-          path: ./matrixone
       - name: Prepare
         id: prep
         run: |
