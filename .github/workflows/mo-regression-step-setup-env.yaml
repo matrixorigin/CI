@@ -139,11 +139,11 @@ jobs:
   
           file="$GITHUB_WORKSPACE/matrixone/${{ inputs.depoy-file-path }}";
   
-          sed -i 's/nsformocheckin/${{ inputs.namespace }}/g' "${file}"
-          sed -i 's/s3pathformocheckin/${{ inputs.oss-bucket-path }}/g' "${file}"
-          sed -i 's/regionformocheckin/${{ inputs.oss-region }}/g' "${file}"
+          sed -i 's?nsformocheckin?${{ inputs.namespace }}?g' "${file}"
+          sed -i 's?s3pathformocheckin?${{ inputs.oss-bucket-path }}?g' "${file}"
+          sed -i 's?regionformocheckin?${{ inputs.oss-region }}?g' "${file}"
           sed -i 's@endpointformocheckin@${{ inputs.oss-endpoint }}@g' "${file}"
-          sed -i "s/imagetag/${{ inputs.image-tag }}/g" "${file}"
+          sed -i "s?imagetag?${{ inputs.image-tag }}?g" "${file}"
           
           cat "${file}";
       - name: Create MO Cluster
