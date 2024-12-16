@@ -1,0 +1,212 @@
+name: setup-checkin-cluster
+description: "Setup MatrixOne Regression Cluster"
+inputs:
+  namespace:
+    description: 'namespace'
+    required: true
+    default: ""
+  repo:
+    description: 'matrixone github repository'
+    required: true
+    default: "matrixorigin/matrixone"
+  ref:
+    description: 'matrixone repository branch(or commit)'
+    required: true
+    default: "main"
+  depoy-file-path:
+    description: 'matrixone repository branch(or commit)'
+    required: true
+    default: "optools/mo_checkin_regression/mo_checkin_regression_tke.yaml"
+  image-tag:
+    description: 'matrixone image tag'
+    required: true
+    default: ""
+  registry:
+    description: 'mo image registry'
+    required: false
+    default: ""
+  username:
+    description: 'mo image registry username'
+    required: false
+    default: ""
+  password:
+    description: 'mo image registry password'
+    required: false
+    default: ""
+  oss-bucket-path:
+    description: "bucket and path used to store matrixone shared data"
+    required: true
+    default: ""
+  oss-endpoint:
+    description: "oss endpoint"
+    required: true
+    default: "https://cos.ap-guangzhou.myqcloud.com"
+  oss-region:
+    description: "oss region"
+    required: true
+    default: "ap-guangzhou"
+  oss-username:
+    description: 'username used to access object storage'
+    required: true
+    default: ""
+  oss-password:
+    description: 'password used to access object storage'
+    required: true
+    default: ""
+  prepare-bvt-data:
+    description: 'prepare bvt test needed data'
+    required: true
+    default: "true"
+  enable-txn-check:
+    description: 'enable mo txn check'
+    required: true
+    default: "false"
+
+outputs:
+  mo_svc_ip:
+    description: 'matrixone service ip which used by mysql client'
+    value: ${{ steps.get_mo_addr.outputs.mo_svc_ip }}
+  cn_ips:
+    description: "matrixone cn components' ip"
+    value: ${{ steps.get_mo_addr.outputs.cn_ips }}
+  cn_0:
+    description: "matrixone cn-0 ip"
+    value: ${{ steps.get_mo_addr.outputs.cn_0 }}
+  cn_1:
+    description: "matrixone cn-1 ip"
+    value: ${{ steps.get_mo_addr.outputs.cn_1 }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Clone Repo ${{ inputs.repo }}
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.repo }}
+        ref: ${{ inputs.ref }}
+        fetch-depth: 1
+        path: ./matrixone
+    - name: Clean TKE ENV
+      shell: /bin/bash
+      run: |
+        if [ "$(kubectl -n ${{ inputs.namespace }} get mo | grep -c "mo-checkin-regression")" -ne 0 ];then 
+          kubectl get matrixonecluster -n ${{ inputs.namespace }} | awk 'NR>1{system("kubectl delete  matrixonecluster -n ${{ inputs.namespace }} "$1)}'
+          sleep 60s;
+        fi
+        kubectl get bucket -n ${{ inputs.namespace }} | grep bucket | awk '{system("kubectl delete bucket/"$1" -n ${{ inputs.namespace }}")}';
+        kubectl delete ns ${{ inputs.namespace }};
+    - name: Prepare Namespace and Secrets
+      id: prepare
+      shell: /bin/bash
+      run: |
+        # set docker login info
+        DOCKER_REGISTRY_SERVER=${{ inputs.registry }}
+        DOCKER_USER=${{ inputs.username }}
+        DOCKER_PASSWORD=${{ inputs.password }}
+
+        kubectl create namespace ${{ inputs.namespace }};
+        kubectl -n ${{ inputs.namespace }} create secret generic tencent-token --from-literal=AWS_ACCESS_KEY_ID=${{ inputs.oss-username }} --from-literal=AWS_SECRET_ACCESS_KEY=${{ inputs.oss-password }};
+        kubectl -n ${{ inputs.namespace }} create secret docker-registry tke-registry --docker-server=$DOCKER_REGISTRY_SERVER --docker-username=$DOCKER_USER --docker-password=$DOCKER_PASSWORD;      
+
+        # export https_proxy and http_proxy
+        echo "https_proxy=${https_proxy}" >> ${GITHUB_OUTPUT};
+        echo "http_proxy=${http_proxy}" >> ${GITHUB_OUTPUT};
+        echo "no_proxy=${no_proxy}" >> ${GITHUB_OUTPUT};
+
+    - name: ECHO mo-checkin-regression.yaml
+      shell: /bin/bash
+      run: |
+        cd $GITHUB_WORKSPACE/matrixone
+
+        file="$GITHUB_WORKSPACE/matrixone/${{ inputs.depoy-file-path }}";
+
+        sed -i 's/nsformocheckin/${{ inputs.namespace }}/g' "${file}"
+        sed -i 's/s3pathformocheckin/${{ inputs.oss-bucket-path }}/g' "${file}"
+        sed -i 's/regionformocheckin/${{ inputs.oss-region }}/g' "${file}"
+        sed -i 's@endpointformocheckin@${{ inputs.oss-endpoint }}@g' "${file}"
+        sed -i "s/imagetag/${{ inputes.image-tag }}/g" "${file}"
+        
+        cat "${file}";
+    - name: Create MO Cluster
+      shell: /bin/bash
+      run: |
+        kubectl create cm -n ${{ inputs.namespace }} proxy-env --from-literal=https_proxy="${https_proxy}" --from-literal=http_proxy="${http_proxy}" --from-literal=no_proxy="${no_proxy}";
+        kubectl -n ${{ inputs.namespace }} apply -f "$GITHUB_WORKSPACE/matrixone/${{ inputs.depoy-file-path }}";
+        sleep 100s
+        while true; do
+          if [ "$(kubectl get mo -n ${{ inputs.namespace }} | grep ${{ inputes.image-tag }} | grep -iv NotReady | grep -ic Ready )" -eq 0 ]; then
+            kubectl get mo -n ${{ inputs.namespace }};
+            sleep 15s;
+            continue;
+          else
+            break;
+          fi
+        done
+        kubectl -n ${{ inputs.namespace }} get pod -owide
+
+    - name: Get MO Cluster Addr
+      id: get_mo_addr
+      shell: /bin/bash
+      timeout-minutes: 2
+      run: |
+        mo_svc_ip=$(kubectl -n ${{ inputs.namespace }} get svc | grep "proxy" | grep "6001/TCP"|awk '{print $3}')
+        if [ -z "$mo_svc_ip" ]; then
+        echo "mo_svc_ip use proxy module failed, starting use cn_svc_ip"
+        mo_svc_ip=$(kubectl -n ${{ inputs.namespace }} get svc | grep "cn" | grep "6001/TCP" | awk '{print $3}')
+        fi
+        echo mo_svc_ip=$mo_svc_ip
+        echo "mo_svc_ip=${mo_svc_ip}" >> $GITHUB_OUTPUT
+        kubectl get pod -n ${{ inputs.namespace }} -l matrixorigin.io/component=CNSet | awk 'NR>1{arr[a++]=$1} END {for(i in arr){system("echo cn_"i"="arr[i]" >> $GITHUB_OUTPUT")}}'
+        cn_ips=$(kubectl -n ${{ inputs.namespace }} get pods -l matrixorigin.io/component=CNSet -o=jsonpath='{.items[*].status.podIP}' | sed 's/ /,/g')
+        echo "cn_ips is $cn_ips"
+        echo "cn_ips=$cn_ips" >> $GITHUB_OUTPUT;
+    - name: Add TXN Filter
+      if: ${{ inputs.enable-txn-check }}
+      shell: /bin/bash
+      run: |
+        export MYSQL_PWD=111;
+        for i in {1..300}; do
+          if mysql -h ${{ steps.get_mo_addr.outputs.mo_svc_ip }} -P 6001 -u dump -e "select mo_ctl('cn', 'txn-trace', 'add-txn user dump');select mo_ctl('cn', 'txn-trace', 'add-txn user admin');select mo_ctl('cn', 'txn-trace', 'add-txn connection sql-executor,0');select mo_ctl('cn', 'txn-trace', 'enable txn');select mo_ctl('cn', 'txn-trace', 'enable data');select mo_ctl('cn', 'txn-trace', 'enable txn-action');select mo_ctl('cn', 'txn-trace', 'add-statement cost 10s');"; then
+            break;
+          fi
+        sleep 1;
+        done
+    - name: Prepare BVT Data in Pod
+      if: ${{ inputs.prepare-bvt-data }}
+      timeout-minutes: 5
+      shell: /bin/bash
+      run: |
+        pods=($(kubectl -n ${{ inputs.namespace }} get pods -l matrixorigin.io/component=CNSet -o=jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'));
+        for pod in "${pods[@]}"; do 
+          kubectl exec -it ${pod} -n ${{ inputs.namespace }} -- bash -c '
+            set -x;
+
+            export https_proxy="${{ steps.prepare.https_proxy }}";
+            export http_proxy="${{ steps.prepare.http_proxy }}";
+            export no_proxy="${{ steps.prepare.no_proxy }}";
+
+            git config --global init.defaultBranch main
+            success="no"
+            path_matrixone=$(pwd);
+            for i in {1..5}; do
+              rm -rf $path_matrixone/matrixone;
+              mkdir $path_matrixone/matrixone;
+              git config --global --add safe.directory $path_matrixone/matrixone;
+              cd $path_matrixone/matrixone && git init;
+              git remote add origin https://github.com/matrixorigin/matrixone.git;
+              git config --local gc.auto 0;
+              timeout 120 git -c protocol.version=2 fetch --no-tags --prune --progress --no-recurse-submodules --depth=1 origin +${{ github.sha }}:refs/remotes/origin/${{ github.ref_name }}
+              git checkout --progress --force -B ${{ github.ref_name }} refs/remotes/origin/${{ github.ref_name }}
+              if [ "$(git log -1 --format='%H')" == "${{ github.sha }}" ]; then
+                success="yes";
+                break;
+              fi
+              sleep 15;
+            done
+
+            if [ $success == "no" ]; then
+              exit 1;
+            fi
+            exit 0;
+          '
+        done
