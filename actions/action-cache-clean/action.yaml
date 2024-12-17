@@ -1,0 +1,20 @@
+name: "Clean Action Cache"
+description: "Auto Clean Action Cache"
+inputs:
+  github_token:
+    description: "PAT token for accessing GitHub API"
+    required: true
+  max_live_duration:
+    description: "The maximum time the cache is allowed to exist, in seconds"
+    required: false
+    default: "86400"
+  owner:
+    description: "Account where cache exists"
+    required: true
+  repository:
+    description: "The specific repository where the cache exists"
+    required: true
+
+runs:
+  using: "node20"
+  main: "dist/index.js"
