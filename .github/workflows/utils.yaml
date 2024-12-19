@@ -454,7 +454,7 @@ jobs:
           repository: matrixorigin/mo-load
           token: ${{secrets.TOKEN_ACTION}}
           path: ./mo-load
-          ref: main
+          ref: 1.0
 
       - name: Clone mo-tpcc Repo
         if: ${{ !cancelled() && !failure() && steps.s1.outputs.run_tpcc == 'true' }}
