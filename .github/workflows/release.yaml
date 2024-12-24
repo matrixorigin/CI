@@ -89,7 +89,7 @@ jobs:
 
   linux-arm64-build-job:
     environment: ci
-    runs-on: aws-arm64-runner
+    runs-on: arm64-mo-guangzhou-2xlarge16
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -383,7 +383,7 @@ jobs:
 
   musl-arm64-build-job:
     environment: ci
-    runs-on: aws-arm64-runner
+    runs-on: arm64-mo-guangzhou-2xlarge16
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
