@@ -209,7 +209,6 @@ jobs:
           retention-days: 7
 
   upgrade-ci-release-linux-amd64:
-    if: ${{ github.event_name == '' }}
     environment: ci
     runs-on: ubuntu-22.04
     name: Compatibility Test With Release on Linux/x64(LAUNCH)
