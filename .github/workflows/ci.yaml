@@ -199,7 +199,7 @@ jobs:
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
-      - uses: thiagodnf/yaml-schema-checker@v0.0.10
+      - uses: thiagodnf/yaml-schema-checker@v0.0.12
         name: Check Issue Template
         with:
           jsonSchemaFile: .github/ISSUE_TEMPLATE/schema.json
