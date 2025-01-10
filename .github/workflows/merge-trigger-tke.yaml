@@ -1,4 +1,4 @@
-name:  MO Checkin Regression On TKE
+name: MO Checkin Regression On TKE
 
 on:
   workflow_call:
@@ -10,34 +10,34 @@ on:
         default: false
     secrets:
       TCR_USERNAME:
-        description: 'TCR_USERNAME'
+        description: "TCR_USERNAME"
         required: true
       TCR_TOKEN:
-        description: 'TCR_TOKEN'
+        description: "TCR_TOKEN"
         required: true
       TENCENT_AK:
-        description: 'TENCENT_AK'
+        description: "TENCENT_AK"
         required: true
       TENCENT_SK:
-        description: 'TENCENT_SK'
+        description: "TENCENT_SK"
         required: true
       WECHAT_MO_CHECKIN_BOT_WEBHOOK:
-        description: 'WECHAT_MO_CHECKIN_BOT_WEBHOOK'
+        description: "WECHAT_MO_CHECKIN_BOT_WEBHOOK"
         required: true
       TOKEN_ACTION:
-        description: 'TOKEN_ACTION'
+        description: "TOKEN_ACTION"
         required: true
 
 jobs:
   docker_image_build:
     environment: ci
-    runs-on: amd64-mo-shanghai-dind  #amd64-mo-guangzhou-dind  
+    runs-on: amd64-mo-shanghai-dind #amd64-mo-guangzhou-dind
     if: ${{ github.event.pull_request.merged == true }}
     timeout-minutes: 30
     name: BUILD MO DOCKER IMAGE
     outputs:
-       version: ${{ steps.prep.outputs.version }}
-       commit_id: ${{ steps.prep.outputs.commit_id }}
+      version: ${{ steps.prep.outputs.version }}
+      commit_id: ${{ steps.prep.outputs.commit_id }}
     steps:
       - name: Clone Repo Matrixorigin/Matrixone
         if: ${{ always() && !cancelled() }}
@@ -53,7 +53,7 @@ jobs:
           DOCKER_IMAGE=ccr.ccs.tencentyun.com/matrixone-dev/matrixone
           VERSION=commit-$LAST_COMMIT_ID
           TAGS="${DOCKER_IMAGE}:${VERSION}"
-          
+
           # Set output parameters.
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
           echo "docker_image=${DOCKER_IMAGE}" >> $GITHUB_OUTPUT
@@ -113,7 +113,7 @@ jobs:
             kubectl create namespace mo-checkin-regression-${{ github.event.pull_request.number }};
             kubectl -n mo-checkin-regression-${{ github.event.pull_request.number }} create secret generic tencent-token --from-literal=AWS_ACCESS_KEY_ID=${{ secrets.TENCENT_AK }} --from-literal=AWS_SECRET_ACCESS_KEY=${{ secrets.TENCENT_SK }};
             kubectl -n mo-checkin-regression-${{ github.event.pull_request.number }} create secret docker-registry tke-registry --docker-server=$DOCKER_REGISTRY_SERVER --docker-username=$DOCKER_USER --docker-password=$DOCKER_PASSWORD;
-          fi       
+          fi
       - name: ECHO mo-checkin-regression.yaml
         run: |
           echo '${{ needs.docker_image_build.outputs.version }}'
@@ -123,7 +123,7 @@ jobs:
           sed -i 's/regionformocheckin/ap-guangzhou/g' $GITHUB_WORKSPACE/matrixone/optools/mo_checkin_regression/mo_checkin_regression_tke.yaml
           sed -i 's@endpointformocheckin@https://cos.ap-guangzhou.myqcloud.com@g' $GITHUB_WORKSPACE/matrixone/optools/mo_checkin_regression/mo_checkin_regression_tke.yaml
           sed -i "s/imagetag/${{ needs.docker_image_build.outputs.version }}/g" $GITHUB_WORKSPACE/matrixone/optools/mo_checkin_regression/mo_checkin_regression_tke.yaml
-         
+
           cat $GITHUB_WORKSPACE/matrixone/optools/mo_checkin_regression/mo_checkin_regression_tke.yaml
       - name: Create MO Cluster
         run: |
@@ -235,7 +235,7 @@ jobs:
     name: MO CHECKIN BVT TEST
     environment: ci
     runs-on: amd64-mo-guangzhou-medium8
-    needs: [setup_mo_test_env,docker_image_build]
+    needs: [setup_mo_test_env, docker_image_build]
     steps:
       - name: Clone MO-Tester
         if: ${{ always() && !cancelled() }}
@@ -282,13 +282,13 @@ jobs:
         with:
           name: mo-checkin-regression-${{ github.event.pull_request.number }}-bvt
           path: |
-             ${{ github.workspace }}/reports
+            ${{ github.workspace }}/reports
   ssb_and_tpch_test:
     if: ${{ always() && !cancelled() && needs.setup_mo_test_env.result == 'success' }}
     name: MO CHECKIN SSB AND TPCH TEST
     environment: ci
     runs-on: amd64-mo-guangzhou-2xlarge16
-    needs: [setup_mo_test_env,bvt_test]
+    needs: [setup_mo_test_env, bvt_test]
     steps:
       - name: Clone mo-load-data Repo
         if: ${{ always() && !cancelled() }}
@@ -324,7 +324,7 @@ jobs:
           token: ${{secrets.TOKEN_ACTION}}
           path: ./mo-nightly-regression
           ref: main
-      
+
       - name: Create Account for Test
         timeout-minutes: 2
         id: account_for_ssb_and_tpch
@@ -401,7 +401,6 @@ jobs:
             ${{ github.workspace }}/upload
           retention-days: 7
 
-
       # start tpch test
       - name: Load TPCH 10G Test Data
         if: ${{ always() && !cancelled() }}
@@ -443,7 +442,6 @@ jobs:
           path: |
             ${{ github.workspace }}/upload
           retention-days: 7
-
 
       - name: Start TPCH 10G Test
         if: ${{ always() && !cancelled() && steps.load_tpch_data.conclusion == 'success' }}
@@ -503,7 +501,7 @@ jobs:
         with:
           name: mo-checkin-regression-${{ github.event.pull_request.number }}-ssb-tpch
           path: |
-             ${{ github.workspace }}/reports
+            ${{ github.workspace }}/reports
           retention-days: 7
 
   sysbench_test:
@@ -511,7 +509,7 @@ jobs:
     name: SYSBENCH TEST
     environment: ci
     runs-on: amd64-mo-guangzhou-2xlarge16
-    needs: [setup_mo_test_env,bvt_test]
+    needs: [setup_mo_test_env, bvt_test]
     steps:
       - name: Clone mo-load Repo
         if: ${{ always() && !cancelled() }}
@@ -529,7 +527,7 @@ jobs:
           token: ${{secrets.TOKEN_ACTION}}
           path: ./mo-nightly-regression
           ref: main
-          
+
       - name: Create Account for Test And Set PATH
         timeout-minutes: 2
         id: account_for_sysbench
@@ -546,13 +544,13 @@ jobs:
           set -uo pipefail
           export LC_ALL="C.UTF-8"
           locale
-          
+
           cd $GITHUB_WORKSPACE/mo-load
           mkdir -p report
           sed -i 's/127.0.0.1/${{ needs.setup_mo_test_env.outputs.mo_svc_ip }}/g' mo.yml
           sed -i 's/name:.*$/name: "${{ steps.account_for_sysbench.outputs.sysbench_account }}"/g' mo.yml
           sed -i 's/password:.*$/password: "${{ steps.account_for_sysbench.outputs.sysbench_password }}"/g' mo.yml
-          
+
           echo 'Start Prepare Data of 10-tables-100000-per-table'
           ./start.sh -m SYSBENCH -n 10 -s 100000 -t 1 | tee report/load-oltp-mix.log
           sleep 10
@@ -574,7 +572,7 @@ jobs:
             fi
           sleep 1;
           done
- 
+
       # start sysbench test
       - name: Start OLTP Mixed Test With 30 Threads
         if: ${{ always() && !cancelled() }}
@@ -583,12 +581,12 @@ jobs:
           set -uo pipefail
           export LC_ALL="C.UTF-8"
           locale
-          
+
           cd $GITHUB_WORKSPACE/mo-load
           mkdir -p report
           echo 'Start OLTP Insert Test With 30 threads'
           ./start.sh -c cases/sysbench/mixed_10_100000 -t 30 -d 20 -g -b sbtest | tee report/oltp-mix.log
-     
+
       - name: Result Summary
         if: ${{ always() && !cancelled()  }}
         run: |
@@ -617,14 +615,14 @@ jobs:
         run: |
           mkdir -p $GITHUB_WORKSPACE/reports/mo-load
           mkdir -p $GITHUB_WORKSPACE/mo-load/report && cp -r $GITHUB_WORKSPACE/mo-load/report $GITHUB_WORKSPACE/reports/mo-load
-          
-      - uses: actions/upload-artifact@v3
+
+      - uses: actions/upload-artifact@v4
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
           name: mo-checkin-regression-${{ github.event.pull_request.number }}-sysbench
           path: |
-             ${{ github.workspace }}/reports
+            ${{ github.workspace }}/reports
           retention-days: 7
 
   tpcc_test:
@@ -632,7 +630,7 @@ jobs:
     name: TPCC TEST
     environment: ci
     runs-on: amd64-mo-guangzhou-2xlarge16
-    needs: [setup_mo_test_env,bvt_test]
+    needs: [setup_mo_test_env, bvt_test]
     steps:
       - name: Clone mo-load-data Repo
         if: ${{ always() && !cancelled() }}
@@ -667,7 +665,6 @@ jobs:
           mysql -h ${{ needs.setup_mo_test_env.outputs.mo_svc_ip }} -P 6001 -udump -p111 -e "create account tpcc_test admin_name = 'admin' identified by '111' comment 'for tpcc test';"
           echo "tpcc_account=tpcc_test:admin" >> $GITHUB_OUTPUT
           echo "tpcc_password=111" >> $GITHUB_OUTPUT
-          
 
       - name: Modify Tool's Setting And Set PATH
         run: |
@@ -678,7 +675,7 @@ jobs:
 
           echo "$JAVA_HOME/bin" >> $GITHUB_PATH
 
-     # start tpcc test
+      # start tpcc test
       - name: Load TPCC 50 Warehouse Data
         if: ${{ always() && !cancelled() }}
         timeout-minutes: 20
@@ -718,7 +715,7 @@ jobs:
           set -uo pipefail
           export LC_ALL="C.UTF-8"
           locale
-          
+
           cd $GITHUB_WORKSPACE/mo-tpcc
           mkdir -p report
           cp props.mo props_50.mo
@@ -761,7 +758,7 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/reports/mo-load-data
           mkdir -p $GITHUB_WORKSPACE/reports/mo-tpcc
           mkdir -p $GITHUB_WORKSPACE/mo-load-data/report && cp -r $GITHUB_WORKSPACE/mo-load-data/report $GITHUB_WORKSPACE/reports/mo-load-data
-          mkdir -p $GITHUB_WORKSPACE/mo-tpcc/report && cp -r $GITHUB_WORKSPACE/mo-tpcc/report $GITHUB_WORKSPACE/reports/mo-tpcc     
+          mkdir -p $GITHUB_WORKSPACE/mo-tpcc/report && cp -r $GITHUB_WORKSPACE/mo-tpcc/report $GITHUB_WORKSPACE/reports/mo-tpcc
 
       - uses: actions/upload-artifact@v4
         if: ${{ failure() || cancelled()}}
@@ -769,7 +766,7 @@ jobs:
         with:
           name: mo-checkin-regression-${{ github.event.pull_request.number }}-tpcc
           path: |
-             ${{ github.workspace }}/reports
+            ${{ github.workspace }}/reports
           retention-days: 7
 
   clean_up_env:
@@ -777,7 +774,15 @@ jobs:
     name: CLEAN ENV AND NOTICE
     environment: ci
     runs-on: amd64-mo-guangzhou-medium8
-    needs: [docker_image_build,setup_mo_test_env,bvt_test,ssb_and_tpch_test,sysbench_test,tpcc_test]
+    needs:
+      [
+        docker_image_build,
+        setup_mo_test_env,
+        bvt_test,
+        ssb_and_tpch_test,
+        sysbench_test,
+        tpcc_test,
+      ]
     steps:
       - name: Check and Recreate Namespace
         if: ${{ needs.docker_image_build.result == 'success' }}
@@ -814,7 +819,7 @@ jobs:
           path: |
             ${{ github.workspace }}/upload
           retention-days: 7
-        
+
       - name: Check MO Status and Clean ENV
         if: ${{ needs.docker_image_build.result == 'success' && needs.setup_mo_test_env.result == 'success' && needs.bvt_test.result == 'success' && needs.ssb_and_tpch_test.result == 'success' && needs.sysbench_test.result == 'success' && needs.tpcc_test.result == 'success'  }}
         run: |
@@ -825,7 +830,7 @@ jobs:
           kubectl get matrixonecluster -n mo-checkin-regression-${{ github.event.pull_request.number }} | awk 'NR>1{system("kubectl delete matrixonecluster/"$1" -n mo-checkin-regression-${{ github.event.pull_request.number }}")}'
           sleep 60      
           kubectl -n mo-checkin-regression-${{ github.event.pull_request.number }} get pod -owide
-          
+
           #delete bucket
           kubectl get bucket -n mo-checkin-regression-${{ github.event.pull_request.number }} | grep bucket | awk '{system("kubectl delete bucket/"$1" -n mo-checkin-regression-${{ github.event.pull_request.number }}")}'
           #delete namespace
