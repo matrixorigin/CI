@@ -303,7 +303,7 @@ jobs:
           path: ${{ github.workspace }}/coverage_downloads/coverage_files.zip
           retention-days: 7
       - name: Checkout for Python file
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: matrixorigin/CI
           ref: release/2.0-dev
