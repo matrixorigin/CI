@@ -67,7 +67,7 @@ jobs:
           fi
           zip -r mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64.zip mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64
       - name: Upload Release normal linux x86_64
-        uses: actions/upload-release-asset@v1.0.1
+        uses: actions/upload-release-asset@v1.0.2
         env:
           GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
         with:
@@ -127,7 +127,7 @@ jobs:
           zip -r mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64.zip mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64
 
       - name: Upload Release normal linux arm64
-        uses: actions/upload-release-asset@v1.0.1
+        uses: actions/upload-release-asset@v1.0.2
         env:
           GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
         with:
@@ -224,7 +224,7 @@ jobs:
           zip -r mo-${{ steps.get_release.outputs.tag_name }}-darwin-x86_64.zip mo-${{ steps.get_release.outputs.tag_name }}-darwin-x86_64
 
       - name: Upload Release normal darwin x86_64
-        uses: actions/upload-release-asset@v1.0.1
+        uses: actions/upload-release-asset@v1.0.2
         env:
           GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
         with:
@@ -310,7 +310,7 @@ jobs:
 
           zip -r mo-${{ steps.get_release.outputs.tag_name }}-darwin-arm64.zip mo-${{ steps.get_release.outputs.tag_name }}-darwin-arm64
       - name: Upload Release normal darwin arm64
-        uses: actions/upload-release-asset@v1.0.1
+        uses: actions/upload-release-asset@v1.0.2
         env:
           GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
         with:
@@ -361,7 +361,7 @@ jobs:
           fi
           zip -r mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64.zip mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64
       - name: Upload Release normal musl x86_64
-        uses: actions/upload-release-asset@v1.0.1
+        uses: actions/upload-release-asset@v1.0.2
         env:
           GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
         with:
@@ -418,7 +418,7 @@ jobs:
           fi
           zip -r mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64.zip mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64
       - name: Upload Release normal musl arm64
-        uses: actions/upload-release-asset@v1.0.1
+        uses: actions/upload-release-asset@v1.0.2
         env:
           GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
         with:
