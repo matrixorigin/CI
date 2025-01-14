@@ -181,11 +181,11 @@ jobs:
           #拆分上传
           mkdir -p ${{ github.workspace }}/upload-1
           mkdir -p ${{ github.workspace }}/upload-2
-          
+
           mv $GITHUB_WORKSPACE/upload/mo-tester/report $GITHUB_WORKSPACE/upload-1/
           mv $GITHUB_WORKSPACE/upload/workspace/mo-service.log $GITHUB_WORKSPACE/upload-1/
           mv $GITHUB_WORKSPACE/upload/workspace/upstream-mo-service.log $GITHUB_WORKSPACE/upload-1/
-          
+
           mv $GITHUB_WORKSPACE/upload/workspace/mo-service $GITHUB_WORKSPACE/upload-2/
           mv $GITHUB_WORKSPACE/upload/workspace/mo-service-upstream $GITHUB_WORKSPACE/upload-2/
           mv $GITHUB_WORKSPACE/upload/workspace/mo-data $GITHUB_WORKSPACE/upload-2/
@@ -272,7 +272,7 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE && mkdir workspace
 
-      - name: Start the MO of Rlease ${{ inputs.release-version }}
+      - name: Start the MO of Rlease ${{ steps.get-latest-release.outputs.tag }}
         run: |
           cd $GITHUB_WORKSPACE/workspace
           mv $GITHUB_WORKSPACE/upstream/etc .
@@ -288,11 +288,11 @@ jobs:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
-      - name: Update BVT SQL Timeout for Release ${{ inputs.release-version }}
+      - name: Update BVT SQL Timeout for Release ${{ steps.get-latest-release.outputs.tag }}
         run: |
           cd $GITHUB_WORKSPACE/mo-tester
           sed -i "s/socketTimeout:.*/socketTimeout: 300000/g" mo.yml
-      - name: Start BVT Test for Release ${{ inputs.release-version }}
+      - name: Start BVT Test for Release ${{ steps.get-latest-release.outputs.tag }}
         id: bvt_on_latest_main_version
         run: |
           export LC_ALL="C.UTF-8"
