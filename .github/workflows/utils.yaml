@@ -301,9 +301,8 @@ jobs:
           cd $GITHUB_WORKSPACE/matrixone
           sed -i.bak 's/level = "info"/level = "error"/g'  ./etc/launch/log.toml
           if  [ -d  "./store"  ]; then rm -rf ./store; fi
-          GOLDFLAGS=-ldflags="-X 'main.GoVersion=$(go version)' -X 'main.BranchName=$(git rev-parse --abbrev-ref HEAD)' -X 'main.CommitID=$(git rev-parse HEAD)' -X 'main.BuildTime=$(date)' -X 'main.Version=$(git describe --always --tags $(git rev-list --tags --max-count=1))'"
           export GOCOVERDIR=$GITHUB_WORKSPACE/matrixone
-          go build -cover "$GOLDFLAGS" -o mo-service ./cmd/mo-service/
+          make GOBUILD_OPT=-cover build
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/matrixone launch
       - name: Update BVT SQL Timeout
         run: |
