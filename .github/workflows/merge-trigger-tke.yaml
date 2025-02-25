@@ -73,7 +73,8 @@ jobs:
           # # adjust for go 1.23.0
           # sed -i 's#FROM golang:1.23.0-bookworm#FROM ccr.ccs.tencentyun.com/mo-infra/golang:1.23.0-bookworm#g' optools/images/Dockerfile
 
-          docker build -t $TAGS -f optools/images/Dockerfile . --build-arg GOPROXY='http://goproxy.goproxy.svc.cluster.local'
+          # --build-arg GOPROXY='http://goproxy.goproxy.svc.cluster.local'
+          docker build -t $TAGS -f optools/images/Dockerfile .
           docker push $TAGS
   setup_mo_test_env:
     if: ${{ always() && !cancelled() && needs.docker_image_build.result == 'success' }}
