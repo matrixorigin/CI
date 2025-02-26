@@ -62,19 +62,19 @@ jobs:
           echo ${TAGS}
           echo ${{ secrets.TCR_TOKEN }} | docker login ccr.ccs.tencentyun.com -u ${{ secrets.TCR_USERNAME }} --password-stdin
 
-          # # # add tencentyun docker image mirror and tencentyun apt mirror
-          # sed -i 's#^RUN apt-get update#RUN sed -i "s?http.*ubuntu\.com?http://mirrors\.ustc\.edu\.cn?g" /etc/apt/sources.list  \&\& apt-get clean all \&\& apt-get update#g' optools/images/Dockerfile
-          # sed -i 's#FROM golang:1.21.5-bookworm#FROM ccr.ccs.tencentyun.com/cicd-runner/golang:1.21.5-bookworm#g' optools/images/Dockerfile
-          # sed -i 's#FROM ubuntu:22.04#FROM ccr.ccs.tencentyun.com/mo-infra/ubuntu:22.04#g' optools/images/Dockerfile
+          # # add tencentyun docker image mirror and tencentyun apt mirror
+          sed -i '8s#RUN apt-get update#RUN sed -i "s/deb\.debian\.org/mirrors\.ustc\.edu\.cn/g" /etc/apt/sources.list.d/debian.sources; apt-get update#g' optools/images/Dockerfile
+          sed -i '38s#^RUN apt-get update#RUN sed -i "s?http.*ubuntu\.com?http://mirrors\.ustc\.edu\.cn?g" /etc/apt/sources.list  \&\& apt-get clean all \&\& apt-get update#g' optools/images/Dockerfile
+          sed -i 's#FROM golang:1.21.5-bookworm#FROM ccr.ccs.tencentyun.com/cicd-runner/golang:1.21.5-bookworm#g' optools/images/Dockerfile
+          sed -i 's#FROM ubuntu:22.04#FROM ccr.ccs.tencentyun.com/mo-infra/ubuntu:22.04#g' optools/images/Dockerfile
 
-          # # adjust for go 1.22.3
-          # sed -i 's#FROM golang:1.22.3-bookworm#FROM ccr.ccs.tencentyun.com/mo-infra/golang:1.22.3-bookworm#g' optools/images/Dockerfile
+          # adjust for go 1.22.3
+          sed -i 's#FROM golang:1.22.3-bookworm#FROM ccr.ccs.tencentyun.com/mo-infra/golang:1.22.3-bookworm#g' optools/images/Dockerfile
 
-          # # adjust for go 1.23.0
-          # sed -i 's#FROM golang:1.23.0-bookworm#FROM ccr.ccs.tencentyun.com/mo-infra/golang:1.23.0-bookworm#g' optools/images/Dockerfile
+          # adjust for go 1.23.0
+          sed -i 's#FROM golang:1.23.0-bookworm#FROM ccr.ccs.tencentyun.com/mo-infra/golang:1.23.0-bookworm#g' optools/images/Dockerfile
 
-          # --build-arg GOPROXY='http://goproxy.goproxy.svc.cluster.local'
-          docker build -t $TAGS -f optools/images/Dockerfile .
+          docker build -t $TAGS -f optools/images/Dockerfile . --build-arg GOPROXY='http://goproxy.goproxy.svc.cluster.local'
           docker push $TAGS
   setup_mo_test_env:
     if: ${{ always() && !cancelled() && needs.docker_image_build.result == 'success' }}
