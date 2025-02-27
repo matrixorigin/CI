@@ -35,8 +35,6 @@ on:
         description: "matrixone cloud db"
         required: true
 
-
-
 jobs:
   ut-linux-x86:
     environment: ci
@@ -54,14 +52,14 @@ jobs:
 
           # 获取格式化的日期时间字符串
           time=$(date '+%Y-%m-%d %H:%M:%S')
-          
+
           # action link
           action_link="https://github.com/${{ github.event.pull_request.base.repo.full_name }}/actions/runs/${{ github.run_id }}"
-          
+
           echo "ACTION_TIME=${ACTION_TIME}"
           echo "START_TIME=${time}"
           echo "ACTION_LINK=${action_link}"
-          
+
           echo "ACTION_TIME=${ACTION_TIME}" >> $GITHUB_OUTPUT
           echo "START_TIME=${time}" >> $GITHUB_OUTPUT
           echo "ACTION_LINK=${action_link}" >> $GITHUB_OUTPUT
@@ -74,7 +72,10 @@ jobs:
       - name: Set up Go
         uses: matrixorigin/CI/actions/setup-env@main
         with:
-          setup-java: false
+          setup-java: true
+      - uses: matrixorigin/setup-hdfs@master
+        with:
+          hdfs-download-url: "https://github.com/matrixorigin/CI/releases/download/hadoop-binary-3.4.1/hadoop-3.4.1.tar.gz"
       - name: Set env
         run: |
           echo "endpoint=${{ secrets.S3ENDPOINT }}" >> $GITHUB_ENV
@@ -127,7 +128,7 @@ jobs:
             cat "${file}";
             fail_ut_cases=${fail_ut_cases}$(basename "${file}")','
           done
-          
+
           echo "steps.ut.conclusion: ${{ steps.ut.conclusion }}"
           echo "FAIL_UT_CASES=${fail_ut_cases}"
           echo "FAIL_UT_CASES=${fail_ut_cases}" >> $GITHUB_OUTPUT
@@ -151,7 +152,6 @@ jobs:
         run: |
           find ./ut-report -name top.txt -exec cat {} \;
 
-
   ut-mac-x86:
     #if: ${{ !github.event.pull_request.draft }}
     if: ${{ false }}
@@ -168,7 +168,10 @@ jobs:
       - name: Set up Go
         uses: matrixorigin/CI/actions/setup-env@main
         with:
-          setup-java: false
+          setup-java: true
+      - uses: matrixorigin/setup-hdfs@master
+        with:
+          hdfs-download-url: "https://github.com/matrixorigin/CI/releases/download/hadoop-binary-3.4.1/hadoop-3.4.1.tar.gz"
       - name: Set env
         run: |
           echo "endpoint=${{ secrets.S3ENDPOINT }}" >> $GITHUB_ENV
