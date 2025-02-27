@@ -75,7 +75,7 @@ jobs:
           setup-java: true
       - uses: matrixorigin/setup-hdfs@master
         with:
-          hdfs-version: "3.4.1"
+          hdfs-download-url: "https://github.com/matrixorigin/CI/releases/download/hadoop-binary-3.4.1/hadoop-3.4.1.tar.gz"
       - name: Set env
         run: |
           echo "endpoint=${{ secrets.S3ENDPOINT }}" >> $GITHUB_ENV
@@ -171,7 +171,7 @@ jobs:
           setup-java: true
       - uses: matrixorigin/setup-hdfs@master
         with:
-          hdfs-version: "3.4.1"
+          hdfs-download-url: "https://github.com/matrixorigin/CI/releases/download/hadoop-binary-3.4.1/hadoop-3.4.1.tar.gz"
       - name: Set env
         run: |
           echo "endpoint=${{ secrets.S3ENDPOINT }}" >> $GITHUB_ENV

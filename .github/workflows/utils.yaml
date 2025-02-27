@@ -187,9 +187,9 @@ jobs:
         run: |
           echo "$JAVA_HOME/bin" >> $GITHUB_PATH
 
-      - uses: matrixorigin/setup-hdfs@master
-        with:
-          hdfs-version: "3.4.1"
+#      - uses: matrixorigin/setup-hdfs@master
+#        with:
+#          hdfs-download-url: "3.4.1"
 
       - name: Clone test-tool repository
         uses: actions/checkout@v4
