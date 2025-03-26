@@ -31,7 +31,7 @@ on:
 jobs:
   docker_image_build:
     environment: ci
-    runs-on: amd64-mo-shanghai-dind #amd64-mo-guangzhou-dind
+    runs-on: amd64-mo-guangzhou-dind #amd64-mo-shanghai-dind
     if: ${{ github.event.pull_request.merged == true }}
     timeout-minutes: 30
     name: BUILD MO DOCKER IMAGE
