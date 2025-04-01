@@ -25,6 +25,7 @@ jobs:
         uses: matrixorigin/CI/actions/setup-env@main
         with:
           setup-java: false
+          setup-cmake: false
           cache: true
 
       - name: Add cn.txn
