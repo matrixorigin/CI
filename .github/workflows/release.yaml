@@ -140,7 +140,7 @@ jobs:
 
   darwin-x86-build-job:
     environment: ci
-    runs-on: macos-latest
+    runs-on: macos-13
     steps:
       # GitHub Hosted MacOS runner cannot connect to time.apple.com, so use time.windows.com
       - name: Sync System Time
