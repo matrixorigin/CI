@@ -433,9 +433,9 @@ jobs:
           if [ -d "./etc/launch-with-python-udf-server" ]; then
             mv ./etc/launch-with-python-udf-server ./mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64/etc/
           fi
-          if [ -d "./pkg/udf/pythonservice/pyserver" ]; then
-            mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64/pkg/udf/pythonservice
-            mv ./pkg/udf/pythonservice/pyserver ./mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64/pkg/udf/pythonservice
+          if [ -d "./pkg/udf/pythonservice" ]; then
+            mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64/pkg/udf
+            mv ./pkg/udf/pythonservice ./mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64/pkg/udf/
           fi
           if [ -d "./thirdparties/install/lib" ]; then
             mv ./thirdparties/install/lib ./mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64/
