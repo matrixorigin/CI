@@ -231,6 +231,7 @@ jobs:
 
           # copy udf python server
           if [ -d "./pkg/udf/pythonservice" ]; then
+            mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-darwin-x86_64/pkg/udf
             mv ./pkg/udf/pythonservice ./mo-${{ steps.get_release.outputs.tag_name }}-darwin-x86_64/pkg/udf/
           fi
 
@@ -322,6 +323,7 @@ jobs:
 
           # copy udf python server
           if [ -d "./pkg/udf/pythonservice" ]; then
+            mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-darwin-arm64/pkg/udf
             mv ./pkg/udf/pythonservice ./mo-${{ steps.get_release.outputs.tag_name }}-darwin-arm64/pkg/udf/
           fi
 
