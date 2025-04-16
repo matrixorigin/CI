@@ -285,6 +285,9 @@ jobs:
           mv $GITHUB_WORKSPACE/upstream/etc .
           mv $GITHUB_WORKSPACE/upstream/mo-service .
           mv $GITHUB_WORKSPACE/upstream/optools .
+          if [ -d "$GITHUB_WORKSPACE/upstream/lib" ]; then
+            mv $GITHUB_WORKSPACE/upstream/lib .
+          fi
 
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/workspace launch;
           sleep 60;
@@ -335,13 +338,16 @@ jobs:
           rm -rf mo-data/etl
           rm -rf etc
           rm -rf optools
-
+          rm -rf lib
           # delete for clear the start finish status of mo(deprecated after pr #14607)
           rm -rf mo-data/local/system_init_completed
 
           mv $GITHUB_WORKSPACE/head/etc .
           mv $GITHUB_WORKSPACE/head/optools .
           mv $GITHUB_WORKSPACE/head/mo-service .
+          if [ -d "$GITHUB_WORKSPACE/head/lib" ]; then
+            mv $GITHUB_WORKSPACE/head/lib .
+          fi
           echo "==============cn configuration of upstram=============="
           cat ./etc/launch/cn.toml
           echo "==============tn configuration of upstram=============="
