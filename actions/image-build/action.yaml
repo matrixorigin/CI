@@ -1,0 +1,54 @@
+name: Build Image and Push
+description: "build image and push"
+inputs:
+  tags:
+    description: "image tag, for example: ccr.ccs.tencentyun.com/mo-infra/actions-runner:tke-latest"
+    required: true
+  file-path:
+    description: "the file path of dockerfile"
+    required: true
+  context:
+    description: "docker build context path"
+    required: true
+  buildx-driver-opts:
+    description: "List of additional driver-specific options (eg. image=moby/buildkit:master)"
+    required: false
+  build-args:
+    description: "List of build-time variables"
+    required: false
+  cache-from:
+    description: "docker build cache from"
+    required: false
+  cache-to:
+    description: "docker build cache to"
+    required: false
+  platform:
+    description: "platform"
+    required: false
+    default: "linux/amd64,linux/arm64"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+      with:
+        image: tonistiigi/binfmt:latest
+        platforms: ${{ inputs.platform }}
+    - name: Set up Docker Buildx
+      id: buildx
+      uses: docker/setup-buildx-action@v3
+      with:
+        driver-opts: ${{ inputs.buildx-driver-opts }}
+    - name: Build
+      uses: docker/build-push-action@v6
+      with:
+        builder: ${{ steps.buildx.outputs.name }}
+        context: ${{ inputs.context }}
+        file: ${{ inputs.file-path }}
+        platforms: ${{ inputs.platform }}
+        push: true
+        tags: ${{ inputs.tags }}
+        build-args: ${{ inputs.build-args }}
+        cache-from: ${{ inputs.cache-from }}
+        cache-to: ${{ inputs.cache-to }}
