@@ -5,6 +5,10 @@ inputs:
     description: "version of golang"
     required: false
     default: "1.23.0"
+  go-version-file:
+    description: "path of go version file"
+    required: false
+    default: "go.mod"
   setup-java:
     description: "wether setup java"
     required: false
@@ -35,6 +39,7 @@ runs:
       with:
         go-version: ${{ inputs.go-version }}
         cache: ${{ inputs.cache == 'true' }}
+        go-version-file: ${{ inputs.go-version-file }}
     - name: Set up JDK 8 for x64
       if: ${{ inputs.setup-java == 'true' }}
       uses: actions/setup-java@v4
