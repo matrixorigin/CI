@@ -4,7 +4,7 @@ inputs:
   go-version:
     description: "version of golang"
     required: false
-    default: "1.23.0"
+    default: ""
   go-version-file:
     description: "path of go version file"
     required: false
