@@ -49,6 +49,7 @@ jobs:
         with:
           setup-java: false
           setup-cmake: true
+          go-version-file: "${{ github.workspace }}/go.mod"
       - name: Build normal
         run: |
           make build
@@ -114,6 +115,7 @@ jobs:
         with:
           setup-java: false
           setup-cmake: false
+          go-version-file: "${{ github.workspace }}/go.mod"
       - name: Build normal
         run: |
           make build
@@ -180,6 +182,7 @@ jobs:
         with:
           setup-java: false
           setup-cmake: true
+          go-version-file: "${{ github.workspace }}/go.mod"
       - name: Build normal
         run: |
           make build
@@ -280,6 +283,7 @@ jobs:
         uses: matrixorigin/CI/actions/setup-env@main
         with:
           setup-java: false
+          go-version-file: "${{ github.workspace }}/go.mod"
           setup-cmake: false
       - name: Check go version
         run: |
@@ -362,6 +366,7 @@ jobs:
         with:
           setup-java: false
           setup-cmake: true
+          go-version-file: "${{ github.workspace }}/go.mod"
       - name: Build normal
         run: |
           cd $GITHUB_WORKSPACE;
@@ -423,6 +428,7 @@ jobs:
         with:
           setup-java: false
           setup-cmake: false
+          go-version-file: "${{ github.workspace }}/go.mod"
       - name: Build normal
         run: |
           cd $GITHUB_WORKSPACE;

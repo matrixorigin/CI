@@ -136,6 +136,7 @@ jobs:
         uses: matrixorigin/CI/actions/setup-env@main
         with:
           setup-java: false
+          go-version-file: "${{ github.workspace }}/matrixone/go.mod"
       - name: Set Variables
         run: |
           echo "ut_report='UT-Report.out'" >> $GITHUB_ENV

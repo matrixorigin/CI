@@ -36,6 +36,8 @@ jobs:
 
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          go-version-file: "${{ github.workspace }}/head/go.mod"
 
       - name: Add cn.txn for head
         run: |
@@ -250,6 +252,8 @@ jobs:
 
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          go-version-file: "${{ github.workspace }}/head/go.mod"
 
       - name: Add cn.txn for head
         run: |

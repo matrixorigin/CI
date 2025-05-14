@@ -20,6 +20,8 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          go-version-file: "${{ github.workspace }}/head/go.mod"
       - name: Build MatrixOne
         run: |
           cd $GITHUB_WORKSPACE/head && make clean && make build
@@ -152,6 +154,8 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          go-version-file: "${{ github.workspace }}/head/go.mod"
       - name: Build MatrixOne
         run: |
           cd $GITHUB_WORKSPACE/head && make clean && make build
@@ -240,6 +244,8 @@ jobs:
 
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          go-version-file: "${{ github.workspace }}/head/go.mod"
 
       - name: Build MatrixOne
         run: |

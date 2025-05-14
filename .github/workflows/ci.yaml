@@ -73,6 +73,7 @@ jobs:
         uses: matrixorigin/CI/actions/setup-env@main
         with:
           setup-java: true
+          go-version-file: "${{ github.workspace }}/go.mod"
       - uses: matrixorigin/setup-hdfs@master
         with:
           hdfs-download-url: "https://github.com/matrixorigin/CI/releases/download/hadoop-binary-3.4.1/hadoop-3.4.1.tar.gz"
@@ -169,6 +170,7 @@ jobs:
         uses: matrixorigin/CI/actions/setup-env@main
         with:
           setup-java: true
+          go-version-file: "${{ github.workspace }}/go.mod"
       - uses: matrixorigin/setup-hdfs@master
         with:
           hdfs-download-url: "https://github.com/matrixorigin/CI/releases/download/hadoop-binary-3.4.1/hadoop-3.4.1.tar.gz"
@@ -213,6 +215,7 @@ jobs:
         uses: matrixorigin/CI/actions/setup-env@main
         with:
           setup-java: false
+          go-version-file: "${{ github.workspace }}/go.mod"
       - name: Prepare ENV
         run: |
           cd $GITHUB_WORKSPACE && make clean && make config && make build
