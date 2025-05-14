@@ -148,6 +148,12 @@ jobs:
           path: ./matrixone
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
+      - name: Set up Go and JAVA
+        uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          setup-java: false
+          go-version-file: "${{ github.workspace }}/matrixone/go.mod"
+
       - name: Generate diff.patch
         run: |
           cd $GITHUB_WORKSPACE/matrixone
@@ -166,10 +172,7 @@ jobs:
           echo "Max retries reached. Failed."
           exit 1
 
-      - name: Set up Go and JAVA
-        uses: matrixorigin/CI/actions/setup-env@main
-        with:
-          setup-java: false
+
       - name: Set Variables
         run: |
           echo "ut_report=UT-Report.out" >> $GITHUB_ENV

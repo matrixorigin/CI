@@ -1,10 +1,10 @@
 name: setup_env
 description: "setup build environment"
 inputs:
-  go-version:
-    description: "version of golang"
+  go-version-file:
+    description: "path of go version file"
     required: false
-    default: "1.23.0"
+    default: ""
   setup-java:
     description: "wether setup java"
     required: false
@@ -33,8 +33,8 @@ runs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: ${{ inputs.go-version }}
         cache: ${{ inputs.cache == 'true' }}
+        go-version-file: ${{ inputs.go-version-file }}
     - name: Set up JDK 8 for x64
       if: ${{ inputs.setup-java == 'true' }}
       uses: actions/setup-java@v4

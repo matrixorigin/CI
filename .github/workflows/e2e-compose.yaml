@@ -18,6 +18,10 @@ jobs:
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
+      - name: Set up Go And Java
+        uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          go-version-file: "${{ github.workspace }}/go.mod"
 
       - name: Print run attempt
         run: echo "run attempt is ${{ github.run_attempt }}"
@@ -93,9 +97,6 @@ jobs:
           path: ./mo-tester
           ref: main
 
-      - name: Set up Go And Java
-        uses: matrixorigin/CI/actions/setup-env@main
-
       - name: Update BVT SQL Timeout
         run: |
           cd $GITHUB_WORKSPACE/mo-tester
@@ -164,6 +165,10 @@ jobs:
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
+      - name: Set up Go And Java
+        uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          go-version-file: "${{ github.workspace }}/go.mod"
 
       - name: Print run attempt
         run: echo "run attempt is ${{ github.run_attempt }}"
@@ -224,9 +229,6 @@ jobs:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
-
-      - name: Set up Go And Java
-        uses: matrixorigin/CI/actions/setup-env@main
 
       - name: Update BVT SQL Timeout
         run: |
