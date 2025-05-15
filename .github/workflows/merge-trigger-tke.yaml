@@ -76,11 +76,6 @@ jobs:
       - name: Adjust Dockerfile
         run: |
           cd $GITHUB_WORKSPACE/matrixone
-          # if Dockerfile.tke exists and the first line contains golang:1.24, skip the following steps.
-          # This is temporary solution for the image build.
-          if [ -f optools/images/Dockerfile.tke ] && [ $(head -n 1 optools/images/Dockerfile.tke | grep -c "golang:1.24") -ne 0 ]; then
-            exit 0;
-          fi
 
           # # add tencentyun docker image mirror and tsinghua apt mirror
           sed -i 's#^RUN apt-get update#RUN sed -i "s?http.*ubuntu\.com?http://mirrors\.tuna\.tsinghua\.edu\.cn?g" /etc/apt/sources.list  \&\& apt-get clean all \&\& apt-get update#g' optools/images/Dockerfile
@@ -96,13 +91,11 @@ jobs:
           # adjust for go 1.24
           sed -i 's#FROM matrixorigin/golang:1.24-ubuntu22#FROM ccr.ccs.tencentyun.com/mo-infra/golang:1.24-ubuntu22#g' optools/images/Dockerfile
 
-          rm -rf optools/images/Dockerfile.tke
-          cp optools/images/Dockerfile optools/images/Dockerfile.tke
       - name: Build and Push Image
         uses: matrixorigin/CI/actions/image-build@main
         with:
           tags: ${{ steps.prep.outputs.tags }}
-          file-path: ${{ github.workspace }}/matrixone/optools/images/Dockerfile.tke
+          file-path: ${{ github.workspace }}/matrixone/optools/images/Dockerfile
           context: ${{ github.workspace }}/matrixone
           cache-from: type=registry,ref=${{ steps.prep.outputs.docker_image }}:cache-${{ github.base_ref }}
           cache-to: type=registry,ref=${{ steps.prep.outputs.docker_image }}:cache-${{ github.base_ref }},mode=max
