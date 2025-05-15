@@ -76,6 +76,8 @@ jobs:
       - name: Adjust Dockerfile
         run: |
           cd $GITHUB_WORKSPACE/matrixone
+          # if Dockerfile.tke exists and the first line contains golang:1.24, skip the following steps.
+          # This is temporary solution for the image build.
           if [ -f optools/images/Dockerfile.tke ] && [ $(head -n 1 optools/images/Dockerfile.tke | grep -c "golang:1.24") -ne 0 ]; then
             exit 0;
           fi
