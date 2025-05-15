@@ -31,7 +31,7 @@ on:
 jobs:
   docker_image_build:
     environment: ci
-    runs-on: amd64-mo-guangzhou-dind #amd64-mo-shanghai-dind
+    runs-on: amd64-mo-shanghai-dind # amd64-mo-guangzhou-dind
     if: ${{ github.event.pull_request.merged == true }}
     timeout-minutes: 30
     name: BUILD MO DOCKER IMAGE
@@ -44,6 +44,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: ./matrixone
+      - name: Login to TCR
+        uses: docker/login-action@v3
+        with:
+          registry: "ccr.ccs.tencentyun.com"
+          username: ${{ secrets.TCR_USERNAME }}
+          password: ${{ secrets.TCR_TOKEN }}
       - name: Prepare And Build
         id: prep
         run: |
@@ -53,18 +59,29 @@ jobs:
           DOCKER_IMAGE=ccr.ccs.tencentyun.com/matrixone-dev/matrixone
           VERSION=commit-$LAST_COMMIT_ID
           TAGS="${DOCKER_IMAGE}:${VERSION}"
-
+          
           # Set output parameters.
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
           echo "docker_image=${DOCKER_IMAGE}" >> $GITHUB_OUTPUT
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "commit_id=${LAST_COMMIT_ID}" >> $GITHUB_OUTPUT
-          echo ${TAGS}
-          echo ${{ secrets.TCR_TOKEN }} | docker login ccr.ccs.tencentyun.com -u ${{ secrets.TCR_USERNAME }} --password-stdin
 
-          # # add tencentyun docker image mirror and tencentyun apt mirror
-          sed -i '8s#RUN apt-get update#RUN sed -i "s/deb\.debian\.org/mirrors\.ustc\.edu\.cn/g" /etc/apt/sources.list.d/debian.sources; apt-get update#g' optools/images/Dockerfile
-          sed -i '38s#^RUN apt-get update#RUN sed -i "s?http.*ubuntu\.com?http://mirrors\.ustc\.edu\.cn?g" /etc/apt/sources.list  \&\& apt-get clean all \&\& apt-get update#g' optools/images/Dockerfile
+      - name: Print Image Info
+        run: |
+          echo "TAGS: ${{ steps.prep.outputs.tags }}"
+          echo "DOCKER_IMAGE: ${{ steps.prep.outputs.docker_image }}"
+          echo "VERSION: ${{ steps.prep.outputs.version }}"
+          echo "COMMIT_ID: ${{ steps.prep.outputs.commit_id }}"
+
+      - name: Adjust Dockerfile
+        run: |
+          cd $GITHUB_WORKSPACE/matrixone
+          if [ -f optools/images/Dockerfile.tke ] && [ $(head -n 1 optools/images/Dockerfile.tke | grep -c "golang:1.24") -ne 0 ]; then
+            exit 0;
+          fi
+
+          # # add tencentyun docker image mirror and tsinghua apt mirror
+          sed -i 's#^RUN apt-get update#RUN sed -i "s?http.*ubuntu\.com?http://mirrors\.tuna\.tsinghua\.edu\.cn?g" /etc/apt/sources.list  \&\& apt-get clean all \&\& apt-get update#g' optools/images/Dockerfile
           sed -i 's#FROM golang:1.21.5-bookworm#FROM ccr.ccs.tencentyun.com/cicd-runner/golang:1.21.5-bookworm#g' optools/images/Dockerfile
           sed -i 's#FROM ubuntu:22.04#FROM ccr.ccs.tencentyun.com/mo-infra/ubuntu:22.04#g' optools/images/Dockerfile
 
@@ -74,8 +91,22 @@ jobs:
           # adjust for go 1.23.0
           sed -i 's#FROM golang:1.23.0-bookworm#FROM ccr.ccs.tencentyun.com/mo-infra/golang:1.23.0-bookworm#g' optools/images/Dockerfile
 
-          docker build -t $TAGS -f optools/images/Dockerfile . --build-arg GOPROXY='http://goproxy.goproxy.svc.cluster.local'
-          docker push $TAGS
+          # adjust for go 1.24
+          sed -i 's#FROM matrixorigin/golang:1.24-ubuntu22#FROM ccr.ccs.tencentyun.com/mo-infra/golang:1.24-ubuntu22#g' optools/images/Dockerfile
+
+          rm -rf optools/images/Dockerfile.tke
+          cp optools/images/Dockerfile optools/images/Dockerfile.tke
+      - name: Build and Push Image
+        uses: matrixorigin/CI/actions/image-build@main
+        with:
+          tags: ${{ steps.prep.outputs.tags }}
+          file-path: ${{ github.workspace }}/matrixone/optools/images/Dockerfile.tke
+          context: ${{ github.workspace }}/matrixone
+          cache-from: type=registry,ref=${{ steps.prep.outputs.docker_image }}:cache-${{ github.base_ref }}
+          cache-to: type=registry,ref=${{ steps.prep.outputs.docker_image }}:cache-${{ github.base_ref }},mode=max
+          platform: linux/amd64
+          build-args: |
+            GOPROXY=http://goproxy.goproxy.svc.cluster.local
   setup_mo_test_env:
     if: ${{ always() && !cancelled() && needs.docker_image_build.result == 'success' }}
     needs: docker_image_build
