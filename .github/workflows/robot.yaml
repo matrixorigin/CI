@@ -30,17 +30,6 @@ jobs:
           mentioned_list: '["@all"]'
           content: "New Issue Opened or Assigned: [${{ github.event.issue.title }}](${{ github.event.issue.html_url }})\nAssignees:<font color=\"warning\">${{ join(github.event.issue.assignees.*.login, ', ') }}</font>\nOpen Issue Number: <font color=\"warning\">${{ github.event.repository.open_issues }}</font>"
 
-  add-projects-milestone:
-    if: github.event_name == 'issues' && github.event.action == 'opened'
-    environment: ci
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Issue Add  Milestone
-        if: contains(github.event.issue.labels.*.name, 'kind/bug')
-        uses: matrixorigin/CI/actions/milestone-add-action@main
-        with:
-          action-token: ${{ secrets.TOKEN_ACTION }}
-          milestone: "1.3.0"
 
   check-bvt-issue:
     if: github.event_name == 'issues' && github.event.action == 'closed'
@@ -105,23 +94,6 @@ jobs:
           name_label: "doc influence"
           mentions: "Prinz,DengNan"
 
-  add-issue-to-project:
-    environment: ci
-    runs-on: ubuntu-22.04
-    if: github.event_name == 'issues' && github.event.action == 'assigned'
-    steps:
-      - name: assign issue
-        uses: matrixorigin/CI/actions/assign-issue@main
-        with:
-          GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
-          Issue_ID: ${{ github.event.issue.number }}
-          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-      - uses: matrixorigin/CI/actions/assign-role-label@main
-        name: Add Label for Assignee Role
-        with:
-          github-token: ${{ secrets.TOKEN_ACTION }}
-          correspondence: '{"qa":"phase/testing"}'
 
   nightly-check:
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
