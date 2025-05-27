@@ -113,10 +113,12 @@ jobs:
 
           ./run.sh -n -g -o -p $GITHUB_WORKSPACE/test/distributed/cases -s /test/distributed/resources -e pessimistic_transaction 2>&1
 
-      - name: Print Disk Usage Before Container Shutdown
+      - name: Print Docker Info Before Container Shutdown
         if: ${{ always() }}
         run: |
           set +e;
+          sudo docker ps;
+          echo "===========================================";
           sudo df -h /*;
           echo "===========================================";
           sudo du -hs /var/lib/docker;
@@ -247,10 +249,12 @@ jobs:
 
           ./run.sh -n -g -o -p $GITHUB_WORKSPACE/test/distributed/cases -s /test/distributed/resources -e optimistic 2>&1
 
-      - name: Print Disk Usage Before Container Shutdown
+      - name: Print Docker Info Before Container Shutdown
         if: ${{ always() }}
         run: |
           set +e;
+          sudo docker ps;
+          echo "===========================================";
           sudo df -h /*;
           echo "===========================================";
           sudo du -hs /var/lib/docker;
