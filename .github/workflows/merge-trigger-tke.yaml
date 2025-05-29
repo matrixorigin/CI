@@ -82,6 +82,9 @@ jobs:
           sed -i 's#FROM golang:1.21.5-bookworm#FROM ccr.ccs.tencentyun.com/cicd-runner/golang:1.21.5-bookworm#g' optools/images/Dockerfile
           sed -i 's#FROM ubuntu:22.04#FROM ccr.ccs.tencentyun.com/mo-infra/ubuntu:22.04#g' optools/images/Dockerfile
 
+          # adjust for matrixorigin/ubuntu:22.04
+          sed -i 's#FROM matrixorigin/ubuntu:22.04#FROM ccr.ccs.tencentyun.com/mo-infra/ubuntu:22.04#g' optools/images/Dockerfile
+
           # adjust for go 1.22.3
           sed -i 's#FROM golang:1.22.3-bookworm#FROM ccr.ccs.tencentyun.com/mo-infra/golang:1.22.3-bookworm#g' optools/images/Dockerfile
 
