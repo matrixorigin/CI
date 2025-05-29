@@ -124,6 +124,11 @@ jobs:
           sudo du -hs /var/lib/docker;
           echo "===========================================";
           sudo docker system df -v;
+      - name: Print System Dmesg
+        if: ${{ always() }}
+        continue-on-error: true
+        run: |
+          sudo dmesg -T
 
       - name: export log
         if: ${{ failure() || cancelled()}}
@@ -260,6 +265,12 @@ jobs:
           sudo du -hs /var/lib/docker;
           echo "===========================================";
           sudo docker system df -v;
+      
+      - name: Print System Dmesg
+        if: ${{ always() }}
+        continue-on-error: true
+        run: |
+          sudo dmesg -T
   
       - name: export log
         if: ${{ failure() || cancelled()}}
