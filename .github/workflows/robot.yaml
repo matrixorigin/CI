@@ -314,7 +314,7 @@ jobs:
       - name: Reopen Issue Without PR
         id: step1
         with:
-          whitelist: "sukki37,fengttt,aressu1985,allengaoo" # 白名单成员 可以无条件删除带有特殊标签的issue
+          whitelist: "sukki37,fengttt,heni02" # 白名单成员 可以无条件删除带有特殊标签的issue
           issue_owner: ${{ github.event.issue.user.login }} # issue的打开者 当满足存在关联pr时允许关闭
           close_user: ${{ github.event.sender.login }} # 当前关闭issue的操作者
           github_token: ${{ secrets.TOKEN_ACTION }} # 获取github action token操作权限
