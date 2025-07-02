@@ -75,7 +75,7 @@ jobs:
     if: github.event_name == 'issues' && github.event.action == 'closed'
     steps:
       - name: Reopen Issue
-        if: github.event.issue.user.login != github.event.sender.login && github.event.action == 'closed' && github.event.sender.login != 'sukki37' && github.event.sender.login != 'aressu1985' && github.event.sender.login != 'fengttt' && github.event.sender.login != 'heni02'
+        if: github.event.issue.user.login != github.event.sender.login && github.event.action == 'closed' && github.event.sender.login != 'sukki37' && github.event.sender.login != 'Ariznawlll' && github.event.sender.login != 'fengttt' && github.event.sender.login != 'heni02'
         uses: actions-cool/issues-helper@v3
         with:
           actions: "open-issue"
@@ -309,7 +309,7 @@ jobs:
   reopen-without-PR:
     environment: ci
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'issues' && github.event.action == 'closed' && github.actor != 'sukki37' }}
+    if: ${{ github.event_name == 'issues' && github.event.action == 'closed' && github.actor != 'sukki37' && github.actor != 'Ariznawlll' }}
     steps:
       - name: Reopen Issue Without PR
         id: step1
