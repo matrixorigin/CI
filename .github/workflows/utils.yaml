@@ -96,63 +96,28 @@ jobs:
     # if you change runner, must modify L117
     runs-on: amd64-mo-guangzhou-2xlarge16
     steps:
-      - name: Analyze test list
-        id: s1
-        run: |
-          echo "---------------------------------"
-          TEST_LIST='ut,bvt,tpcc,sysbench,ssb,tpch'
-          for test in $(echo ${TEST_LIST} | sed "s/,/ /g"); do
-              echo "Current test: ${test}"
-              case "${test}" in
-                  "ut")
-                      run_ut="true"
-                      ;;
-                  "bvt")
-                      run_bvt="true"
-                      ;;
-                  "tpcc")
-                      run_tpcc="true"
-                      ;;
-                  "sysbench")
-                      run_sysbench="true"
-                      ;;
-                  "ssb")
-                      run_ssb="true"
-                      ;;
-                  "tpch")
-                      run_tpch="true"
-                      ;;
-                  *)
-                      echo "Invalid test option: ${test}, skipping"
-                      ;;
-              esac
-          done
-
-          echo "run_ut=${run_ut}"
-          echo "run_bvt=${run_bvt}"
-          echo "run_tpcc=${run_tpcc}"
-          echo "run_sysbench=${run_sysbench}"
-          echo "run_ssb=${run_ssb}"
-          echo "run_tpch=${run_tpch}"
-
-          echo "run_ut=${run_ut}" >> $GITHUB_OUTPUT
-          echo "run_bvt=${run_bvt}" >> $GITHUB_OUTPUT
-          echo "run_tpcc=${run_tpcc}" >> $GITHUB_OUTPUT
-          echo "run_sysbench=${run_sysbench}" >> $GITHUB_OUTPUT
-          echo "run_ssb=${run_ssb}" >> $GITHUB_OUTPUT
-          echo "run_tpch=${run_tpch}" >> $GITHUB_OUTPUT
-
       - uses: actions/checkout@v4
         with:
           fetch-depth: "1"
           path: ./matrixone
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
+      - name: Clone test-tool repository
+        uses: actions/checkout@v4
+        with:
+          repository: matrixorigin/mo-tester
+          path: ./mo-tester
+          ref: main
+
       - name: Set up Go and JAVA
         uses: matrixorigin/CI/actions/setup-env@main
         with:
           setup-java: false
           go-version-file: "${{ github.workspace }}/matrixone/go.mod"
+
+      - name: Set JAVA PATH
+        run: |
+          echo "$JAVA_HOME/bin" >> $GITHUB_PATH
 
       - name: Generate diff.patch
         run: |
@@ -186,20 +151,9 @@ jobs:
           echo "bvt_excluded_pkg='pkg/pb\|yaccpar'" >> $GITHUB_ENV
           echo 'GOPROXY=http://goproxy.goproxy.svc.cluster.local|https://goproxy.cn|direct' >> $GITHUB_ENV
 
-      - name: Set JAVA PATH
-        run: |
-          echo "$JAVA_HOME/bin" >> $GITHUB_PATH
-
 #      - uses: matrixorigin/setup-hdfs@master
 #        with:
 #          hdfs-download-url: "3.4.1"
-
-      - name: Clone test-tool repository
-        uses: actions/checkout@v4
-        with:
-          repository: matrixorigin/mo-tester
-          path: ./mo-tester
-          ref: main
       - name: Add cn.txn
         run: |
           cd $GITHUB_WORKSPACE/matrixone
@@ -434,61 +388,73 @@ jobs:
             ${{ github.workspace }}/coverage_downloads/final_result_files.zip
           retention-days: 7
 
-      - name: Other Test Need Repo
-        if: ${{ !cancelled() && !failure() }}
-        run: |
-          echo "tpcc need mo-load-data,mo-tpcc repo"
-          echo "sysbench need mo-load repo"
-          echo "ssb need mo-load-data,mo-ssb repo"
-          echo "tpch need mo-load-data,mo-tpch repo"
-          echo "========================================="
-          echo "tpcc=${{steps.s1.outputs.run_tpcc}}"
-          echo "sysbench=${{steps.s1.outputs.run_sysbench}}"
-          echo "ssb=${{steps.s1.outputs.run_ssb}}"
-          echo "tpch=${{steps.s1.outputs.run_tpch}}"
+  pr-size-label:
+    environment: ci
+    runs-on: ubuntu-22.04
+    needs: [check_organization_user]
+    steps:
+      - name: size-label
+        uses: "matrixorigin/CI/actions/label-size-action@main"
+        with:
+          size_token: ${{ secrets.TOKEN_ACTION }}
+          ignore: ".md,.pb.go"
+          sizes: >
+            {
+              "XS":0,
+              "S":10,
+              "M":100,
+              "L":500,
+              "XL":1000,
+              "XXL":2000
+            }
 
-          # start mo-service
-          cd $GITHUB_WORKSPACE/matrixone
-          ./optools/run_bvt.sh $GITHUB_WORKSPACE/matrixone launch
-
+  pr_basic_benchmarks:
+    if: ${{ needs.check_organization_user.outputs.safe_label == '1' || needs.check_organization_user.outputs.in_org == '1' }}
+    name: Pull Request Basic Benchmark Test
+    needs:
+      - check_organization_user
+    environment: ci
+    runs-on: amd64-mo-guangzhou-2xlarge16
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ./matrixone
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.ref }}
       - name: Clone mo-load-data Repo
-        if: ${{ !cancelled() && !failure() && ( steps.s1.outputs.run_tpcc == 'true' || steps.s1.outputs.run_ssb == 'true' || steps.s1.outputs.run_tpch == 'true' ) }}
+        if: ${{ !cancelled() && !failure() }}
         uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-load-data
           token: ${{secrets.TOKEN_ACTION}}
           path: ./mo-load-data
           ref: main
-
       - name: Clone mo-load Repo
-        if: ${{ !cancelled() && !failure() && steps.s1.outputs.run_sysbench == 'true' }}
+        if: ${{ !cancelled() && !failure() }}
         uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-load
           token: ${{secrets.TOKEN_ACTION}}
           path: ./mo-load
           ref: "1.0"
-
       - name: Clone mo-tpcc Repo
-        if: ${{ !cancelled() && !failure() && steps.s1.outputs.run_tpcc == 'true' }}
+        if: ${{ !cancelled() && !failure() }}
         uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-tpcc
           token: ${{secrets.TOKEN_ACTION}}
           path: ./mo-tpcc
           ref: main
-
       - name: Clone mo-ssb Repo
-        if: ${{ !cancelled() && !failure() && steps.s1.outputs.run_ssb == 'true' }}
+        if: ${{ !cancelled() && !failure() }}
         uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-ssb
           token: ${{secrets.TOKEN_ACTION}}
           path: ./mo-ssb
           ref: main
-
       - name: Clone mo-tpch Repo
-        if: ${{ !cancelled() && !failure() && steps.s1.outputs.run_tpch == 'true' }}
+        if: ${{ !cancelled() && !failure() }}
         uses: actions/checkout@v4
         with:
           repository: matrixorigin/mo-tpch
@@ -496,28 +462,60 @@ jobs:
           path: ./mo-tpch
           ref: main
 
-      - name: TPCC/Create Account for Test
-        if: ${{ !cancelled() && !failure() && steps.s1.outputs.run_tpcc == 'true' }}
-        timeout-minutes: 2
-        id: account_for_tpcc
+      - name: Set up Go and JAVA
+        uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          setup-java: false
+          go-version-file: "${{ github.workspace }}/matrixone/go.mod"
+
+      - name: Set Variables and PATH
+        run: |
+          echo 'GOPROXY=http://goproxy.goproxy.svc.cluster.local|https://goproxy.cn|direct' >> $GITHUB_ENV
+          echo "$JAVA_HOME/bin" >> $GITHUB_PATH
+
+      - name: Add cn.txn
+        run: |
+          cd $GITHUB_WORKSPACE/matrixone
+          echo "[cn.txn]" >> ./etc/launch/cn.toml
+          echo "  enable-leak-check = 1" >> ./etc/launch/cn.toml
+          echo '  max-active-ages = "2m"'>> ./etc/launch/cn.toml
+
+      - name: Start MatrixOne Service
+        id: setup_mo_test_env
+        run: |
+          # start mo-service
+          cd $GITHUB_WORKSPACE/matrixone
+          ./optools/run_bvt.sh $GITHUB_WORKSPACE/matrixone launch
+          
+          echo "mo_svc_ip=127.0.0.1" >> $GITHUB_OUTPUT;
+          sleep 60;
+
+      - name: Create Account for Test
+        if: ${{ !cancelled() && !failure() }}
+        timeout-minutes: 5
+        id: create_account
         run: |
           mysql -h 127.0.0.1 -P 6001 -udump -p111 -e "create account tpcc_test admin_name = 'admin' identified by '111' comment 'for tpcc test';"
           echo "tpcc_account=tpcc_test:admin" >> $GITHUB_OUTPUT
           echo "tpcc_password=111" >> $GITHUB_OUTPUT
+          
+          echo "sysbench_account=dump" >> $GITHUB_OUTPUT
+          echo "sysbench_password=111" >> $GITHUB_OUTPUT
+          
+          echo "ssb_tpch_account=dump" >> $GITHUB_OUTPUT
+          echo "ssb_tpch_password=111" >> $GITHUB_OUTPUT
 
-      - name: TPCC/Modify Tool's Setting And Set PATH
-        if: ${{ !cancelled() && !failure() && steps.s1.outputs.run_tpcc == 'true' }}
+      - name: Modify Tool's Setting And Set PATH
+        if: ${{ !cancelled() && !failure() }}
         run: |
           cd $GITHUB_WORKSPACE/mo-load-data
           sed -i '/.*ENDPOINT: ""*/c\ENDPOINT: "cos.ap-guangzhou.myqcloud.com"' access.yml
           sed -i '/.*ACCESS_KEY_ID: ""*/c\ACCESS_KEY_ID: "${{secrets.TENCENT_AK}}"' access.yml
           sed -i '/.*SECRET_ACCESS_KEY: ""*/c\SECRET_ACCESS_KEY: "${{secrets.TENCENT_SK}}"' access.yml
 
-          echo "$JAVA_HOME/bin" >> $GITHUB_PATH
-
       # start tpcc test
-      - name: TPCC/Load TPCC 10 Warehouse Data
-        if: ${{ !cancelled() && !failure() && steps.s1.outputs.run_tpcc == 'true' }}
+      - name: Load TPCC 10 Warehouse Data
+        if: ${{ !cancelled() && !failure() }}
         timeout-minutes: 20
         id: load_tpcc_data
         run: |
@@ -527,9 +525,10 @@ jobs:
           sleep 60s
           cd $GITHUB_WORKSPACE/mo-load-data
           mkdir -p report
-          ./load.sh -u ${{ steps.account_for_tpcc.outputs.tpcc_account }} -p ${{ steps.account_for_tpcc.outputs.tpcc_password }} -h 127.0.0.1 -c cases/02_from_cos/tpcc_10 -r -m | tee report/mo-load-data-tpcc.log
-      - name: TPCC/Start TPCC 10 Warehouses 10 terminals Test
-        if: ${{ !cancelled() && !failure() && steps.load_tpcc_data.conclusion == 'success' }}
+          ./load.sh -u ${{ steps.create_account.outputs.tpcc_account }} -p ${{ steps.create_account.outputs.tpcc_password }} -h 127.0.0.1 -c cases/02_from_cos/tpcc_10 -r -m | tee report/mo-load-data-tpcc.log
+
+      - name: Start TPCC 10 Warehouses 10 terminals Test
+        if: ${{ !cancelled() && !failure() }}
         timeout-minutes: 25
         run: |
           set -uo pipefail
@@ -542,15 +541,17 @@ jobs:
           sed -i '/.*terminals=*/c\terminals=10' props_10.mo
           sed -i '/.*warehouses=*/c\warehouses=10' props_10.mo
           sed -i 's/tpcc/tpcc_10/g' props_10.mo
-          #sed -i 's/127.0.0.1/${{ needs.setup_mo_test_env.outputs.mo_svc_ip }}/g' props_10.mo
+          sed -i 's/127.0.0.1/${{ needs.setup_mo_test_env.outputs.mo_svc_ip }}/g' props_10.mo
           sed -i '/runMins=*/c\runMins=5' props_10.mo
           sed -i '/.*expectedErrorCodes=*/c\expectedErrorCodes=20619,1062' props_10.mo
-          sed -i 's/user=.*/user=${{ steps.account_for_tpcc.outputs.tpcc_account }}/g' props_10.mo
-          sed -i 's/password=.*/password=${{ steps.account_for_tpcc.outputs.tpcc_password }}/g' props_10.mo
+          sed -i 's/user=.*/user=${{ steps.create_account.outputs.tpcc_account }}/g' props_10.mo
+          sed -i 's/password=.*/password=${{ steps.create_account.outputs.tpcc_password }}/g' props_10.mo
           ./runBenchmark.sh props_10.mo | tee report/tpcc-benchmark-10-10.log
           ./runVerify.sh props_10.mo | tee report/tpcc-verify-10-10.log
-      - name: TPCC/Result Summary
-        if: ${{ !cancelled() && !failure() && steps.s1.outputs.run_tpcc == 'true' }}
+
+      - name: TPCC Result Summary
+        if: ${{ !cancelled() && !failure() }}
+        continue-on-error: true
         run: |
           cd $GITHUB_WORKSPACE/mo-tpcc
           files=("report/tpcc-benchmark-10-10.log")
@@ -571,26 +572,9 @@ jobs:
               tail -n 3 tmp 
           done
 
-      - name: TPCC/Collect Upload files
-        if: ${{ !cancelled() && !failure() && steps.s1.outputs.run_tpcc == 'true' }}
-        run: |
-          mkdir -p $GITHUB_WORKSPACE/reports/mo-load-data
-          mkdir -p $GITHUB_WORKSPACE/reports/mo-tpcc
-          mkdir -p $GITHUB_WORKSPACE/mo-load-data/report && cp -r $GITHUB_WORKSPACE/mo-load-data/report $GITHUB_WORKSPACE/reports/mo-load-data
-          mkdir -p $GITHUB_WORKSPACE/mo-tpcc/report && cp -r $GITHUB_WORKSPACE/mo-tpcc/report $GITHUB_WORKSPACE/reports/mo-tpcc
-
-      - name: Sysbench/Create Account for Test And Set PATH
-        if: ${{ !cancelled() && !failure() && steps.s1.outputs.run_sysbench == 'true' }}
-        timeout-minutes: 2
-        id: account_for_sysbench
-        run: |
-          echo "sysbench_account=dump" >> $GITHUB_OUTPUT
-          echo "sysbench_password=111" >> $GITHUB_OUTPUT
-          echo "$JAVA_HOME/bin" >> $GITHUB_PATH
-
       # start sysbench test
-      - name: Sysbench/Prepare Sysbench Database and Tables
-        if: ${{ !cancelled() && !failure() && steps.s1.outputs.run_sysbench == 'true' }}
+      - name: Prepare Sysbench Database and Tables
+        if: ${{ !cancelled() && !failure() }}
         timeout-minutes: 5
         run: |
           set -uo pipefail
@@ -599,17 +583,17 @@ jobs:
 
           cd $GITHUB_WORKSPACE/mo-load
           mkdir -p report
-          #sed -i 's/127.0.0.1/${{ needs.setup_mo_test_env.outputs.mo_svc_ip }}/g' mo.yml
-          sed -i 's/name:.*$/name: "${{ steps.account_for_sysbench.outputs.sysbench_account }}"/g' mo.yml
-          sed -i 's/password:.*$/password: "${{ steps.account_for_sysbench.outputs.sysbench_password }}"/g' mo.yml
+          sed -i 's/127.0.0.1/${{ needs.setup_mo_test_env.outputs.mo_svc_ip }}/g' mo.yml
+          sed -i 's/name:.*$/name: "${{ steps.create_account.outputs.sysbench_account }}"/g' mo.yml
+          sed -i 's/password:.*$/password: "${{ steps.create_account.outputs.sysbench_password }}"/g' mo.yml
 
           echo 'Start Prepare Data of 10-tables-100000-per-table'
           ./start.sh -m SYSBENCH -n 10 -s 100000 -t 1 | tee report/load-oltp-mix.log
           sleep 10
 
       # start sysbench test
-      - name: Sysbench/Start OLTP Mixed Test With 10 Threads
-        if: ${{ !cancelled() && !failure() && steps.s1.outputs.run_sysbench == 'true' }}
+      - name: Start OLTP Mixed Test With 10 Threads
+        if: ${{ !cancelled() && !failure() }}
         timeout-minutes: 40
         run: |
           set -uo pipefail
@@ -621,8 +605,8 @@ jobs:
           echo 'Start OLTP Insert Test With 10 threads'
           ./start.sh -c cases/sysbench/mixed_10_100000 -t 10 -d 5 -g -b sbtest | tee report/oltp-mix.log
 
-      - name: Sysbench/Result Summary
-        if: ${{ !cancelled() && !failure() && steps.s1.outputs.run_sysbench == 'true' }}
+      - name: Sysbench Result Summary
+        if: ${{ !cancelled() && !failure() }}
         run: |
           cd $GITHUB_WORKSPACE/mo-load
 
@@ -644,33 +628,9 @@ jobs:
               tail -n 3 tmp 
           done
 
-      - name: Sysbench/Collect Upload files
-        if: ${{ (steps.s1.outputs.run_sysbench == 'true') && (always() || cancelled()) }}
-        run: |
-          mkdir -p $GITHUB_WORKSPACE/reports/mo-load
-          mkdir -p $GITHUB_WORKSPACE/mo-load/report && cp -r $GITHUB_WORKSPACE/mo-load/report $GITHUB_WORKSPACE/reports/mo-load
 
-      - name: TPCH/SSB/Create Account for Test
-        if: ${{ !cancelled() && !failure() && (steps.s1.outputs.run_tpch == 'true' || steps.s1.outputs.run_ssb == 'true') }}
-        timeout-minutes: 2
-        id: account_for_ssb_and_tpch
-        run: |
-          #mysql -h 127.0.0.1 -P 6001 -udump -p111 -e "create account ssb_tpch_test admin_name = 'admin' identified by '111' comment 'for ssb_tpch test';"
-          echo "ssb_tpch_account=dump" >> $GITHUB_OUTPUT
-          echo "ssb_tpch_password=111" >> $GITHUB_OUTPUT
-
-      - name: TPCH/SSB/Modify Tool's Setting And Set PATH
-        if: ${{ !cancelled() && !failure() && (steps.s1.outputs.run_tpch == 'true' || steps.s1.outputs.run_ssb == 'true') }}
-        run: |
-          cd $GITHUB_WORKSPACE/mo-load-data
-          sed -i '/.*ENDPOINT: ""*/c\ENDPOINT: "cos.ap-guangzhou.myqcloud.com"' access.yml
-          sed -i '/.*ACCESS_KEY_ID: ""*/c\ACCESS_KEY_ID: "${{secrets.TENCENT_AK}}"' access.yml
-          sed -i '/.*SECRET_ACCESS_KEY: ""*/c\SECRET_ACCESS_KEY: "${{secrets.TENCENT_SK}}"' access.yml
-          echo "$JAVA_HOME/bin" >> $GITHUB_PATH
-
-      - name: SSB/Start Load SSB 1G Data And Test
-        if: ${{ !cancelled() && !failure() && steps.s1.outputs.run_ssb == 'true' }}
-        id: step_ssb_test
+      - name: Start Load SSB 1G Data And Test
+        if: ${{ !cancelled() && !failure() }}
         timeout-minutes: 20
         run: |
           set -uo pipefail
@@ -679,14 +639,14 @@ jobs:
           sleep 60s
           cd $GITHUB_WORKSPACE/mo-load-data
           mkdir -p report
-          ./load.sh -u ${{ steps.account_for_ssb_and_tpch.outputs.ssb_tpch_account }} -p ${{ steps.account_for_ssb_and_tpch.outputs.ssb_tpch_password }} -h 127.0.0.1 -c cases/02_from_cos/ssb_1 -r -m | tee report/mo-load-data-ssb.log
+          ./load.sh -u ${{ steps.create_account.outputs.ssb_tpch_account }} -p ${{ steps.create_account.outputs.ssb_tpch_password }} -h 127.0.0.1 -c cases/02_from_cos/ssb_1 -r -m | tee report/mo-load-data-ssb.log
           # start test
           cd $GITHUB_WORKSPACE/mo-ssb
           mkdir -p report
-          ./run.sh -u ${{ steps.account_for_ssb_and_tpch.outputs.ssb_tpch_account }} -p ${{ steps.account_for_ssb_and_tpch.outputs.ssb_tpch_password }} -h 127.0.0.1 -q all -s 1 -t 5 | tee report/mo-ssb.log
+          ./run.sh -u ${{ steps.create_account.outputs.ssb_tpch_account }} -p ${{ steps.create_account.outputs.ssb_tpch_password }} -h 127.0.0.1 -q all -s 1 -t 5 | tee report/mo-ssb.log
 
-      - name: TPCH/Load TPCH 1G Test Data
-        if: ${{ !cancelled() && !failure() && steps.s1.outputs.run_tpch == 'true' }}
+      - name: Load TPCH 1G Test Data
+        if: ${{ !cancelled() && !failure() }}
         timeout-minutes: 20
         id: load_tpch_data
         run: |
@@ -696,10 +656,10 @@ jobs:
           sleep 60s
           cd $GITHUB_WORKSPACE/mo-load-data
           mkdir -p report
-          ./load.sh -u ${{ steps.account_for_ssb_and_tpch.outputs.ssb_tpch_account }} -p ${{ steps.account_for_ssb_and_tpch.outputs.ssb_tpch_password }} -h 127.0.0.1 -c cases/02_from_cos/tpch_1 -r -m | tee report/mo-load-data-tpch.log
+          ./load.sh -u ${{ steps.create_account.outputs.ssb_tpch_account }} -p ${{ steps.create_account.outputs.ssb_tpch_password }} -h 127.0.0.1 -c cases/02_from_cos/tpch_1 -r -m | tee report/mo-load-data-tpch.log
 
-      - name: TPCH/Start TPCH 1G Test
-        if: ${{ !cancelled() && !failure() && steps.load_tpch_data.conclusion == 'success' && steps.s1.outputs.run_tpch == 'true' }}
+      - name: Start TPCH 1G Test
+        if: ${{ !cancelled() && !failure() && steps.load_tpch_data.conclusion == 'success'}}
         id: step_tpch_test
         timeout-minutes: 20
         run: |
@@ -709,18 +669,7 @@ jobs:
           sleep 60s
           cd $GITHUB_WORKSPACE/mo-tpch
           mkdir -p report
-          ./run.sh -u ${{ steps.account_for_ssb_and_tpch.outputs.ssb_tpch_account }} -p ${{ steps.account_for_ssb_and_tpch.outputs.ssb_tpch_password }} -h 127.0.0.1 -q all -s 1 -t 5 | tee report/tpch.log
-
-      - name: TPCH/SSB/Collect SSB AND TPCH Upload files
-        if: ${{ (failure() || cancelled()) && (steps.s1.outputs.run_tpch == 'true' || steps.s1.outputs.run_ssb == 'true') }}
-        run: |
-          mkdir -p $GITHUB_WORKSPACE/reports
-          mkdir -p $GITHUB_WORKSPACE/reports/mo-ssb
-          mkdir -p $GITHUB_WORKSPACE/reports/mo-load-data
-          mkdir -p $GITHUB_WORKSPACE/reports/mo-tpch
-          mkdir -p $GITHUB_WORKSPACE/mo-ssb/report && cp -r $GITHUB_WORKSPACE/mo-ssb/report $GITHUB_WORKSPACE/reports/mo-ssb
-          mkdir -p $GITHUB_WORKSPACE/mo-load-data/report && cp -r $GITHUB_WORKSPACE/mo-load-data/report $GITHUB_WORKSPACE/reports/mo-load-data
-          mkdir -p $GITHUB_WORKSPACE/mo-tpch/report && cp -r $GITHUB_WORKSPACE/mo-tpch/report $GITHUB_WORKSPACE/reports/mo-tpch
+          ./run.sh -u ${{ steps.create_account.outputs.ssb_tpch_account }} -p ${{ steps.create_account.outputs.ssb_tpch_password }} -h 127.0.0.1 -q all -s 1 -t 5 | tee report/tpch.log
 
       - name: Clean mo-service
         if: ${{ always() }}
@@ -729,67 +678,29 @@ jobs:
           i=1 && while [ -n "$(ps -aux|grep 'mo-service' | grep -v 'grep' | awk '{print $2}')" ] && [ $i -le 300 ]; do echo "mo-service kill not finished......$i/300"; i=$(($i+1)); sleep 1s; done
           if [ $i -gt 300 ]; then echo 'stop mo-service failed...'; exit 1; else echo 'stop mo-service successed...'; fi
 
-      - name: Download mo-log
+      - name: Collect Upload files
         if: ${{ always() }}
         run: |
+          mkdir -p $GITHUB_WORKSPACE/reports
+          mkdir -p $GITHUB_WORKSPACE/reports/mo-ssb
+          mkdir -p $GITHUB_WORKSPACE/reports/mo-load-data
+          mkdir -p $GITHUB_WORKSPACE/reports/mo-tpch
+          mkdir -p $GITHUB_WORKSPACE/reports/mo-load
+          mkdir -p $GITHUB_WORKSPACE/reports/mo-tpcc
+          mkdir -p $GITHUB_WORKSPACE/mo-ssb/report && cp -r $GITHUB_WORKSPACE/mo-ssb/report $GITHUB_WORKSPACE/reports/mo-ssb
+          mkdir -p $GITHUB_WORKSPACE/mo-load-data/report && cp -r $GITHUB_WORKSPACE/mo-load-data/report $GITHUB_WORKSPACE/reports/mo-load-data
+          mkdir -p $GITHUB_WORKSPACE/mo-tpch/report && cp -r $GITHUB_WORKSPACE/mo-tpch/report $GITHUB_WORKSPACE/reports/mo-tpch
+          mkdir -p $GITHUB_WORKSPACE/mo-load/report && cp -r $GITHUB_WORKSPACE/mo-load/report $GITHUB_WORKSPACE/reports/mo-load
+          mkdir -p $GITHUB_WORKSPACE/mo-tpcc/report && cp -r $GITHUB_WORKSPACE/mo-tpcc/report $GITHUB_WORKSPACE/reports/mo-tpcc
+          
           cp $GITHUB_WORKSPACE/matrixone/mo-service.log $GITHUB_WORKSPACE/reports/mo-service.log
 
+
       - uses: actions/upload-artifact@v4
-        if: ${{ always() }}
+        if: ${{ failure() || cancelled() }}
         continue-on-error: true
         with:
           name: reports
           path: |
             ${{ github.workspace }}/reports
           retention-days: 7
-
-  pr-size-label:
-    environment: ci
-    runs-on: ubuntu-22.04
-    needs: [check_organization_user]
-    steps:
-      - name: size-label
-        uses: "matrixorigin/CI/actions/label-size-action@main"
-        with:
-          size_token: ${{ secrets.TOKEN_ACTION }}
-          ignore: ".md,.pb.go"
-          sizes: >
-            {
-              "XS":0,
-              "S":10,
-              "M":100,
-              "L":500,
-              "XL":1000,
-              "XXL":2000
-            }
-
-  docu_issue_check:
-    environment: ci
-    runs-on: ubuntu-22.04
-    needs: [check_organization_user]
-    if: ${{ github.event.action == 'opened' }}
-    steps:
-      - uses: matrixorigin/CI/actions/pull-issue-reviewer@main
-        with:
-          token_action: ${{ secrets.TOKEN_ACTION }}
-          uri_notice: ${{ secrets.DOCU_GROUP_HOOK }}
-          name_label: "doc influence"
-          reviewers: "lacrimosaprinz,dengn"
-          mentions: "Prinz,DengNan"
-
-  # chatgpt-review:
-  #   name: ChatGPT Review
-  #   needs: [check_organization_user]
-  #   runs-on: ubuntu-22.04
-  #   if: ${{ github.event.action == 'opened' }}
-  #   steps:
-  #     - uses: matrixorigin/ChatGPT-Reviewer@main
-  #       name: ChatGPT Review
-  #       env:
-  #         GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
-  #         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-  #       with:
-  #         model: "gpt-3.5-turbo"
-  #         temperature: 0.2
-  #         review_per_file: false
-  #         comment_per_file: false
