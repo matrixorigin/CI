@@ -300,21 +300,9 @@ jobs:
           echo "bvt_coverage finished"
           go tool cover -o ${{ env.bvt_html_coverage }} -html=${{ env.bvt_coverage }}
           echo "bvt_html_coverage finished"
-
-      - name: Download UT BVT Coverage and diff.patch Files
-        if: ${{ failure() }}
-        continue-on-error: true
-        run: |
-          cd $GITHUB_WORKSPACE
-          mkdir -p coverage_downloads
-          cp $GITHUB_WORKSPACE/matrixone/mo-service.log $GITHUB_WORKSPACE/coverage_downloads/mo-service.log
-          cp $GITHUB_WORKSPACE/matrixone/ut_coverage.out $GITHUB_WORKSPACE/coverage_downloads/ut_coverage.out
-          cp $GITHUB_WORKSPACE/matrixone/bvt_coverage.out $GITHUB_WORKSPACE/coverage_downloads/bvt_coverage.out
-          cp $GITHUB_WORKSPACE/matrixone/diff.patch $GITHUB_WORKSPACE/coverage_downloads/diff.patch
-
-          cd $GITHUB_WORKSPACE/coverage_downloads
+          
+          # generate sorted ut coverage file
           sort ut_coverage.out | uniq > ut_coverage_sort.out
-          zip -r coverage_files.zip mo-service.log ut_coverage_sort.out bvt_coverage.out diff.patch
 
       - name: Upload Compressed Files
         uses: actions/upload-artifact@v4
@@ -322,15 +310,21 @@ jobs:
         continue-on-error: true
         with:
           name: coverage-files
-          path: ${{ github.workspace }}/coverage_downloads/coverage_files.zip
+          path: |
+            ${{ github.workspace }}/matrixone/mo-service.log
+            ${{ github.workspace }}/matrixone/ut_coverage.out
+            ${{ github.workspace }}/matrixone/bvt_coverage.out
+            ${{ github.workspace }}/matrixone/diff.patch
           retention-days: 7
       - name: Checkout for Python file
+        if: ${{ always() && !cancelled() }}
         uses: actions/checkout@v4
         with:
           repository: matrixorigin/CI
           fetch-depth: "1"
           path: CI
       - name: Get Python file
+        if: ${{ always() && !cancelled() }}
         run: |
           cd $GITHUB_WORKSPACE
           cp $GITHUB_WORKSPACE/CI/scripts/parse_coverage.py $GITHUB_WORKSPACE/parse_coverage.py
@@ -341,12 +335,13 @@ jobs:
           python $GITHUB_WORKSPACE/parse_coverage.py -coverage_files $GITHUB_WORKSPACE/matrixone/ut_coverage.out $GITHUB_WORKSPACE/matrixone/bvt_coverage.out -diff_path $GITHUB_WORKSPACE/matrixone/diff.patch
 
       - name: Check Coverage(compare with branch main)
+        if: ${{ always() && !cancelled() }}
         #if: ${{ false }}
         uses: matrixorigin/CI/actions/check-coverage@main
         with:
           type: open
-          ut_coverage_file: ${{ github.workspace }}/coverage_downloads/ut_coverage_sort.out
-          bvt_coverage_file: ${{ github.workspace }}/coverage_downloads/bvt_coverage.out
+          ut_coverage_file: ${{ github.workspace }}/matrixone/ut_coverage_sort.out
+          bvt_coverage_file: ${{ github.workspace }}/matrixone/bvt_coverage.out
           commit_id: ${{ github.event.pull_request.head.sha }}
           branch: "main"
           pr_number: ${{ github.event.pull_request.number }}
@@ -374,13 +369,6 @@ jobs:
           cp $GITHUB_WORKSPACE/pr_coverage.out $GITHUB_WORKSPACE/matrixone/pr_coverage.out
           go tool cover -o pr_coverage.html -html=pr_coverage.out
 
-          cd $GITHUB_WORKSPACE
-          cp $GITHUB_WORKSPACE/matrixone/pr_coverage.html $GITHUB_WORKSPACE/coverage_downloads/pr_coverage.html
-          cp $GITHUB_WORKSPACE/pr_coverage.out $GITHUB_WORKSPACE/coverage_downloads/pr_coverage.out
-          cp $GITHUB_WORKSPACE/merged_coverage.out $GITHUB_WORKSPACE/coverage_downloads/merged_coverage.out
-
-          cd $GITHUB_WORKSPACE/coverage_downloads
-          zip -r final_result_files.zip pr_coverage.html pr_coverage.out merged_coverage.out
       - name: Upload final result files
         uses: actions/upload-artifact@v4
         if: ${{ always() && !cancelled() && steps.compress_result.outputs.file_exists == 'true' }}
@@ -388,7 +376,9 @@ jobs:
         with:
           name: final-result-files
           path: |
-            ${{ github.workspace }}/coverage_downloads/final_result_files.zip
+            ${{ github.workspace }}/matrixone/pr_coverage.html
+            ${{ github.workspace }}/pr_coverage.out
+            ${{ github.workspace }}/merged_coverage.out
           retention-days: 7
 
   pr-size-label:
