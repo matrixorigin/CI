@@ -302,20 +302,23 @@ jobs:
           echo "bvt_html_coverage finished"
 
       - name: Download UT BVT Coverage and diff.patch Files
+        if: ${{ failure() }}
         continue-on-error: true
         run: |
           cd $GITHUB_WORKSPACE
           mkdir -p coverage_downloads
+          cp $GITHUB_WORKSPACE/matrixone/mo-service.log $GITHUB_WORKSPACE/coverage_downloads/mo-service.log
           cp $GITHUB_WORKSPACE/matrixone/ut_coverage.out $GITHUB_WORKSPACE/coverage_downloads/ut_coverage.out
           cp $GITHUB_WORKSPACE/matrixone/bvt_coverage.out $GITHUB_WORKSPACE/coverage_downloads/bvt_coverage.out
           cp $GITHUB_WORKSPACE/matrixone/diff.patch $GITHUB_WORKSPACE/coverage_downloads/diff.patch
 
           cd $GITHUB_WORKSPACE/coverage_downloads
           sort ut_coverage.out | uniq > ut_coverage_sort.out
-          zip -r coverage_files.zip ut_coverage_sort.out bvt_coverage.out diff.patch
+          zip -r coverage_files.zip mo-service.log ut_coverage_sort.out bvt_coverage.out diff.patch
 
       - name: Upload Compressed Files
         uses: actions/upload-artifact@v4
+        if: ${{ failure() }}
         continue-on-error: true
         with:
           name: coverage-files
