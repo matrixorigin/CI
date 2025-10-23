@@ -41,6 +41,16 @@ jobs:
     runs-on: ubuntu-22.04
     name: UT Test on Ubuntu/x86
     steps:
+      - name: Pre Clean Some Unneeded Images
+        run: |
+          sudo df -h /*
+          echo "========================================="
+          sudo docker builder prune -f -a;
+          sudo docker images | grep -v REPOSITORY | awk '{system("sudo docker rmi "$1":"$2)}';
+          sudo docker volume prune -f;
+          echo "========================================="
+          sudo df -h /*
+
       - name: Parse Time for moc
         id: time
         run: |

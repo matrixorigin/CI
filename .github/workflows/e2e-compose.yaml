@@ -12,6 +12,15 @@ jobs:
     timeout-minutes: 60
 
     steps:
+      - name: Pre Clean Some Unneeded Images
+        run: |
+          sudo df -h /*
+          echo "========================================="
+          sudo docker builder prune -f -a;
+          sudo docker images | grep -v REPOSITORY | awk '{system("sudo docker rmi "$1":"$2)}';
+          sudo docker volume prune -f;
+          echo "========================================="
+          sudo df -h /*
       - name: checkout
         uses: actions/checkout@v5
         with:
@@ -164,8 +173,16 @@ jobs:
     runs-on: ubuntu-22.04
     name: multi cn e2e bvt test docker compose(PESSIMISTIC)
     timeout-minutes: 60
-
     steps:
+      - name: Pre Clean Some Unneeded Images
+        run: |
+          sudo df -h /*
+          echo "========================================="
+          sudo docker builder prune -f -a;
+          sudo docker images | grep -v REPOSITORY | awk '{system("sudo docker rmi "$1":"$2)}';
+          sudo docker volume prune -f;
+          echo "========================================="
+          sudo df -h /*
       - name: checkout
         uses: actions/checkout@v5
         with:
