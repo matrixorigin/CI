@@ -84,7 +84,7 @@ jobs:
           asset_name: mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64.zip
           asset_content_type: application/zip
       - name: dispatch binary test
-        uses: peter-evans/repository-dispatch@v3
+        uses: peter-evans/repository-dispatch@v4
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           repository: matrixorigin/mo-nightly-regression
@@ -397,7 +397,7 @@ jobs:
   #         asset_name: mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64.zip
   #         asset_content_type: application/zip
   #     - name: dispatch binary test
-  #       uses: peter-evans/repository-dispatch@v3
+  #       uses: peter-evans/repository-dispatch@v4
   #       with:
   #         token: ${{ secrets.TOKEN_ACTION }}
   #         repository: matrixorigin/mo-nightly-regression
