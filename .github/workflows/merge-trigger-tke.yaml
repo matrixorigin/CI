@@ -276,7 +276,7 @@ jobs:
         run: |
           mkdir -p $GITHUB_WORKSPACE/reports/mo-tester
           mkdir -p $GITHUB_WORKSPACE/mo-tester && cp -r $GITHUB_WORKSPACE/mo-tester $GITHUB_WORKSPACE/reports/mo-tester
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
@@ -393,7 +393,7 @@ jobs:
           curl "http://$cn_1_ip:6060/debug/pprof/trace?seconds=30" -o cn_1_trace.out
           curl "http://$cn_1_ip:6060/debug/pprof/goroutine?debug=2" -o cn_1_groutine.out
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: ${{ always() && steps.step_ssb_test.conclusion != 'success' }}
         with:
           name: mo-cluster-trace-${{ github.event.pull_request.number }}-ssb
@@ -435,7 +435,7 @@ jobs:
           curl "http://$cn_1_ip:6060/debug/pprof/trace?seconds=30" -o cn_1_trace.out
           curl "http://$cn_1_ip:6060/debug/pprof/goroutine?debug=2" -o cn_1_groutine.out
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: ${{ always() && steps.load_tpch_data.conclusion != 'success' }}
         with:
           name: mo-cluster-trace-${{ github.event.pull_request.number }}-load-tpch
@@ -476,7 +476,7 @@ jobs:
           curl "http://$cn_1_ip:6060/debug/pprof/trace?seconds=30" -o cn_1_trace.out
           curl "http://$cn_1_ip:6060/debug/pprof/goroutine?debug=2" -o cn_1_groutine.out
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: ${{ always() && steps.step_tpch_test.conclusion != 'success' }}
         with:
           name: mo-cluster-trace-${{ github.event.pull_request.number }}-tpch
@@ -495,7 +495,7 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/mo-load-data/report && cp -r $GITHUB_WORKSPACE/mo-load-data/report $GITHUB_WORKSPACE/reports/mo-load-data
           mkdir -p $GITHUB_WORKSPACE/mo-tpch/report && cp -r $GITHUB_WORKSPACE/mo-tpch/report $GITHUB_WORKSPACE/reports/mo-tpch
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
@@ -616,7 +616,7 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/reports/mo-load
           mkdir -p $GITHUB_WORKSPACE/mo-load/report && cp -r $GITHUB_WORKSPACE/mo-load/report $GITHUB_WORKSPACE/reports/mo-load
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
@@ -760,7 +760,7 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/mo-load-data/report && cp -r $GITHUB_WORKSPACE/mo-load-data/report $GITHUB_WORKSPACE/reports/mo-load-data
           mkdir -p $GITHUB_WORKSPACE/mo-tpcc/report && cp -r $GITHUB_WORKSPACE/mo-tpcc/report $GITHUB_WORKSPACE/reports/mo-tpcc
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
@@ -811,7 +811,7 @@ jobs:
           curl "http://$cn_1_ip:6060/debug/pprof/trace?seconds=30" -o cn_1_trace.out
           curl "http://$cn_1_ip:6060/debug/pprof/goroutine?debug=2" -o cn_1_groutine.out
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: ${{ needs.docker_image_build.result == 'success' }}
         continue-on-error: true
         with:

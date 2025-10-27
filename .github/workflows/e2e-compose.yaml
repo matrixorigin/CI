@@ -140,7 +140,7 @@ jobs:
           docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn down --remove-orphans
           docker volume rm launch-tae-compose_minio_storage
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
@@ -274,7 +274,7 @@ jobs:
           docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn down --remove-orphans
           docker volume rm launch-tae-compose_minio_storage
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
