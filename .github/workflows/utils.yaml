@@ -305,7 +305,7 @@ jobs:
           sort ut_coverage.out | uniq > ut_coverage_sort.out
 
       - name: Upload Compressed Files
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         if: ${{ failure() }}
         continue-on-error: true
         with:
@@ -370,7 +370,7 @@ jobs:
           go tool cover -o pr_coverage.html -html=pr_coverage.out
 
       - name: Upload final result files
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         if: ${{ always() && !cancelled() && steps.compress_result.outputs.file_exists == 'true' }}
         continue-on-error: true
         with:
@@ -696,7 +696,7 @@ jobs:
           cp $GITHUB_WORKSPACE/matrixone/mo-service.log $GITHUB_WORKSPACE/reports/mo-service.log
 
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: ${{ failure() || cancelled() }}
         continue-on-error: true
         with:

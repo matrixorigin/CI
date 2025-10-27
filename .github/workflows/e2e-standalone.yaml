@@ -121,7 +121,7 @@ jobs:
           mv ${{ github.workspace }}/head/mo-service.log ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/mo-tester ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/head/dump-stacks* ${{ github.workspace }}/upload/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
@@ -129,7 +129,7 @@ jobs:
           path: |
             ${{ github.workspace }}/upload
           retention-days: 7
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         name: Upload MO DATA
         if: ${{ failure() }}
         continue-on-error: true
@@ -218,7 +218,7 @@ jobs:
           mv ${{ github.workspace }}/head/mo-service.log ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/mo-tester ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/head/dump-stacks.log ${{ github.workspace }}/upload/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
@@ -320,7 +320,7 @@ jobs:
           mv ${{ github.workspace }}/mo-tester ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/head/dump-stacks.log ${{ github.workspace }}/upload/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
