@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v5
       - name: Check for any changed workflows
         id: check-for-changed-workflows
-        uses: tj-actions/changed-files@v46
+        uses: tj-actions/changed-files@v47
         with:
           files: |
             .github/workflows/**.yaml
