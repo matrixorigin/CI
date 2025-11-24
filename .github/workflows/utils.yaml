@@ -96,14 +96,14 @@ jobs:
     # if you change runner, must modify L117
     runs-on: amd64-mo-guangzhou-2xlarge16
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: "1"
           path: ./matrixone
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
       - name: Clone test-tool repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
@@ -318,7 +318,7 @@ jobs:
           retention-days: 7
       - name: Checkout for Python file
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/CI
           fetch-depth: "1"
@@ -409,14 +409,14 @@ jobs:
     environment: ci
     runs-on: amd64-mo-guangzhou-2xlarge16
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           path: ./matrixone
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
       - name: Clone mo-load-data Repo
         if: ${{ !cancelled() && !failure() }}
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-load-data
           token: ${{secrets.TOKEN_ACTION}}
@@ -424,7 +424,7 @@ jobs:
           ref: main
       - name: Clone mo-load Repo
         if: ${{ !cancelled() && !failure() }}
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-load
           token: ${{secrets.TOKEN_ACTION}}
@@ -432,7 +432,7 @@ jobs:
           ref: "1.0"
       - name: Clone mo-tpcc Repo
         if: ${{ !cancelled() && !failure() }}
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-tpcc
           token: ${{secrets.TOKEN_ACTION}}
@@ -440,7 +440,7 @@ jobs:
           ref: main
       - name: Clone mo-ssb Repo
         if: ${{ !cancelled() && !failure() }}
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-ssb
           token: ${{secrets.TOKEN_ACTION}}
@@ -448,7 +448,7 @@ jobs:
           ref: main
       - name: Clone mo-tpch Repo
         if: ${{ !cancelled() && !failure() }}
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-tpch
           token: ${{secrets.TOKEN_ACTION}}

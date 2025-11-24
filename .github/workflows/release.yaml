@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout source
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - name: Get release
         id: get_release
         uses: bruceadams/get-release@v1.3.2
@@ -100,7 +100,7 @@ jobs:
     runs-on: arm64-mo-guangzhou-2xlarge16
     steps:
       - name: Checkout source
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - name: Get release
         id: get_release
         uses: bruceadams/get-release@v1.3.2
@@ -167,7 +167,7 @@ jobs:
           done
           exit 1;
       - name: Checkout source
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - name: Get release
         id: get_release
         uses: bruceadams/get-release@v1.3.2
@@ -195,7 +195,7 @@ jobs:
           p12-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
 
       - name: Clone gon
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: "1"
           repository: matrixorigin/gon
@@ -269,7 +269,7 @@ jobs:
           done
           exit 1;
       - name: Checkout source
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - name: Get release
         id: get_release
         uses: bruceadams/get-release@v1.3.2
@@ -351,7 +351,7 @@ jobs:
   #   runs-on: ubuntu-22.04
   #   steps:
   #     - name: Checkout source
-  #       uses: actions/checkout@v5
+  #       uses: actions/checkout@v6
   #     - name: Get release
   #       id: get_release
   #       uses: bruceadams/get-release@v1.3.2
@@ -413,7 +413,7 @@ jobs:
   #   runs-on: arm64-mo-guangzhou-2xlarge16
   #   steps:
   #     - name: Checkout source
-  #       uses: actions/checkout@v5
+  #       uses: actions/checkout@v6
   #     - name: Get release
   #       id: get_release
   #       uses: bruceadams/get-release@v1.3.2
