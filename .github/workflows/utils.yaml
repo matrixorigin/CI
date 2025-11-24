@@ -90,7 +90,7 @@ jobs:
     # if you change runner, must modify L117
     runs-on: amd64-mo-guangzhou-2xlarge16
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: "1"
           path: ./matrixone
@@ -136,7 +136,7 @@ jobs:
           echo "$JAVA_HOME/bin" >> $GITHUB_PATH
 
       - name: Clone test-tool repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
@@ -303,7 +303,7 @@ jobs:
           path: ${{ github.workspace }}/coverage_downloads/coverage_files.zip
           retention-days: 7
       - name: Checkout for Python file
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/CI
           ref: release/2.0-dev
