@@ -18,7 +18,7 @@ jobs:
       mo_reuse_enable_checker: true
     steps:
       - name: checkout matrixorigin/matrixone
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           path: ./matrixone
       - name: Set up Go
@@ -56,7 +56,7 @@ jobs:
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/matrixone launch
 
       - name: Clone test-tool repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
@@ -129,7 +129,7 @@ jobs:
       mo_reuse_enable_checker: true
     steps:
       - name: checkout head
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           path: ./head
       - name: Set up Go
@@ -152,7 +152,7 @@ jobs:
           cd $GITHUB_WORKSPACE/head
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/head launch
       - name: Clone test-tool repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
