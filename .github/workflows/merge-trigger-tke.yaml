@@ -93,6 +93,9 @@ jobs:
 
           # adjust for go 1.24
           sed -i 's#FROM matrixorigin/golang:1.24-ubuntu22#FROM ccr.ccs.tencentyun.com/mo-infra/golang:1.24-ubuntu22#g' optools/images/Dockerfile
+          
+          # adjust for go 1.25
+          sed -i 's#FROM matrixorigin/golang:1.25-ubuntu22#FROM ccr.ccs.tencentyun.com/mo-infra/golang:1.25-ubuntu22#g' optools/images/Dockerfile
 
       - name: Build and Push Image
         uses: matrixorigin/CI/actions/image-build@main
