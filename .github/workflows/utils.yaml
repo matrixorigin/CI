@@ -147,8 +147,8 @@ jobs:
           echo "bvt_coverage='bvt_coverage.out'" >> $GITHUB_ENV
           echo "ut_html_coverage='ut_coverage.html'" >> $GITHUB_ENV
           echo "bvt_html_coverage='bvt_coverage.html'" >> $GITHUB_ENV
-          echo "ut_excluded_pkg='pkg/pb\|pkg/sql/parsers/goyacc\|yaccpar'" >> $GITHUB_ENV
-          echo "bvt_excluded_pkg='pkg/pb\|yaccpar'" >> $GITHUB_ENV
+          echo "ut_excluded_pkg='pkg/pb|pkg/sql/parsers/goyacc|yaccpar'" >> $GITHUB_ENV
+          echo "bvt_excluded_pkg='pkg/pb|yaccpar'" >> $GITHUB_ENV
           echo 'GOPROXY=http://goproxy.goproxy.svc.cluster.local|https://goproxy.cn|direct' >> $GITHUB_ENV
 
 #      - uses: matrixorigin/setup-hdfs@master
