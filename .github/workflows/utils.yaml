@@ -287,6 +287,7 @@ jobs:
         timeout-minutes: 10
         run: |
           set -uo pipefail
+          set -ex
           cd $GITHUB_WORKSPACE/matrixone
           cat ${{ env.raw_ut_coverage }} | grep -Ev ${{ env.ut_excluded_pkg }} > ${{ env.ut_coverage }}
           echo "ut_coverage finished"
