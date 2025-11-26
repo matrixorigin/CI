@@ -21,14 +21,14 @@ jobs:
 
     steps:
       - name: checkout head
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           path: ./head
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
 
       - name: checkout upstream
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           path: ./upstream
           repository: ${{ github.event.pull_request.base.repo.full_name }}
@@ -81,7 +81,7 @@ jobs:
           sleep 60;
 
       - name: Clone test-tool repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
@@ -227,7 +227,7 @@ jobs:
 
     steps:
       - name: Checkout Head
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           path: ./head
           repository: ${{ github.event.pull_request.head.repo.full_name }}
@@ -244,7 +244,7 @@ jobs:
           echo "tag=$LATEST_RELEASE_TAG" >> $GITHUB_OUTPUT
 
       - name: Checkout Upstream Release
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           path: ./upstream
           repository: ${{ inputs.release-repo }}
@@ -297,7 +297,7 @@ jobs:
           sleep 60;
 
       - name: Clone test-tool repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
