@@ -289,6 +289,10 @@ jobs:
           set -uo pipefail
           set -ex
           cd $GITHUB_WORKSPACE/matrixone
+          ls -lh;
+          echo "====================================="
+          echo ""
+          
           grep -Ev ${{ env.ut_excluded_pkg }} ${{ env.raw_ut_coverage }} > ${{ env.ut_coverage }}
           echo "ut_coverage finished"
           go tool cover -o ${{ env.ut_html_coverage }} -html=${{ env.ut_coverage }}
@@ -340,6 +344,11 @@ jobs:
           cd $GITHUB_WORKSPACE
           python $GITHUB_WORKSPACE/parse_coverage.py -coverage_files $GITHUB_WORKSPACE/matrixone/ut_coverage.out $GITHUB_WORKSPACE/matrixone/bvt_coverage.out -diff_path $GITHUB_WORKSPACE/matrixone/diff.patch
 
+      - name: Show Dmesg For Debug
+        continue-on-error: true
+        if: ${{ always() }}
+        run: |
+          sudo dmesg -T
       # - name: Check Coverage(compare with branch main)
       #   if: ${{ always() && !cancelled() }}
       #   #if: ${{ false }}
