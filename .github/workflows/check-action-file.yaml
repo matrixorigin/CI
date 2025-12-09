@@ -18,7 +18,7 @@ jobs:
       contents: read
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Check for any changed workflows
         id: check-for-changed-workflows
         uses: tj-actions/changed-files@v47
