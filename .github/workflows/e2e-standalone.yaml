@@ -12,7 +12,7 @@ jobs:
     timeout-minutes: 90
     steps:
       - name: checkout head
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: "3"
           path: ./head
@@ -44,7 +44,7 @@ jobs:
           cd $GITHUB_WORKSPACE/head
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/head launch
       - name: Clone test-tool repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
@@ -147,7 +147,7 @@ jobs:
       mo_reuse_enable_checker: true
     steps:
       - name: checkout head
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           path: ./head
           repository: ${{ github.event.pull_request.head.repo.full_name }}
@@ -178,7 +178,7 @@ jobs:
           cd $GITHUB_WORKSPACE/head
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/head launch-dynamic-with-proxy -with-proxy
       - name: Clone test-tool repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
@@ -235,7 +235,7 @@ jobs:
       mo_reuse_enable_checker: true
     steps:
       - name: checkout head
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: "3"
           path: ./head
@@ -271,7 +271,7 @@ jobs:
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/head launch
 
       - name: Clone test-tool repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
