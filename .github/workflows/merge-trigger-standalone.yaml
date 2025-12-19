@@ -63,7 +63,7 @@ jobs:
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
-          ref: release/3.0-dev
+          ref: 3.0-dev
 
       - name: Check Java Version
         run: java -version
@@ -161,7 +161,7 @@ jobs:
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
-          ref: release/3.0-dev
+          ref: 3.0-dev
       - name: Set up JDK 8 for x64
         run: echo "$JAVA_HOME/bin" >> $GITHUB_PATH
       - name: Start BVT Test
