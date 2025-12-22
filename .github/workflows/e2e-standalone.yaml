@@ -48,7 +48,7 @@ jobs:
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
-          ref: main
+          ref: 3.0-dev
       - name: Update BVT SQL Timeout
         run: |
           cd $GITHUB_WORKSPACE/mo-tester
@@ -182,7 +182,7 @@ jobs:
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
-          ref: main
+          ref: 3.0-dev
       - name: Update BVT SQL Timeout
         run: |
           cd $GITHUB_WORKSPACE/mo-tester
@@ -275,7 +275,7 @@ jobs:
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
-          ref: main
+          ref: 3.0-dev
       - name: Update BVT SQL Timeout
         run: |
           cd $GITHUB_WORKSPACE/mo-tester
