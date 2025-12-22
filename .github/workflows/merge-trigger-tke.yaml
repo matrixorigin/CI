@@ -274,10 +274,10 @@ jobs:
         if: ${{ always() && !cancelled() }}
         uses: actions/checkout@v6
         with:
-          repository: matrixorigin/mo-tester
+          repository: aptend/mo-tester
           token: ${{secrets.TOKEN_ACTION}}
           path: ./mo-tester
-          ref: main
+          ref: 3.0-dev
       - name: Clone matrixone Repo
         if: ${{ always() && !cancelled() }}
         uses: actions/checkout@v6

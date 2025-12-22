@@ -125,9 +125,9 @@ jobs:
       - name: Clone test-tool repository
         uses: actions/checkout@v6
         with:
-          repository: matrixorigin/mo-tester
+          repository: aptend/mo-tester
           path: ./mo-tester
-          ref: main
+          ref: 3.0-dev
       - name: Add cn.txn
         run: |
           cd $GITHUB_WORKSPACE/matrixone

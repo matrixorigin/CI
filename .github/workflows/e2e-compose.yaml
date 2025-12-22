@@ -102,9 +102,9 @@ jobs:
         # Please update the following actions to use Node.js 16: actions/checkout@v3
         uses: actions/checkout@v6
         with:
-          repository: matrixorigin/mo-tester
+          repository: aptend/mo-tester
           path: ./mo-tester
-          ref: main
+          ref: 3.0-dev
 
       - name: Update BVT SQL Timeout
         run: |
@@ -250,9 +250,9 @@ jobs:
       - name: Clone test-tool repository
         uses: actions/checkout@v6
         with:
-          repository: matrixorigin/mo-tester
+          repository: aptend/mo-tester
           path: ./mo-tester
-          ref: main
+          ref: 3.0-dev
 
       - name: Update BVT SQL Timeout
         run: |

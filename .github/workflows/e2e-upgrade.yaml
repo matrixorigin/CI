@@ -83,9 +83,9 @@ jobs:
       - name: Clone test-tool repository
         uses: actions/checkout@v6
         with:
-          repository: matrixorigin/mo-tester
+          repository: aptend/mo-tester
           path: ./mo-tester
-          ref: main
+          ref: 3.0-dev
       - name: Update BVT SQL Timeout
         run: |
           cd $GITHUB_WORKSPACE/mo-tester
@@ -296,9 +296,9 @@ jobs:
       - name: Clone test-tool repository
         uses: actions/checkout@v6
         with:
-          repository: matrixorigin/mo-tester
+          repository: aptend/mo-tester
           path: ./mo-tester
-          ref: main
+          ref: 3.0-dev
       - name: Update BVT SQL Timeout for Release ${{ steps.get-latest-release.outputs.tag }}
         run: |
           cd $GITHUB_WORKSPACE/mo-tester

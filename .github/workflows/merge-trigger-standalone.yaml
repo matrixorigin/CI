@@ -61,7 +61,7 @@ jobs:
       - name: Clone test-tool repository
         uses: actions/checkout@v6
         with:
-          repository: matrixorigin/mo-tester
+          repository: aptend/mo-tester
           path: ./mo-tester
           ref: 3.0-dev
 
@@ -159,7 +159,7 @@ jobs:
       - name: Clone test-tool repository
         uses: actions/checkout@v6
         with:
-          repository: matrixorigin/mo-tester
+          repository: aptend/mo-tester
           path: ./mo-tester
           ref: 3.0-dev
       - name: Set up JDK 8 for x64
