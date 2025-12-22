@@ -104,7 +104,7 @@ jobs:
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
-          ref: main
+          ref: 3.0-dev
 
       - name: Update BVT SQL Timeout
         run: |
@@ -252,7 +252,7 @@ jobs:
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
-          ref: main
+          ref: 3.0-dev
 
       - name: Update BVT SQL Timeout
         run: |
