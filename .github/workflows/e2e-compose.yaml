@@ -120,7 +120,7 @@ jobs:
           cat mo.yml
           echo "============================="
 
-          ./run.sh -n -g -o -p $GITHUB_WORKSPACE/test/distributed/cases -s /test/distributed/resources -e pessimistic_transaction 2>&1
+          ./run.sh -n -g -o -p /test/distributed/cases -e pessimistic_transaction 2>&1
 
       - name: Print Docker Info Before Container Shutdown
         if: ${{ always() }}
@@ -269,7 +269,7 @@ jobs:
           cat mo.yml
           echo "============================="
 
-          ./run.sh -n -g -o -p $GITHUB_WORKSPACE/test/distributed/cases -s /test/distributed/resources -e optimistic 2>&1
+          ./run.sh -n -g -o -p /test/distributed/cases -e optimistic 2>&1
 
       - name: Print Docker Info Before Container Shutdown
         if: ${{ always() }}
