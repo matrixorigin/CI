@@ -61,6 +61,11 @@ jobs:
           cat ./etc/launch-tae-compose/config/cn-1.toml
           cat ./etc/launch-tae-compose/config/tn.toml
 
+          # Update compose.yaml to mount test directory to $GITHUB_WORKSPACE/test instead of /test
+          # Replace container mount point from /test to $GITHUB_WORKSPACE/test
+          # Handle various docker-compose volume formats: /test, /test:options, /test followed by space
+          sed -i 's|:/test\b|:'"$GITHUB_WORKSPACE"'/test|g' ./etc/launch-tae-compose/compose.yaml
+
           mkdir -p ${{ github.workspace }}/docker-compose-log
           docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn up -d --build
 
@@ -120,7 +125,7 @@ jobs:
           cat mo.yml
           echo "============================="
 
-          ./run.sh -n -g -o -p /test/distributed/cases -e pessimistic_transaction 2>&1
+          ./run.sh -n -g -o -p $GITHUB_WORKSPACE/test/distributed/cases -e pessimistic_transaction 2>&1
 
       - name: Print Docker Info Before Container Shutdown
         if: ${{ always() }}
@@ -213,6 +218,12 @@ jobs:
           cat ./etc/launch-tae-compose/config/cn-0.toml
           cat ./etc/launch-tae-compose/config/cn-1.toml
           cat ./etc/launch-tae-compose/config/tn.toml
+
+          # Update compose.yaml to mount test directory to $GITHUB_WORKSPACE/test instead of /test
+          # Replace container mount point from /test to $GITHUB_WORKSPACE/test
+          # Handle various docker-compose volume formats: /test, /test:options, /test followed by space
+          sed -i 's|:/test\b|:'"$GITHUB_WORKSPACE"'/test|g' ./etc/launch-tae-compose/compose.yaml
+
           mkdir -p ${{ github.workspace }}/docker-compose-log
           docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn up -d --build
 
@@ -269,7 +280,7 @@ jobs:
           cat mo.yml
           echo "============================="
 
-          ./run.sh -n -g -o -p /test/distributed/cases -e optimistic 2>&1
+          ./run.sh -n -g -o -p $GITHUB_WORKSPACE/test/distributed/cases -e optimistic 2>&1
 
       - name: Print Docker Info Before Container Shutdown
         if: ${{ always() }}
