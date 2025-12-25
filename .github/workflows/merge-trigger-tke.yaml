@@ -206,7 +206,7 @@ jobs:
       - name: Prepare Data in cn-0
         timeout-minutes: 5
         run: |
-          kubectl exec -it ${{ steps.get_mo_addr.outputs.cn_0 }} -n mo-checkin-regression-${{ github.event.pull_request.number }} -- bash -c '
+          kubectl exec -it ${{ steps.get_mo_addr.outputs.cn_0 }} -n mo-checkin-regression-${{ github.event.pull_request.number }} -- env GITHUB_WORKSPACE=$GITHUB_WORKSPACE bash -c '
           set -x;
           export https_proxy=http://proxy-service.proxy.svc.cluster.local:8001
           git config --global init.defaultBranch main
@@ -231,12 +231,17 @@ jobs:
           if [ $success == "no" ]; then
             exit 1;
           fi
+
+          # 创建对应的目录结构和符号链接，容器内外资源目录一致
+          mkdir -p $GITHUB_WORKSPACE/matrixone/test/distributed
+          ln -sf $path_matrixone/matrixone/test/distributed/resources $GITHUB_WORKSPACE/matrixone/test/distributed/resources
+
           exit 0;
           '
       - name: Prepare Data in cn-1
         timeout-minutes: 5
         run: |
-          kubectl exec -it ${{ steps.get_mo_addr.outputs.cn_1 }} -n mo-checkin-regression-${{ github.event.pull_request.number }} -- bash -c '
+          kubectl exec -it ${{ steps.get_mo_addr.outputs.cn_1 }} -n mo-checkin-regression-${{ github.event.pull_request.number }} -- env GITHUB_WORKSPACE=$GITHUB_WORKSPACE bash -c '
           set -x;
           export https_proxy=http://proxy-service.proxy.svc.cluster.local:8001
           git config --global init.defaultBranch main
@@ -261,6 +266,11 @@ jobs:
           if [ $success == "no" ]; then
             exit 1;
           fi
+
+          # 创建对应的目录结构和符号链接
+          mkdir -p $GITHUB_WORKSPACE/matrixone/test/distributed
+          ln -sf $path_matrixone/matrixone/test/distributed/resources $GITHUB_WORKSPACE/matrixone/test/distributed/resources
+
           exit 0;
           '
   bvt_test:
@@ -302,7 +312,7 @@ jobs:
           echo "=========================="
 
           cd $GITHUB_WORKSPACE/mo-tester
-          ./run.sh -n -g -o -p $GITHUB_WORKSPACE/matrixone/test/distributed/cases -s /matrixone/test/distributed/resources -e optimistic  2>&1
+          ./run.sh -n -g -o -p $GITHUB_WORKSPACE/matrixone/test/distributed/cases -e optimistic  2>&1
           rm -rf .git lib
       - name: Collect Upload files
         if: ${{ always() || cancelled() }}
