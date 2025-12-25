@@ -45,7 +45,7 @@ jobs:
           echo ${{ steps.get_release.outputs.upload_url }}
           echo ${{ steps.get_release.outputs.tag_name }}
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/3.0-dev
         with:
           setup-java: false
           setup-cmake: true
@@ -111,7 +111,7 @@ jobs:
           echo ${{ steps.get_release.outputs.upload_url }}
           echo ${{ steps.get_release.outputs.tag_name }}
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/3.0-dev
         with:
           setup-java: false
           setup-cmake: false
@@ -178,7 +178,7 @@ jobs:
           echo ${{ steps.get_release.outputs.upload_url }}
           echo ${{ steps.get_release.outputs.tag_name }}
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/3.0-dev
         with:
           setup-java: false
           setup-cmake: true
@@ -280,7 +280,7 @@ jobs:
           echo ${{ steps.get_release.outputs.upload_url }}
           echo ${{ steps.get_release.outputs.tag_name }}
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/3.0-dev
         with:
           setup-java: false
           go-version-file: "${{ github.workspace }}/go.mod"
@@ -362,7 +362,7 @@ jobs:
   #         echo ${{ steps.get_release.outputs.upload_url }}
   #         echo ${{ steps.get_release.outputs.tag_name }}
   #     - name: Set up Go
-  #       uses: matrixorigin/CI/actions/setup-env@main
+  #       uses: matrixorigin/CI/actions/setup-env@release/3.0-dev
   #       with:
   #         setup-java: false
   #         setup-cmake: true
@@ -424,7 +424,7 @@ jobs:
   #         echo ${{ steps.get_release.outputs.upload_url }}
   #         echo ${{ steps.get_release.outputs.tag_name }}
   #     - name: Set up Go
-  #       uses: matrixorigin/CI/actions/setup-env@main
+  #       uses: matrixorigin/CI/actions/setup-env@release/3.0-dev
   #       with:
   #         setup-java: false
   #         setup-cmake: false

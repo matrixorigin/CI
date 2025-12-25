@@ -23,7 +23,7 @@ jobs:
           path: ./matrixone
           ref: ${{ github.event.pull_request.base.ref }}
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/3.0-dev
         with:
           go-version-file: "${{ github.workspace }}/matrixone/go.mod"
           setup-java: false
@@ -137,7 +137,7 @@ jobs:
           path: ./head
           ref: ${{ github.event.pull_request.base.ref }}
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/3.0-dev
         with:
           setup-java: false
           go-version-file: "${{ github.workspace }}/head/go.mod"

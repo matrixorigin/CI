@@ -35,7 +35,7 @@ jobs:
           ref: ${{ github.event.pull_request.base.ref }}
 
       - name: Set up Go And Java
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/3.0-dev
         with:
           go-version-file: "${{ github.workspace }}/head/go.mod"
 
@@ -248,7 +248,7 @@ jobs:
           ref: ${{ steps.get-latest-release.outputs.tag }}
 
       - name: Set up Go And Java
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/3.0-dev
         with:
           go-version-file: "${{ github.workspace }}/head/go.mod"
 
