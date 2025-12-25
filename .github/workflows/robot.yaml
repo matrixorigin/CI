@@ -105,7 +105,7 @@ jobs:
           fetch-depth: "3"
           path: ./matrixone
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/3.0-dev
         with:
           setup-java: false
           go-version-file: "${{ github.workspace }}/matrixone/go.mod"
@@ -294,7 +294,7 @@ jobs:
     if: ${{ github.event_name == 'issues' && github.event.action == 'assigned' }}
     steps:
       - name: Remove Labels
-        uses: matrixorigin/CI/actions/rm-labels@main
+        uses: matrixorigin/CI/actions/rm-labels@release/3.0-dev
         id: step1
         env:
           BASE_URL: ${{ github.api_url }}
@@ -324,7 +324,7 @@ jobs:
           assignees: "sukki37" #issue指定分配对象
           LABELS: "no-pr-linked" #相关自定义label配置 形如 label1,label2
           LABELS_NEED: "kind/bug,Bug fix,bug_fix,bug/ut" # 指定需要排查的标签 label1,label2,...
-        uses: matrixorigin/CI/actions/reopen-without-PR@main
+        uses: matrixorigin/CI/actions/reopen-without-PR@release/3.0-dev
       - name: WeChat Work notification
         if: ${{ failure() || cancelled() || steps.step1.outputs.send == 'yes' }}
         id: notification

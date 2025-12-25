@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Update MOC Data
-        uses: matrixorigin/CI/actions/check-coverage@main
+        uses: matrixorigin/CI/actions/check-coverage@release/3.0-dev
         with:
           type: merged
           commit_id: ${{ github.event.pull_request.head.sha }}

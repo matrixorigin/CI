@@ -98,7 +98,7 @@ jobs:
           sed -i 's#FROM matrixorigin/golang:1.25-ubuntu22#FROM ccr.ccs.tencentyun.com/mo-infra/golang:1.25-ubuntu22#g' optools/images/Dockerfile
 
       - name: Build and Push Image
-        uses: matrixorigin/CI/actions/image-build@main
+        uses: matrixorigin/CI/actions/image-build@release/3.0-dev
         with:
           tags: ${{ steps.prep.outputs.tags }}
           file-path: ${{ github.workspace }}/matrixone/optools/images/Dockerfile

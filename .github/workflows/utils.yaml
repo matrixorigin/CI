@@ -110,7 +110,7 @@ jobs:
           ref: 3.0-dev
 
       - name: Set up Go and JAVA
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/3.0-dev
         with:
           setup-java: false
           go-version-file: "${{ github.workspace }}/matrixone/go.mod"
@@ -242,7 +242,7 @@ jobs:
           echo "FAIL_UT_CASES=${fail_ut_cases}" >> $GITHUB_OUTPUT
       - name: Insert Failed UT Cases to MOC
         if: ${{ failure() }}
-        uses: matrixorigin/CI/actions/fail-ut-case@main
+        uses: matrixorigin/CI/actions/fail-ut-case@release/3.0-dev
         with:
           action_time: ${{ steps.time.outputs.ACTION_TIME }}
           ut_cases: ${{ steps.failed.outputs.FAIL_UT_CASES }}
@@ -352,7 +352,7 @@ jobs:
       # - name: Check Coverage(compare with branch main)
       #   if: ${{ always() && !cancelled() }}
       #   #if: ${{ false }}
-      #   uses: matrixorigin/CI/actions/check-coverage@main
+      #   uses: matrixorigin/CI/actions/check-coverage@release/3.0-dev
       #   with:
       #     type: open
       #     ut_coverage_file: ${{ github.workspace }}/matrixone/ut_coverage_sort.out
@@ -402,7 +402,7 @@ jobs:
     needs: [check_organization_user]
     steps:
       - name: size-label
-        uses: "matrixorigin/CI/actions/label-size-action@main"
+        uses: "matrixorigin/CI/actions/label-size-action@release/3.0-dev"
         with:
           size_token: ${{ secrets.TOKEN_ACTION }}
           ignore: ".md,.pb.go"
@@ -471,7 +471,7 @@ jobs:
           ref: main
 
       - name: Set up Go and JAVA
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@release/3.0-dev
         with:
           setup-java: false
           go-version-file: "${{ github.workspace }}/matrixone/go.mod"
