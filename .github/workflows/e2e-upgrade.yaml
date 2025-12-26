@@ -247,6 +247,7 @@ jobs:
           repository: ${{ inputs.release-repo }}
           # ref: ${{ steps.get-latest-release.outputs.tag }} // restore to this line after new release includes d4051aebd6 - update bvt cases (#23317)
           ref: d4051aebd6
+          fetch-depth: 0
 
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
