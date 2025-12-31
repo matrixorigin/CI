@@ -152,8 +152,16 @@ def get_modified_columns(old_line, new_line):
     
     return modified_columns
 
-def parse_coverage_and_generate_report(coverage_path, modified_lines, output_path='pr_coverage.out'):
-    """解析coverage.out文件，计算覆盖率并生成覆盖率报告"""
+def parse_coverage_and_generate_report(coverage_path, modified_lines, output_path='pr_coverage.out', count_by_line=False):
+    """解析coverage.out文件，计算覆盖率并生成覆盖率报告
+    
+    Args:
+        count_by_line: True=按行计数, False=按块计数(默认)
+    """
+    if count_by_line:
+        return _parse_coverage_by_line(coverage_path, modified_lines, output_path)
+    
+    # 原有逻辑：按块计数
     logging.info(f"Starting to parse coverage file: {coverage_path}")
     total_modified_blocks = 0
     covered_blocks = set()
@@ -250,7 +258,7 @@ def normalize_path(path, prefix='github.com/matrixorigin/matrixone/'):
         return path[len(prefix):]
     return os.path.normpath(path)
 
-def diff_coverage(diff_path, coverage_path, output_path='pr_coverage.out', ignore_path='.ignore'):
+def diff_coverage(diff_path, coverage_path, output_path='pr_coverage.out', ignore_path='.ignore', count_by_line=False):
     try:
         # 解析diff文件，获取修改和新增的行号
         modified_lines = parse_diff(diff_path, ignore_path)
@@ -261,7 +269,7 @@ def diff_coverage(diff_path, coverage_path, output_path='pr_coverage.out', ignor
             return 0,0,1
 
         # 解析coverage.out文件，计算覆盖率并生成覆盖率报告
-        total_modified_lines, covered_modified_lines, coverage_percentage = parse_coverage_and_generate_report(coverage_path, modified_lines, output_path)
+        total_modified_lines, covered_modified_lines, coverage_percentage = parse_coverage_and_generate_report(coverage_path, modified_lines, output_path, count_by_line)
 
         
         # 输出结果
@@ -355,6 +363,95 @@ def parse_file_coverage(minimal_coverage,file='./pr_coverage.out'):
         logging.error(f"An error parse_file_coverage: {e}")
 
 
+def _parse_coverage_by_line(coverage_path, modified_lines, output_path):
+    """按行计数的覆盖率计算"""
+    logging.info(f"Starting to parse coverage file (by line): {coverage_path}")
+    
+    # 解析 coverage 文件，构建块列表
+    coverage_blocks = []
+    seen_blocks = set()
+    
+    with open(coverage_path, 'r') as cov_file:
+        for line in cov_file:
+            if line.startswith('mode:'):
+                continue
+            parts = line.split(':')
+            if len(parts) < 2:
+                continue
+            
+            file_name = normalize_path(parts[0])
+            line_info = parts[1].split()[0]
+            executed_count = int(parts[1].split()[-1])
+            
+            line_range = line_info.split(',')
+            if len(line_range) != 2:
+                continue
+            
+            try:
+                start_line = int(line_range[0].split('.')[0])
+                end_line = int(line_range[1].split('.')[0])
+                start_col = int(line_range[0].split('.')[1])
+                end_col = int(line_range[1].split('.')[1])
+            except ValueError:
+                continue
+            
+            block_key = (file_name, start_line, end_line, start_col, end_col)
+            if block_key in seen_blocks:
+                continue
+            seen_blocks.add(block_key)
+            
+            coverage_blocks.append({
+                'file': file_name,
+                'start_line': start_line, 'end_line': end_line,
+                'start_col': start_col, 'end_col': end_col,
+                'executed': executed_count > 0,
+                'raw_line': line,
+            })
+    
+    # 按行统计
+    total_lines = 0
+    covered_lines = 0
+    matched_raw_lines = set()
+    
+    for file_name, lines in modified_lines.items():
+        for modified_line, mincol, maxcol in lines:
+            for block in coverage_blocks:
+                if block['file'] != file_name:
+                    continue
+                if _line_matches_block(modified_line, mincol, maxcol, block):
+                    total_lines += 1
+                    if block['executed']:
+                        covered_lines += 1
+                    matched_raw_lines.add(block['raw_line'])
+                    break
+    
+    # 写入输出文件
+    with open(output_path, 'w') as f:
+        f.write('mode: set\n')
+        for line in matched_raw_lines:
+            f.write(line)
+    
+    coverage_pct = (covered_lines / total_lines) if total_lines > 0 else 1
+    logging.info(f"Line-based coverage: {covered_lines}/{total_lines} = {coverage_pct:.2%}")
+    return total_lines, covered_lines, coverage_pct
+
+
+def _line_matches_block(line_num, mincol, maxcol, block):
+    """判断修改行是否在 coverage 块范围内"""
+    start_line, end_line = block['start_line'], block['end_line']
+    start_col, end_col = block['start_col'], block['end_col']
+    
+    if start_line < line_num < end_line:
+        return True
+    if line_num == start_line == end_line:
+        return not (mincol > end_col or maxcol < start_col)
+    if line_num == start_line:
+        return maxcol >= start_col
+    if line_num == end_line:
+        return mincol <= end_col
+    return False
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Merge coverage files and calculate coverage based on diff.")
 
@@ -379,6 +476,13 @@ if __name__ == "__main__":
         help='Minimal coverage percentage required. Default to 0.75.'
     )
 
+    parser.add_argument(
+        '-count_by_line',
+        action='store_true',
+        default=False,
+        help='Count coverage by line instead of block. Default is False (count by block).'
+    )
+
     args = parser.parse_args()
 
     total_blocks, covered_blocks, coverage_percentage = merge_coverage_files('merged_coverage.out', *args.coverage_files)
@@ -387,7 +491,7 @@ if __name__ == "__main__":
     # 调用主函数
     diff_path = args.diff_path  # 可以根据实际情况修改路径
     coverage_path = 'merged_coverage.out'  # 可以根据实际情况修改路径
-    total_modified_lines, covered_modified_lines, coverage_percentage = diff_coverage(diff_path, coverage_path)
+    total_modified_lines, covered_modified_lines, coverage_percentage = diff_coverage(diff_path, coverage_path, count_by_line=args.count_by_line)
     logging.info(f"total_modified_lines: {total_modified_lines}, covered_modified_lines: {covered_modified_lines}, coverage_percentage:{coverage_percentage}")
 
     if coverage_percentage <= args.minimal_coverage:
