@@ -246,8 +246,7 @@ jobs:
           path: ./upstream
           repository: ${{ inputs.release-repo }}
           # ref: ${{ steps.get-latest-release.outputs.tag }} // restore to this line after new release includes d4051aebd6 - update bvt cases (#23317)
-          ref: d4051aebd69ee8349f087ae5ceb76f21b8ea17a0
-          fetch-depth: 0
+          ref: v3.0.4-hotfix
 
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
@@ -300,7 +299,7 @@ jobs:
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
-          ref: main
+          ref: 3.0-dev
       - name: Update BVT SQL Timeout for Release ${{ steps.get-latest-release.outputs.tag }}
         run: |
           cd $GITHUB_WORKSPACE/mo-tester
@@ -361,16 +360,22 @@ jobs:
           fi
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/workspace launch;
           sleep 60;
+      - name: Clone test-tool repository for Head
+        uses: actions/checkout@v6
+        with:
+          repository: matrixorigin/mo-tester
+          path: ./mo-tester-head
+          ref: main
       - name: Update BVT SQL Timeout for Head Ref
         run: |
-          cd $GITHUB_WORKSPACE/mo-tester
+          cd $GITHUB_WORKSPACE/mo-tester-head
           sed -i "s/socketTimeout:.*/socketTimeout: 300000/g" mo.yml
       - name: Start BVT Test for Head Ref
         id: bvt_on_latest_head_version
         run: |
           export LC_ALL="C.UTF-8"
           locale
-          cd $GITHUB_WORKSPACE/mo-tester
+          cd $GITHUB_WORKSPACE/mo-tester-head
           sed -i 's/  port: [0-9]*/  port: 12345/g' mo.yml
           cat mo.yml
           echo "============================="
@@ -400,14 +405,18 @@ jobs:
           mkdir -p ${{ github.workspace }}/upload
           rm -rf ./mo-tester/.git
           rm -rf ./mo-tester/lib
+          rm -rf ./mo-tester-head/.git
+          rm -rf ./mo-tester-head/lib
           mv ${{ github.workspace }}/workspace ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/mo-tester ${{ github.workspace }}/upload/
+          mv ${{ github.workspace }}/mo-tester-head ${{ github.workspace }}/upload/
 
           #拆分上传
           mkdir -p ${{ github.workspace }}/upload-1
           mkdir -p ${{ github.workspace }}/upload-2
 
           mv $GITHUB_WORKSPACE/upload/mo-tester/report $GITHUB_WORKSPACE/upload-1/
+          mv $GITHUB_WORKSPACE/upload/mo-tester-head/report $GITHUB_WORKSPACE/upload-1/ 2>/dev/null || true
           mv $GITHUB_WORKSPACE/upload/workspace/mo-service.log $GITHUB_WORKSPACE/upload-1/
           mv $GITHUB_WORKSPACE/upload/workspace/upstream-mo-service.log $GITHUB_WORKSPACE/upload-1/
 
