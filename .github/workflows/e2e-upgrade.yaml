@@ -288,6 +288,14 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE && mkdir workspace
 
+      - name: Adjust Year Related Configurations
+        run: |
+          cd ${{ github.workspace }}/upstream
+          now="$(date "+%Y")"
+          sed -i "s|2023|${now}|g" test/distributed/cases/function/func_datetime_utc_timestamp.result;
+          sed -i "s|2024|${now}|g" test/distributed/cases/function/func_datetime_utc_timestamp.result;
+          sed -i "s|2025|${now}|g" test/distributed/cases/function/func_datetime_utc_timestamp.result;
+
       - name: Start the MO of Rlease ${{ steps.get-latest-release.outputs.tag }}
         run: |
           cd $GITHUB_WORKSPACE/workspace
