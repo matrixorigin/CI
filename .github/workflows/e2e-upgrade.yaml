@@ -21,14 +21,14 @@ jobs:
 
     steps:
       - name: checkout head
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: ./head
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
 
       - name: checkout upstream
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: ./upstream
           repository: ${{ github.event.pull_request.base.repo.full_name }}
@@ -36,6 +36,8 @@ jobs:
 
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          go-version-file: "${{ github.workspace }}/head/go.mod"
 
       - name: Add cn.txn for head
         run: |
@@ -71,12 +73,15 @@ jobs:
           mv $GITHUB_WORKSPACE/upstream/etc .
           mv $GITHUB_WORKSPACE/upstream/mo-service .
           mv $GITHUB_WORKSPACE/upstream/optools .
+          if [ -d "$GITHUB_WORKSPACE/upstream/lib" ]; then
+            mv $GITHUB_WORKSPACE/upstream/lib .
+          fi
 
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/workspace launch
           sleep 60;
 
       - name: Clone test-tool repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
@@ -121,11 +126,15 @@ jobs:
           rm -rf mo-data/etl
           rm -rf etc
           rm -rf optools
+          rm -rf lib
           # delete for clear the start finish status of mo
           rm -rf mo-data/local/system_init_completed
           mv $GITHUB_WORKSPACE/head/etc .
           mv $GITHUB_WORKSPACE/head/optools .
           mv $GITHUB_WORKSPACE/head/mo-service .
+          if [ -d "$GITHUB_WORKSPACE/head/lib" ]; then
+            mv $GITHUB_WORKSPACE/head/lib .
+          fi
           echo "==============cn configuration of upstram=============="
           cat ./etc/launch/cn.toml
           echo "==============tn configuration of upstram=============="
@@ -190,7 +199,7 @@ jobs:
           mv $GITHUB_WORKSPACE/upload/workspace/mo-service-upstream $GITHUB_WORKSPACE/upload-2/
           mv $GITHUB_WORKSPACE/upload/workspace/mo-data $GITHUB_WORKSPACE/upload-2/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
@@ -199,7 +208,7 @@ jobs:
             ${{ github.workspace }}/upload-1
           retention-days: 7
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
@@ -218,7 +227,7 @@ jobs:
 
     steps:
       - name: Checkout Head
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: ./head
           repository: ${{ github.event.pull_request.head.repo.full_name }}
@@ -227,22 +236,22 @@ jobs:
       - name: Get latest release
         id: get-latest-release
         run: |
-          LATEST_RELEASE_TAG=($(curl -L \
-          -H "Accept: application/vnd.github+json" \
-          -H "X-GitHub-Api-Version: 2022-11-28" \
-          https://api.github.com/repos/${{ inputs.release-repo }}/tags?per_page=100 | jq -r '.[].name' | grep "v2" | sort -u | tail -1))
+          LATEST_RELEASE_TAG=("v3.0.4")
           echo "Latest release tag is $LATEST_RELEASE_TAG"
           echo "tag=$LATEST_RELEASE_TAG" >> $GITHUB_OUTPUT
 
       - name: Checkout Upstream Release
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: ./upstream
           repository: ${{ inputs.release-repo }}
-          ref: ${{ steps.get-latest-release.outputs.tag }}
+          # ref: ${{ steps.get-latest-release.outputs.tag }} // restore to this line after new release includes d4051aebd6 - update bvt cases (#23317)
+          ref: v3.0.4-hotfix
 
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          go-version-file: "${{ github.workspace }}/head/go.mod"
 
       - name: Add cn.txn for head
         run: |
@@ -278,16 +287,19 @@ jobs:
           mv $GITHUB_WORKSPACE/upstream/etc .
           mv $GITHUB_WORKSPACE/upstream/mo-service .
           mv $GITHUB_WORKSPACE/upstream/optools .
+          if [ -d "$GITHUB_WORKSPACE/upstream/lib" ]; then
+            mv $GITHUB_WORKSPACE/upstream/lib .
+          fi
 
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/workspace launch;
           sleep 60;
 
       - name: Clone test-tool repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
-          ref: main
+          ref: 3.0-dev
       - name: Update BVT SQL Timeout for Release ${{ steps.get-latest-release.outputs.tag }}
         run: |
           cd $GITHUB_WORKSPACE/mo-tester
@@ -328,13 +340,16 @@ jobs:
           rm -rf mo-data/etl
           rm -rf etc
           rm -rf optools
-
+          rm -rf lib
           # delete for clear the start finish status of mo(deprecated after pr #14607)
           rm -rf mo-data/local/system_init_completed
 
           mv $GITHUB_WORKSPACE/head/etc .
           mv $GITHUB_WORKSPACE/head/optools .
           mv $GITHUB_WORKSPACE/head/mo-service .
+          if [ -d "$GITHUB_WORKSPACE/head/lib" ]; then
+            mv $GITHUB_WORKSPACE/head/lib .
+          fi
           echo "==============cn configuration of upstram=============="
           cat ./etc/launch/cn.toml
           echo "==============tn configuration of upstram=============="
@@ -345,16 +360,22 @@ jobs:
           fi
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/workspace launch;
           sleep 60;
+      - name: Clone test-tool repository for Head
+        uses: actions/checkout@v6
+        with:
+          repository: matrixorigin/mo-tester
+          path: ./mo-tester-head
+          ref: main
       - name: Update BVT SQL Timeout for Head Ref
         run: |
-          cd $GITHUB_WORKSPACE/mo-tester
+          cd $GITHUB_WORKSPACE/mo-tester-head
           sed -i "s/socketTimeout:.*/socketTimeout: 300000/g" mo.yml
       - name: Start BVT Test for Head Ref
         id: bvt_on_latest_head_version
         run: |
           export LC_ALL="C.UTF-8"
           locale
-          cd $GITHUB_WORKSPACE/mo-tester
+          cd $GITHUB_WORKSPACE/mo-tester-head
           sed -i 's/  port: [0-9]*/  port: 12345/g' mo.yml
           cat mo.yml
           echo "============================="
@@ -384,14 +405,39 @@ jobs:
           mkdir -p ${{ github.workspace }}/upload
           rm -rf ./mo-tester/.git
           rm -rf ./mo-tester/lib
+          rm -rf ./mo-tester-head/.git
+          rm -rf ./mo-tester-head/lib
           mv ${{ github.workspace }}/workspace ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/mo-tester ${{ github.workspace }}/upload/
+          mv ${{ github.workspace }}/mo-tester-head ${{ github.workspace }}/upload/
 
-      - uses: actions/upload-artifact@v4
+          #拆分上传
+          mkdir -p ${{ github.workspace }}/upload-1
+          mkdir -p ${{ github.workspace }}/upload-2
+
+          mv $GITHUB_WORKSPACE/upload/mo-tester/report $GITHUB_WORKSPACE/upload-1/
+          mv $GITHUB_WORKSPACE/upload/mo-tester-head/report $GITHUB_WORKSPACE/upload-1/ 2>/dev/null || true
+          mv $GITHUB_WORKSPACE/upload/workspace/mo-service.log $GITHUB_WORKSPACE/upload-1/
+          mv $GITHUB_WORKSPACE/upload/workspace/upstream-mo-service.log $GITHUB_WORKSPACE/upload-1/
+
+          mv $GITHUB_WORKSPACE/upload/workspace/mo-service $GITHUB_WORKSPACE/upload-2/
+          mv $GITHUB_WORKSPACE/upload/workspace/mo-service-upstream $GITHUB_WORKSPACE/upload-2/
+          mv $GITHUB_WORKSPACE/upload/workspace/mo-data $GITHUB_WORKSPACE/upload-2/
+
+      - uses: actions/upload-artifact@v6
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
           name: Compatibility-Test-Release-on-Linux-x64(LAUNCH)-reports
           path: |
-            ${{ github.workspace }}/upload
+            ${{ github.workspace }}/upload-1
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v6
+        if: ${{ failure() || cancelled()}}
+        continue-on-error: true
+        with:
+          name: Compatibility-Test-Release-on-Linux-x64(LAUNCH)-mo-data
+          path: |
+            ${{ github.workspace }}/upload-2
           retention-days: 7

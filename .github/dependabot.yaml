@@ -9,4 +9,4 @@ updates:
     directory: "/.github/workflows"
     schedule:
       interval: "weekly"
-    target-branch: "release/2.0-dev"
+    target-branch: "release/3.0-dev"

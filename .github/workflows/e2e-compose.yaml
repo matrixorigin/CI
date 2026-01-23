@@ -12,12 +12,25 @@ jobs:
     timeout-minutes: 60
 
     steps:
+      - name: Pre Clean Some Unneeded Images
+        run: |
+          sudo df -h /*
+          echo "========================================="
+          sudo docker builder prune -f -a;
+          sudo docker images | grep -v REPOSITORY | awk '{system("sudo docker rmi "$1":"$2)}';
+          sudo docker volume prune -f;
+          echo "========================================="
+          sudo df -h /*
       - name: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
+      - name: Set up Go And Java
+        uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          go-version-file: "${{ github.workspace }}/go.mod"
 
       - name: Print run attempt
         run: echo "run attempt is ${{ github.run_attempt }}"
@@ -47,6 +60,11 @@ jobs:
           cat ./etc/launch-tae-compose/config/cn-0.toml
           cat ./etc/launch-tae-compose/config/cn-1.toml
           cat ./etc/launch-tae-compose/config/tn.toml
+
+          # Update compose.yaml to mount test directory to $GITHUB_WORKSPACE/test instead of /test
+          # Replace container mount point from /test to $GITHUB_WORKSPACE/test
+          # Handle various docker-compose volume formats: /test, /test:options, /test followed by space
+          sed -i 's|:/test\b|:'"$GITHUB_WORKSPACE"'/test|g' ./etc/launch-tae-compose/compose.yaml
 
           mkdir -p ${{ github.workspace }}/docker-compose-log
           docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn up -d --build
@@ -87,14 +105,11 @@ jobs:
         # For more information see:
         #     - https://github.blog/changelog/2022-09-22-github-actions-all-actions-will-begin-running-on-node16-instead-of-node12/.
         # Please update the following actions to use Node.js 16: actions/checkout@v3
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
-
-      - name: Set up Go And Java
-        uses: matrixorigin/CI/actions/setup-env@main
 
       - name: Update BVT SQL Timeout
         run: |
@@ -110,17 +125,24 @@ jobs:
           cat mo.yml
           echo "============================="
 
-          ./run.sh -n -g -o -p $GITHUB_WORKSPACE/test/distributed/cases -s /test/distributed/resources -e pessimistic_transaction 2>&1
+          ./run.sh -n -g -o -p $GITHUB_WORKSPACE/test/distributed/cases -e pessimistic_transaction 2>&1
 
-      - name: Print Disk Usage Before Container Shutdown
+      - name: Print Docker Info Before Container Shutdown
         if: ${{ always() }}
         run: |
           set +e;
+          sudo docker ps;
+          echo "===========================================";
           sudo df -h /*;
           echo "===========================================";
           sudo du -hs /var/lib/docker;
           echo "===========================================";
           sudo docker system df -v;
+      - name: Print System Dmesg
+        if: ${{ always() }}
+        continue-on-error: true
+        run: |
+          sudo dmesg -T
 
       - name: export log
         if: ${{ failure() || cancelled()}}
@@ -141,7 +163,7 @@ jobs:
           docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn down --remove-orphans
           docker volume rm launch-tae-compose_minio_storage
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
@@ -156,14 +178,26 @@ jobs:
     runs-on: ubuntu-22.04
     name: multi cn e2e bvt test docker compose(PESSIMISTIC)
     timeout-minutes: 60
-
     steps:
+      - name: Pre Clean Some Unneeded Images
+        run: |
+          sudo df -h /*
+          echo "========================================="
+          sudo docker builder prune -f -a;
+          sudo docker images | grep -v REPOSITORY | awk '{system("sudo docker rmi "$1":"$2)}';
+          sudo docker volume prune -f;
+          echo "========================================="
+          sudo df -h /*
       - name: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
+      - name: Set up Go And Java
+        uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          go-version-file: "${{ github.workspace }}/go.mod"
 
       - name: Print run attempt
         run: echo "run attempt is ${{ github.run_attempt }}"
@@ -184,6 +218,12 @@ jobs:
           cat ./etc/launch-tae-compose/config/cn-0.toml
           cat ./etc/launch-tae-compose/config/cn-1.toml
           cat ./etc/launch-tae-compose/config/tn.toml
+
+          # Update compose.yaml to mount test directory to $GITHUB_WORKSPACE/test instead of /test
+          # Replace container mount point from /test to $GITHUB_WORKSPACE/test
+          # Handle various docker-compose volume formats: /test, /test:options, /test followed by space
+          sed -i 's|:/test\b|:'"$GITHUB_WORKSPACE"'/test|g' ./etc/launch-tae-compose/compose.yaml
+
           mkdir -p ${{ github.workspace }}/docker-compose-log
           docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn up -d --build
 
@@ -219,14 +259,11 @@ jobs:
           sudo docker system df -v;
           
       - name: Clone test-tool repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
-
-      - name: Set up Go And Java
-        uses: matrixorigin/CI/actions/setup-env@main
 
       - name: Update BVT SQL Timeout
         run: |
@@ -243,17 +280,25 @@ jobs:
           cat mo.yml
           echo "============================="
 
-          ./run.sh -n -g -o -p $GITHUB_WORKSPACE/test/distributed/cases -s /test/distributed/resources -e optimistic 2>&1
+          ./run.sh -n -g -o -p $GITHUB_WORKSPACE/test/distributed/cases -e optimistic 2>&1
 
-      - name: Print Disk Usage Before Container Shutdown
+      - name: Print Docker Info Before Container Shutdown
         if: ${{ always() }}
         run: |
           set +e;
+          sudo docker ps;
+          echo "===========================================";
           sudo df -h /*;
           echo "===========================================";
           sudo du -hs /var/lib/docker;
           echo "===========================================";
           sudo docker system df -v;
+      
+      - name: Print System Dmesg
+        if: ${{ always() }}
+        continue-on-error: true
+        run: |
+          sudo dmesg -T
   
       - name: export log
         if: ${{ failure() || cancelled()}}
@@ -275,7 +320,7 @@ jobs:
           docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn down --remove-orphans
           docker volume rm launch-tae-compose_minio_storage
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:

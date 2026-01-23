@@ -31,7 +31,7 @@ on:
 jobs:
   docker_image_build:
     environment: ci
-    runs-on: amd64-mo-shanghai-dind #amd64-mo-guangzhou-dind
+    runs-on: amd64-mo-shanghai-dind # amd64-mo-guangzhou-dind
     if: ${{ github.event.pull_request.merged == true }}
     timeout-minutes: 30
     name: BUILD MO DOCKER IMAGE
@@ -41,9 +41,15 @@ jobs:
     steps:
       - name: Clone Repo Matrixorigin/Matrixone
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: ./matrixone
+      - name: Login to TCR
+        uses: docker/login-action@v3
+        with:
+          registry: "ccr.ccs.tencentyun.com"
+          username: ${{ secrets.TCR_USERNAME }}
+          password: ${{ secrets.TCR_TOKEN }}
       - name: Prepare And Build
         id: prep
         run: |
@@ -53,19 +59,31 @@ jobs:
           DOCKER_IMAGE=ccr.ccs.tencentyun.com/matrixone-dev/matrixone
           VERSION=commit-$LAST_COMMIT_ID
           TAGS="${DOCKER_IMAGE}:${VERSION}"
-
+          
           # Set output parameters.
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
           echo "docker_image=${DOCKER_IMAGE}" >> $GITHUB_OUTPUT
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "commit_id=${LAST_COMMIT_ID}" >> $GITHUB_OUTPUT
-          echo ${TAGS}
-          echo ${{ secrets.TCR_TOKEN }} | docker login ccr.ccs.tencentyun.com -u ${{ secrets.TCR_USERNAME }} --password-stdin
 
-          # # add tencentyun docker image mirror and tencentyun apt mirror
-          sed -i 's#^RUN apt-get update#RUN sed -i "s?http.*ubuntu\.com?http://mirrors\.ustc\.edu\.cn?g" /etc/apt/sources.list  \&\& apt-get clean all \&\& apt-get update#g' optools/images/Dockerfile
+      - name: Print Image Info
+        run: |
+          echo "TAGS: ${{ steps.prep.outputs.tags }}"
+          echo "DOCKER_IMAGE: ${{ steps.prep.outputs.docker_image }}"
+          echo "VERSION: ${{ steps.prep.outputs.version }}"
+          echo "COMMIT_ID: ${{ steps.prep.outputs.commit_id }}"
+
+      - name: Adjust Dockerfile
+        run: |
+          cd $GITHUB_WORKSPACE/matrixone
+
+          # # add tencentyun docker image mirror and tsinghua apt mirror
+          sed -i 's#^RUN apt-get update#RUN sed -i "s?http.*ubuntu\.com?http://mirrors\.tuna\.tsinghua\.edu\.cn?g" /etc/apt/sources.list  \&\& apt-get clean all \&\& apt-get update#g' optools/images/Dockerfile
           sed -i 's#FROM golang:1.21.5-bookworm#FROM ccr.ccs.tencentyun.com/cicd-runner/golang:1.21.5-bookworm#g' optools/images/Dockerfile
           sed -i 's#FROM ubuntu:22.04#FROM ccr.ccs.tencentyun.com/mo-infra/ubuntu:22.04#g' optools/images/Dockerfile
+
+          # adjust for matrixorigin/ubuntu:22.04
+          sed -i 's#FROM matrixorigin/ubuntu:22.04#FROM ccr.ccs.tencentyun.com/mo-infra/ubuntu:22.04#g' optools/images/Dockerfile
 
           # adjust for go 1.22.3
           sed -i 's#FROM golang:1.22.3-bookworm#FROM ccr.ccs.tencentyun.com/mo-infra/golang:1.22.3-bookworm#g' optools/images/Dockerfile
@@ -73,8 +91,23 @@ jobs:
           # adjust for go 1.23.0
           sed -i 's#FROM golang:1.23.0-bookworm#FROM ccr.ccs.tencentyun.com/mo-infra/golang:1.23.0-bookworm#g' optools/images/Dockerfile
 
-          docker build -t $TAGS -f optools/images/Dockerfile . --build-arg GOPROXY='http://goproxy.goproxy.svc.cluster.local'
-          docker push $TAGS
+          # adjust for go 1.24
+          sed -i 's#FROM matrixorigin/golang:1.24-ubuntu22#FROM ccr.ccs.tencentyun.com/mo-infra/golang:1.24-ubuntu22#g' optools/images/Dockerfile
+          
+          # adjust for go 1.25
+          sed -i 's#FROM matrixorigin/golang:1.25-ubuntu22#FROM ccr.ccs.tencentyun.com/mo-infra/golang:1.25-ubuntu22#g' optools/images/Dockerfile
+
+      - name: Build and Push Image
+        uses: matrixorigin/CI/actions/image-build@main
+        with:
+          tags: ${{ steps.prep.outputs.tags }}
+          file-path: ${{ github.workspace }}/matrixone/optools/images/Dockerfile
+          context: ${{ github.workspace }}/matrixone
+          cache-from: type=registry,ref=${{ steps.prep.outputs.docker_image }}:cache-${{ github.base_ref }}
+          cache-to: type=registry,ref=${{ steps.prep.outputs.docker_image }}:cache-${{ github.base_ref }},mode=max
+          platform: linux/amd64
+          build-args: |
+            GOPROXY=http://goproxy.goproxy.svc.cluster.local
   setup_mo_test_env:
     if: ${{ always() && !cancelled() && needs.docker_image_build.result == 'success' }}
     needs: docker_image_build
@@ -90,7 +123,7 @@ jobs:
     steps:
       - name: Clone Repo Matrixorigin/Matrixone
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: ./matrixone
       - name: Clean TKE ENV
@@ -173,7 +206,7 @@ jobs:
       - name: Prepare Data in cn-0
         timeout-minutes: 5
         run: |
-          kubectl exec -it ${{ steps.get_mo_addr.outputs.cn_0 }} -n mo-checkin-regression-${{ github.event.pull_request.number }} -- bash -c '
+          kubectl exec -it ${{ steps.get_mo_addr.outputs.cn_0 }} -n mo-checkin-regression-${{ github.event.pull_request.number }} -- env GITHUB_WORKSPACE=$GITHUB_WORKSPACE bash -c '
           set -x;
           export https_proxy=http://proxy-service.proxy.svc.cluster.local:8001
           git config --global init.defaultBranch main
@@ -198,12 +231,17 @@ jobs:
           if [ $success == "no" ]; then
             exit 1;
           fi
+
+          # 创建对应的目录结构和符号链接，容器内外资源目录一致
+          mkdir -p $GITHUB_WORKSPACE/matrixone/test/distributed
+          ln -sf $path_matrixone/matrixone/test/distributed/resources $GITHUB_WORKSPACE/matrixone/test/distributed/resources
+
           exit 0;
           '
       - name: Prepare Data in cn-1
         timeout-minutes: 5
         run: |
-          kubectl exec -it ${{ steps.get_mo_addr.outputs.cn_1 }} -n mo-checkin-regression-${{ github.event.pull_request.number }} -- bash -c '
+          kubectl exec -it ${{ steps.get_mo_addr.outputs.cn_1 }} -n mo-checkin-regression-${{ github.event.pull_request.number }} -- env GITHUB_WORKSPACE=$GITHUB_WORKSPACE bash -c '
           set -x;
           export https_proxy=http://proxy-service.proxy.svc.cluster.local:8001
           git config --global init.defaultBranch main
@@ -228,6 +266,11 @@ jobs:
           if [ $success == "no" ]; then
             exit 1;
           fi
+
+          # 创建对应的目录结构和符号链接
+          mkdir -p $GITHUB_WORKSPACE/matrixone/test/distributed
+          ln -sf $path_matrixone/matrixone/test/distributed/resources $GITHUB_WORKSPACE/matrixone/test/distributed/resources
+
           exit 0;
           '
   bvt_test:
@@ -239,7 +282,7 @@ jobs:
     steps:
       - name: Clone MO-Tester
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-tester
           token: ${{secrets.TOKEN_ACTION}}
@@ -247,7 +290,7 @@ jobs:
           ref: main
       - name: Clone matrixone Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: ./matrixone
       - name: Set JAVA PATH
@@ -269,14 +312,14 @@ jobs:
           echo "=========================="
 
           cd $GITHUB_WORKSPACE/mo-tester
-          ./run.sh -n -g -o -p $GITHUB_WORKSPACE/matrixone/test/distributed/cases -s /matrixone/test/distributed/resources -e optimistic  2>&1
+          ./run.sh -n -g -o -p $GITHUB_WORKSPACE/matrixone/test/distributed/cases -e optimistic  2>&1
           rm -rf .git lib
       - name: Collect Upload files
         if: ${{ always() || cancelled() }}
         run: |
           mkdir -p $GITHUB_WORKSPACE/reports/mo-tester
           mkdir -p $GITHUB_WORKSPACE/mo-tester && cp -r $GITHUB_WORKSPACE/mo-tester $GITHUB_WORKSPACE/reports/mo-tester
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
@@ -292,7 +335,7 @@ jobs:
     steps:
       - name: Clone mo-load-data Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-load-data
           token: ${{secrets.TOKEN_ACTION}}
@@ -301,7 +344,7 @@ jobs:
 
       - name: Clone mo-ssb Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-ssb
           token: ${{secrets.TOKEN_ACTION}}
@@ -310,7 +353,7 @@ jobs:
 
       - name: Clone mo-tpch Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-tpch
           token: ${{secrets.TOKEN_ACTION}}
@@ -318,7 +361,7 @@ jobs:
           ref: main
       - name: Clone mo-night-regression Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-nightly-regression
           token: ${{secrets.TOKEN_ACTION}}
@@ -393,7 +436,7 @@ jobs:
           curl "http://$cn_1_ip:6060/debug/pprof/trace?seconds=30" -o cn_1_trace.out
           curl "http://$cn_1_ip:6060/debug/pprof/goroutine?debug=2" -o cn_1_groutine.out
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ always() && steps.step_ssb_test.conclusion != 'success' }}
         with:
           name: mo-cluster-trace-${{ github.event.pull_request.number }}-ssb
@@ -435,7 +478,7 @@ jobs:
           curl "http://$cn_1_ip:6060/debug/pprof/trace?seconds=30" -o cn_1_trace.out
           curl "http://$cn_1_ip:6060/debug/pprof/goroutine?debug=2" -o cn_1_groutine.out
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ always() && steps.load_tpch_data.conclusion != 'success' }}
         with:
           name: mo-cluster-trace-${{ github.event.pull_request.number }}-load-tpch
@@ -476,7 +519,7 @@ jobs:
           curl "http://$cn_1_ip:6060/debug/pprof/trace?seconds=30" -o cn_1_trace.out
           curl "http://$cn_1_ip:6060/debug/pprof/goroutine?debug=2" -o cn_1_groutine.out
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ always() && steps.step_tpch_test.conclusion != 'success' }}
         with:
           name: mo-cluster-trace-${{ github.event.pull_request.number }}-tpch
@@ -495,7 +538,7 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/mo-load-data/report && cp -r $GITHUB_WORKSPACE/mo-load-data/report $GITHUB_WORKSPACE/reports/mo-load-data
           mkdir -p $GITHUB_WORKSPACE/mo-tpch/report && cp -r $GITHUB_WORKSPACE/mo-tpch/report $GITHUB_WORKSPACE/reports/mo-tpch
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
@@ -513,7 +556,7 @@ jobs:
     steps:
       - name: Clone mo-load Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-load
           token: ${{secrets.TOKEN_ACTION}}
@@ -521,7 +564,7 @@ jobs:
           ref: "1.0"
       - name: Clone mo-night-regression Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-nightly-regression
           token: ${{secrets.TOKEN_ACTION}}
@@ -616,7 +659,7 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/reports/mo-load
           mkdir -p $GITHUB_WORKSPACE/mo-load/report && cp -r $GITHUB_WORKSPACE/mo-load/report $GITHUB_WORKSPACE/reports/mo-load
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
@@ -634,7 +677,7 @@ jobs:
     steps:
       - name: Clone mo-load-data Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-load-data
           token: ${{secrets.TOKEN_ACTION}}
@@ -643,7 +686,7 @@ jobs:
 
       - name: Clone mo-tpcc Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-tpcc
           token: ${{secrets.TOKEN_ACTION}}
@@ -651,7 +694,7 @@ jobs:
           ref: main
       - name: Clone mo-night-regression Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-nightly-regression
           token: ${{secrets.TOKEN_ACTION}}
@@ -760,7 +803,7 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/mo-load-data/report && cp -r $GITHUB_WORKSPACE/mo-load-data/report $GITHUB_WORKSPACE/reports/mo-load-data
           mkdir -p $GITHUB_WORKSPACE/mo-tpcc/report && cp -r $GITHUB_WORKSPACE/mo-tpcc/report $GITHUB_WORKSPACE/reports/mo-tpcc
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
@@ -811,7 +854,7 @@ jobs:
           curl "http://$cn_1_ip:6060/debug/pprof/trace?seconds=30" -o cn_1_trace.out
           curl "http://$cn_1_ip:6060/debug/pprof/goroutine?debug=2" -o cn_1_groutine.out
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ needs.docker_image_build.result == 'success' }}
         continue-on-error: true
         with:

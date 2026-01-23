@@ -12,7 +12,7 @@ jobs:
     timeout-minutes: 90
     steps:
       - name: checkout head
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: "3"
           path: ./head
@@ -20,6 +20,8 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          go-version-file: "${{ github.workspace }}/head/go.mod"
       - name: Build MatrixOne
         run: |
           cd $GITHUB_WORKSPACE/head && make clean && make build
@@ -42,7 +44,7 @@ jobs:
           cd $GITHUB_WORKSPACE/head
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/head launch
       - name: Clone test-tool repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
@@ -119,7 +121,7 @@ jobs:
           mv ${{ github.workspace }}/head/mo-service.log ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/mo-tester ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/head/dump-stacks* ${{ github.workspace }}/upload/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
@@ -127,7 +129,7 @@ jobs:
           path: |
             ${{ github.workspace }}/upload
           retention-days: 7
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         name: Upload MO DATA
         if: ${{ failure() }}
         continue-on-error: true
@@ -145,13 +147,15 @@ jobs:
       mo_reuse_enable_checker: true
     steps:
       - name: checkout head
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: ./head
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          go-version-file: "${{ github.workspace }}/head/go.mod"
       - name: Build MatrixOne
         run: |
           cd $GITHUB_WORKSPACE/head && make clean && make build
@@ -174,7 +178,7 @@ jobs:
           cd $GITHUB_WORKSPACE/head
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/head launch-dynamic-with-proxy -with-proxy
       - name: Clone test-tool repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
@@ -214,7 +218,7 @@ jobs:
           mv ${{ github.workspace }}/head/mo-service.log ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/mo-tester ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/head/dump-stacks.log ${{ github.workspace }}/upload/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
@@ -231,7 +235,7 @@ jobs:
       mo_reuse_enable_checker: true
     steps:
       - name: checkout head
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: "3"
           path: ./head
@@ -240,6 +244,8 @@ jobs:
 
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          go-version-file: "${{ github.workspace }}/head/go.mod"
 
       - name: Build MatrixOne
         run: |
@@ -265,7 +271,7 @@ jobs:
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/head launch
 
       - name: Clone test-tool repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
@@ -314,7 +320,7 @@ jobs:
           mv ${{ github.workspace }}/mo-tester ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/head/dump-stacks.log ${{ github.workspace }}/upload/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:

@@ -30,17 +30,6 @@ jobs:
           mentioned_list: '["@all"]'
           content: "New Issue Opened or Assigned: [${{ github.event.issue.title }}](${{ github.event.issue.html_url }})\nAssignees:<font color=\"warning\">${{ join(github.event.issue.assignees.*.login, ', ') }}</font>\nOpen Issue Number: <font color=\"warning\">${{ github.event.repository.open_issues }}</font>"
 
-  add-projects-milestone:
-    if: github.event_name == 'issues' && github.event.action == 'opened'
-    environment: ci
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Issue Add  Milestone
-        if: contains(github.event.issue.labels.*.name, 'kind/bug')
-        uses: matrixorigin/CI/actions/milestone-add-action@main
-        with:
-          action-token: ${{ secrets.TOKEN_ACTION }}
-          milestone: "1.3.0"
 
   check-bvt-issue:
     if: github.event_name == 'issues' && github.event.action == 'closed'
@@ -48,7 +37,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: CheckOut
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Check the code to see if the issue number is removed
         id: get_check_val
@@ -86,7 +75,7 @@ jobs:
     if: github.event_name == 'issues' && github.event.action == 'closed'
     steps:
       - name: Reopen Issue
-        if: github.event.issue.user.login != github.event.sender.login && github.event.action == 'closed' && github.event.sender.login != 'sukki37' && github.event.sender.login != 'aressu1985' && github.event.sender.login != 'fengttt' && github.event.sender.login != 'allengaoo'
+        if: github.event.issue.user.login != github.event.sender.login && github.event.action == 'closed' && github.event.sender.login != 'sukki37' && github.event.sender.login != 'Ariznawlll' && github.event.sender.login != 'fengttt' && github.event.sender.login != 'heni02'
         uses: actions-cool/issues-helper@v3
         with:
           actions: "open-issue"
@@ -104,31 +93,14 @@ jobs:
           uri_notice: ${{ secrets.DOCU_GROUP_HOOK }}
           name_label: "doc influence"
           mentions: "Prinz,DengNan"
-          
-  add-issue-to-project:
-    environment: ci
-    runs-on: ubuntu-22.04
-    if: github.event_name == 'issues' && github.event.action == 'assigned'
-    steps:
-      - name: assign issue
-        uses: matrixorigin/CI/actions/assign-issue@main
-        with:
-          GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
-          Issue_ID: ${{ github.event.issue.number }}
-          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-      - uses: matrixorigin/CI/actions/assign-role-label@main
-        name: Add Label for Assignee Role
-        with:
-          github-token: ${{ secrets.TOKEN_ACTION }}
-          correspondence: "{\"qa\":\"phase/testing\"}"
+
 
   nightly-check:
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     environment: ci
     runs-on: amd64-mo-shanghai-4xlarge32
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: "3"
           path: ./matrixone
@@ -136,6 +108,7 @@ jobs:
         uses: matrixorigin/CI/actions/setup-env@main
         with:
           setup-java: false
+          go-version-file: "${{ github.workspace }}/matrixone/go.mod"
       - name: Set Variables
         run: |
           echo "ut_report='UT-Report.out'" >> $GITHUB_ENV
@@ -150,7 +123,7 @@ jobs:
           echo 'GOPROXY=http://goproxy.goproxy.svc.cluster.local|https://goproxy.cn|direct' >> $GITHUB_ENV
           echo "$JAVA_HOME/bin" >> $GITHUB_PATH;
       - name: Clone test-tool repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
@@ -169,8 +142,18 @@ jobs:
           cd $GITHUB_WORKSPACE/matrixone
           test_scope=$(go list ./... | grep -v 'driver\|engine/aoe\|engine/memEngine\|pkg/catalog')
           make clean && make config && make cgo
+          CGO_CFLAGS="-I${GITHUB_WORKSPACE}/matrixone/cgo"
+          CGO_LDFLAGS="-L${GITHUB_WORKSPACE}/matrixone/cgo -lmo"
+          THIRDPARTIES_DIR=$GITHUB_WORKSPACE/matrixone/thirdparties
+          THIRDPARTIES_INSTALL_DIR=$THIRDPARTIES_DIR/install
+          if [ -d $THIRDPARTIES_DIR ] ; then
+            make thirdparties
+            CGO_CFLAGS="${CGO_CFLAGS} -I${THIRDPARTIES_INSTALL_DIR}/include"
+            CGO_LDFLAGS="${CGO_LDFLAGS} -L${THIRDPARTIES_INSTALL_DIR}/lib -Wl,-rpath,${THIRDPARTIES_INSTALL_DIR}/lib"
+          fi
+
           echo "ut start"
-          CGO_CFLAGS="-I${GITHUB_WORKSPACE}/matrixone/cgo" CGO_LDFLAGS="-L${GITHUB_WORKSPACE}/matrixone/cgo -lmo" go test -short -v -tags matrixone_test -p 6 -covermode=count -coverprofile=${{ env.raw_ut_coverage }} -coverpkg=./pkg/... ${test_scope} | tee ${{ env.ut_report }}
+          CGO_CFLAGS="${CGO_CFLAGS}" CGO_LDFLAGS="${CGO_LDFLAGS}" go test -json -short -v -tags matrixone_test -p 6 -covermode=set -coverprofile=${{ env.raw_ut_coverage }} -coverpkg=./... ${test_scope} | tee ${{ env.ut_report }}
           echo "ut finished"
       - name: Start BVT Test Service
         if: ${{ always() && !cancelled() }}
@@ -179,9 +162,8 @@ jobs:
           cd $GITHUB_WORKSPACE/matrixone
           sed -i.bak 's/level = "info"/level = "error"/g'  ./etc/launch/log.toml
           if  [ -d  "./store"  ]; then rm -rf ./store; fi
-          GOLDFLAGS=-ldflags="-X 'main.GoVersion=$(go version)' -X 'main.BranchName=$(git rev-parse --abbrev-ref HEAD)' -X 'main.CommitID=$(git rev-parse HEAD)' -X 'main.BuildTime=$(date)' -X 'main.Version=$(git describe --always --tags $(git rev-list --tags --max-count=1))'"
           export GOCOVERDIR=$GITHUB_WORKSPACE/matrixone
-          go build -cover "$GOLDFLAGS" -o mo-service ./cmd/mo-service/
+          make GOBUILD_OPT=-cover build
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/matrixone launch
       - name: Update BVT SQL Timeout
         run: |
@@ -269,7 +251,7 @@ jobs:
           echo 'Detail<<EOF' >> $GITHUB_ENV
           cat coverage_report.txt >> $GITHUB_ENV
           echo 'EOF' >> $GITHUB_ENV
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ always() && !cancelled() }}
         continue-on-error: true
         with:
@@ -277,7 +259,7 @@ jobs:
           path: |
             ${{ github.workspace }}/matrixone/code_quality_reports.zip
           retention-days: 7
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ failure() }}
         continue-on-error: true
         with:
@@ -317,31 +299,31 @@ jobs:
         env:
           BASE_URL: ${{ github.api_url }}
         with:
-          repository: ${{ github.repository }}  # 获取执行该作业的仓库名 形如: matrixorigin/CI
-          issue_number: ${{ github.event.issue.number }}  # 获取当前操作的issue number
-          github_token: ${{ secrets.TOKEN_ACTION }}  # 获取github action token操作权限
-          labels: 'needs-triage'  #要删除的label标签 形如 label1,label2,...
+          repository: ${{ github.repository }} # 获取执行该作业的仓库名 形如: matrixorigin/CI
+          issue_number: ${{ github.event.issue.number }} # 获取当前操作的issue number
+          github_token: ${{ secrets.TOKEN_ACTION }} # 获取github action token操作权限
+          labels: "needs-triage" #要删除的label标签 形如 label1,label2,...
           current_assignee: ${{ github.event.assignee.login }}
-          blacklist: 'matrix-meow'  #黑名单形如: user1,user2,...
+          blacklist: "matrix-meow" #黑名单形如: user1,user2,...
 
   reopen-without-PR:
     environment: ci
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'issues' && github.event.action == 'closed' && github.actor != 'sukki37' }}
+    if: ${{ github.event_name == 'issues' && github.event.action == 'closed' && github.actor != 'sukki37' && github.actor != 'Ariznawlll' }}
     steps:
       - name: Reopen Issue Without PR
         id: step1
         with:
-          whitelist: 'sukki37,fengttt,aressu1985,allengaoo' # 白名单成员 可以无条件删除带有特殊标签的issue
+          whitelist: "sukki37,fengttt,heni02" # 白名单成员 可以无条件删除带有特殊标签的issue
           issue_owner: ${{ github.event.issue.user.login }} # issue的打开者 当满足存在关联pr时允许关闭
-          close_user: ${{ github.event.sender.login }}  # 当前关闭issue的操作者
-          github_token: ${{ secrets.TOKEN_ACTION }}  # 获取github action token操作权限
+          close_user: ${{ github.event.sender.login }} # 当前关闭issue的操作者
+          github_token: ${{ secrets.TOKEN_ACTION }} # 获取github action token操作权限
           base_url: ${{ github.api_url }}
-          repository: ${{ github.repository }}  # 获取执行该作业的仓库名 形如: matrixorigin/CI
-          issue_number: ${{ github.event.issue.number }}  # 获取当前操作的issue number
-          assignees: 'sukki37'  #issue指定分配对象
-          LABELS: 'no-pr-linked'  #相关自定义label配置 形如 label1,label2
-          LABELS_NEED: 'kind/bug,Bug fix,bug_fix,bug/ut'  # 指定需要排查的标签 label1,label2,...
+          repository: ${{ github.repository }} # 获取执行该作业的仓库名 形如: matrixorigin/CI
+          issue_number: ${{ github.event.issue.number }} # 获取当前操作的issue number
+          assignees: "sukki37" #issue指定分配对象
+          LABELS: "no-pr-linked" #相关自定义label配置 形如 label1,label2
+          LABELS_NEED: "kind/bug,Bug fix,bug_fix,bug/ut" # 指定需要排查的标签 label1,label2,...
         uses: matrixorigin/CI/actions/reopen-without-PR@main
       - name: WeChat Work notification
         if: ${{ failure() || cancelled() || steps.step1.outputs.send == 'yes' }}

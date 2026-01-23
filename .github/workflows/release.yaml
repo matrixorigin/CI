@@ -31,10 +31,10 @@ on:
 jobs:
   linux-amd64-build-job:
     environment: ci
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Get release
         id: get_release
         uses: bruceadams/get-release@v1.3.2
@@ -48,6 +48,8 @@ jobs:
         uses: matrixorigin/CI/actions/setup-env@main
         with:
           setup-java: false
+          setup-cmake: true
+          go-version-file: "${{ github.workspace }}/go.mod"
       - name: Build normal
         run: |
           make build
@@ -61,10 +63,16 @@ jobs:
             mv ./etc/launch-with-python-udf-server ./mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64/etc/
           fi
 
-          if [ -d "./pkg/udf/pythonservice/pyserver" ]; then
-            mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64/pkg/udf/pythonservice
-            mv ./pkg/udf/pythonservice/pyserver ./mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64/pkg/udf/pythonservice/
+          if [ -d "./pkg/udf/pythonservice" ]; then
+            mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64/pkg/udf
+            mv ./pkg/udf/pythonservice ./mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64/pkg/udf/
           fi
+
+          if [ -d "./thirdparties/install/lib" ]; then
+            mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64/lib
+            mv ./thirdparties/install/lib ./mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64/
+          fi
+
           zip -r mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64.zip mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64
       - name: Upload Release normal linux x86_64
         uses: actions/upload-release-asset@v1.0.2
@@ -76,7 +84,7 @@ jobs:
           asset_name: mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64.zip
           asset_content_type: application/zip
       - name: dispatch binary test
-        uses: peter-evans/repository-dispatch@v3
+        uses: peter-evans/repository-dispatch@v4
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           repository: matrixorigin/mo-nightly-regression
@@ -92,7 +100,7 @@ jobs:
     runs-on: arm64-mo-guangzhou-2xlarge16
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Get release
         id: get_release
         uses: bruceadams/get-release@v1.3.2
@@ -106,6 +114,8 @@ jobs:
         uses: matrixorigin/CI/actions/setup-env@main
         with:
           setup-java: false
+          setup-cmake: false
+          go-version-file: "${{ github.workspace }}/go.mod"
       - name: Build normal
         run: |
           make build
@@ -120,10 +130,16 @@ jobs:
           fi
 
           # copy udf python server
-          if [ -d "./pkg/udf/pythonservice/pyserver" ]; then
-            mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64/pkg/udf/pythonservice
-            mv ./pkg/udf/pythonservice/pyserver ./mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64/pkg/udf/pythonservice
+          if [ -d "./pkg/udf/pythonservice" ]; then
+            mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64/pkg/udf
+            mv ./pkg/udf/pythonservice ./mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64/pkg/udf/
           fi
+
+          if [ -d "./thirdparties/install/lib" ]; then
+            mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64/lib
+            mv ./thirdparties/install/lib ./mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64/
+          fi
+
           zip -r mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64.zip mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64
 
       - name: Upload Release normal linux arm64
@@ -135,11 +151,10 @@ jobs:
           asset_path: ./mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64.zip
           asset_name: mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64.zip
           asset_content_type: application/zip
-          
 
   darwin-x86-build-job:
     environment: ci
-    runs-on: macos-latest
+    runs-on: macos-13
     steps:
       # GitHub Hosted MacOS runner cannot connect to time.apple.com, so use time.windows.com
       - name: Sync System Time
@@ -152,7 +167,7 @@ jobs:
           done
           exit 1;
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Get release
         id: get_release
         uses: bruceadams/get-release@v1.3.2
@@ -166,11 +181,13 @@ jobs:
         uses: matrixorigin/CI/actions/setup-env@main
         with:
           setup-java: false
+          setup-cmake: true
+          go-version-file: "${{ github.workspace }}/go.mod"
       - name: Build normal
         run: |
           make build
       - name: Import Code-Signing Certificates
-        uses: Apple-Actions/import-codesign-certs@v3
+        uses: Apple-Actions/import-codesign-certs@v6
         with:
           # The certificates in a PKCS12 file encoded as a base64 string
           p12-file-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
@@ -178,7 +195,7 @@ jobs:
           p12-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
 
       - name: Clone gon
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: "1"
           repository: matrixorigin/gon
@@ -216,9 +233,13 @@ jobs:
           fi
 
           # copy udf python server
-          if [ -d "./pkg/udf/pythonservice/pyserver" ]; then
-            mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-darwin-x86_64/pkg/udf/pythonservice
-            mv ./pkg/udf/pythonservice/pyserver ./mo-${{ steps.get_release.outputs.tag_name }}-darwin-x86_64/pkg/udf/pythonservice/
+          if [ -d "./pkg/udf/pythonservice" ]; then
+            mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-darwin-x86_64/pkg/udf
+            mv ./pkg/udf/pythonservice ./mo-${{ steps.get_release.outputs.tag_name }}-darwin-x86_64/pkg/udf/
+          fi
+
+          if [ -d "./thirdparties/install/lib" ]; then
+            mv ./thirdparties/install/lib ./mo-${{ steps.get_release.outputs.tag_name }}-darwin-x86_64/
           fi
 
           zip -r mo-${{ steps.get_release.outputs.tag_name }}-darwin-x86_64.zip mo-${{ steps.get_release.outputs.tag_name }}-darwin-x86_64
@@ -248,7 +269,7 @@ jobs:
           done
           exit 1;
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Get release
         id: get_release
         uses: bruceadams/get-release@v1.3.2
@@ -262,6 +283,8 @@ jobs:
         uses: matrixorigin/CI/actions/setup-env@main
         with:
           setup-java: false
+          go-version-file: "${{ github.workspace }}/go.mod"
+          setup-cmake: false
       - name: Check go version
         run: |
           go version
@@ -273,7 +296,7 @@ jobs:
           security list-keychains | grep sign | awk 'system("security delete-keychain "$1)'
           security find-identity -p codesigning | grep ID | awk 'NR=1{system("security delete-identity -Z "$2)}'
       - name: Import Code-Signing Certificates
-        uses: Apple-Actions/import-codesign-certs@v3
+        uses: Apple-Actions/import-codesign-certs@v6
         with:
           # The certificates in a PKCS12 file encoded as a base64 string
           p12-file-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
@@ -303,9 +326,13 @@ jobs:
           fi
 
           # copy udf python server
-          if [ -d "./pkg/udf/pythonservice/pyserver" ]; then
-            mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-darwin-arm64/pkg/udf/pythonservice
-            mv ./pkg/udf/pythonservice/pyserver ./mo-${{ steps.get_release.outputs.tag_name }}-darwin-arm64/pkg/udf/pythonservice/
+          if [ -d "./pkg/udf/pythonservice" ]; then
+            mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-darwin-arm64/pkg/udf
+            mv ./pkg/udf/pythonservice ./mo-${{ steps.get_release.outputs.tag_name }}-darwin-arm64/pkg/udf/
+          fi
+
+          if [ -d "./thirdparties/install/lib" ]; then
+            mv ./thirdparties/install/lib ./mo-${{ steps.get_release.outputs.tag_name }}-darwin-arm64/
           fi
 
           zip -r mo-${{ steps.get_release.outputs.tag_name }}-darwin-arm64.zip mo-${{ steps.get_release.outputs.tag_name }}-darwin-arm64
@@ -318,111 +345,116 @@ jobs:
           asset_path: ./mo-${{ steps.get_release.outputs.tag_name }}-darwin-arm64.zip
           asset_name: mo-${{ steps.get_release.outputs.tag_name }}-darwin-arm64.zip
           asset_content_type: application/zip
-      - name: Remove Code-Signing Certificates
-        if: ${{ always() }}
-        run: |
-          security list-keychains | grep sign | awk 'system("security delete-keychain "$1)'
-          security find-identity -p codesigning | grep ID | awk 'NR=1{system("security delete-identity -Z "$2)}'
 
-  musl-x86-build-job:
-    environment: ci
-    runs-on: ubuntu-20.04
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-      - name: Get release
-        id: get_release
-        uses: bruceadams/get-release@v1.3.2
-        env:
-          GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
-      - name: Echo some info
-        run: |
-          echo ${{ steps.get_release.outputs.upload_url }}
-          echo ${{ steps.get_release.outputs.tag_name }}
-      - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
-        with:
-          setup-java: false
-      - name: Build normal
-        run: |
-          cd $GITHUB_WORKSPACE;
-          make musl;
-          # copy toml configure file
-          mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64/etc
-          mv mo-service mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64/
+  # musl-x86-build-job:
+  #   environment: ci
+  #   runs-on: ubuntu-22.04
+  #   steps:
+  #     - name: Checkout source
+  #       uses: actions/checkout@v6
+  #     - name: Get release
+  #       id: get_release
+  #       uses: bruceadams/get-release@v1.3.2
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
+  #     - name: Echo some info
+  #       run: |
+  #         echo ${{ steps.get_release.outputs.upload_url }}
+  #         echo ${{ steps.get_release.outputs.tag_name }}
+  #     - name: Set up Go
+  #       uses: matrixorigin/CI/actions/setup-env@main
+  #       with:
+  #         setup-java: false
+  #         setup-cmake: true
+  #         go-version-file: "${{ github.workspace }}/go.mod"
+  #     - name: Build normal
+  #       run: |
+  #         cd $GITHUB_WORKSPACE;
+  #         make musl;
+  #         # copy toml configure file
+  #         mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64/etc
+  #         mv mo-service mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64/
 
-          mv ./etc/launch mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64/etc/
-          if [ -d "./etc/launch-with-python-udf-server" ]; then
-            mv ./etc/launch-with-python-udf-server ./mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64/etc/
-          fi
-          if [ -d "./pkg/udf/pythonservice/pyserver" ]; then
-            mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64/pkg/udf/pythonservice
-            mv ./pkg/udf/pythonservice/pyserver ./mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64/pkg/udf/pythonservice
-          fi
-          zip -r mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64.zip mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64
-      - name: Upload Release normal musl x86_64
-        uses: actions/upload-release-asset@v1.0.2
-        env:
-          GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
-        with:
-          upload_url: ${{ steps.get_release.outputs.upload_url }}
-          asset_path: ./mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64.zip
-          asset_name: mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64.zip
-          asset_content_type: application/zip
-      - name: dispatch binary test
-        uses: peter-evans/repository-dispatch@v3
-        with:
-          token: ${{ secrets.TOKEN_ACTION }}
-          repository: matrixorigin/mo-nightly-regression
-          event-type: binary-test
-          client-payload: '{"RUNNER": "runner-aron-shpc-2","GIT_WEBSITE": "github","MO_REPO": "${{ github.repository_owner }}","MO_VERSION": "${{ steps.get_release.outputs.tag_name }}","MO_DEPLOY_MODE": "binary","MO_BIN_URL": "https://github.com/${{ github.repository }}/releases/download/${{ steps.get_release.outputs.tag_name }}/mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64.zip","TEST_LIST": "bvt,tpcc,sysbench,ssb,tpch,customer","BVT_EXCLUDE_CASES": "","CUS_TEST_OPTION": "ddl,insert,query","CUS_DS_LIST": "cmcciot_001,cmcciot_002,dmt_001,etao_001,etao_002,etao_003,etao_006,extremevision_001,guangheng_001,slooong_001,slooong_002,slooong_003,unre_001,unre_002,unre_003,unre_004,unre_005,unre_006,us_001,worthcloud_001"}'
-      - name: Get binary test url
-        run: |
-          echo "you can find the binary test action on https://github.com/matrixorigin/mo-nightly-regression/actions/workflows/mo-release-test-binary.yaml "
-          echo "check in [ J_0. Set variables ]->[ Step_99. Display and output actual variables ] to see if the binary file url is correct"
+  #         mv ./etc/launch mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64/etc/
+  #         if [ -d "./etc/launch-with-python-udf-server" ]; then
+  #           mv ./etc/launch-with-python-udf-server ./mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64/etc/
+  #         fi
+  #         if [ -d "./pkg/udf/pythonservice" ]; then
+  #           mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64/pkg/udf
+  #           mv ./pkg/udf/pythonservice ./mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64/pkg/udf/
+  #         fi
+  #         if [ -d "./thirdparties/install/lib" ]; then
+  #           mv ./thirdparties/install/lib ./mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64/
+  #         fi
+  #         zip -r mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64.zip mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64
+  #     - name: Upload Release normal musl x86_64
+  #       uses: actions/upload-release-asset@v1.0.2
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
+  #       with:
+  #         upload_url: ${{ steps.get_release.outputs.upload_url }}
+  #         asset_path: ./mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64.zip
+  #         asset_name: mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64.zip
+  #         asset_content_type: application/zip
+  #     - name: dispatch binary test
+  #       uses: peter-evans/repository-dispatch@v4
+  #       with:
+  #         token: ${{ secrets.TOKEN_ACTION }}
+  #         repository: matrixorigin/mo-nightly-regression
+  #         event-type: binary-test
+  #         client-payload: '{"RUNNER": "runner-aron-shpc-2","GIT_WEBSITE": "github","MO_REPO": "${{ github.repository_owner }}","MO_VERSION": "${{ steps.get_release.outputs.tag_name }}","MO_DEPLOY_MODE": "binary","MO_BIN_URL": "https://github.com/${{ github.repository }}/releases/download/${{ steps.get_release.outputs.tag_name }}/mo-${{ steps.get_release.outputs.tag_name }}-musl-x86_64.zip","TEST_LIST": "bvt,tpcc,sysbench,ssb,tpch,customer","BVT_EXCLUDE_CASES": "","CUS_TEST_OPTION": "ddl,insert,query","CUS_DS_LIST": "cmcciot_001,cmcciot_002,dmt_001,etao_001,etao_002,etao_003,etao_006,extremevision_001,guangheng_001,slooong_001,slooong_002,slooong_003,unre_001,unre_002,unre_003,unre_004,unre_005,unre_006,us_001,worthcloud_001"}'
+  #     - name: Get binary test url
+  #       run: |
+  #         echo "you can find the binary test action on https://github.com/matrixorigin/mo-nightly-regression/actions/workflows/mo-release-test-binary.yaml "
+  #         echo "check in [ J_0. Set variables ]->[ Step_99. Display and output actual variables ] to see if the binary file url is correct"
 
-  musl-arm64-build-job:
-    environment: ci
-    runs-on: arm64-mo-guangzhou-2xlarge16
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-      - name: Get release
-        id: get_release
-        uses: bruceadams/get-release@v1.3.2
-        env:
-          GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
-      - name: Echo some info
-        run: |
-          echo ${{ steps.get_release.outputs.upload_url }}
-          echo ${{ steps.get_release.outputs.tag_name }}
-      - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
-        with:
-          setup-java: false
-      - name: Build normal
-        run: |
-          cd $GITHUB_WORKSPACE;
-          make musl;
-          # copy toml configure file
-          mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64/etc
-          mv mo-service mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64/
+  # musl-arm64-build-job:
+  #   environment: ci
+  #   runs-on: arm64-mo-guangzhou-2xlarge16
+  #   steps:
+  #     - name: Checkout source
+  #       uses: actions/checkout@v6
+  #     - name: Get release
+  #       id: get_release
+  #       uses: bruceadams/get-release@v1.3.2
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
+  #     - name: Echo some info
+  #       run: |
+  #         echo ${{ steps.get_release.outputs.upload_url }}
+  #         echo ${{ steps.get_release.outputs.tag_name }}
+  #     - name: Set up Go
+  #       uses: matrixorigin/CI/actions/setup-env@main
+  #       with:
+  #         setup-java: false
+  #         setup-cmake: false
+  #         go-version-file: "${{ github.workspace }}/go.mod"
+  #     - name: Build normal
+  #       run: |
+  #         cd $GITHUB_WORKSPACE;
+  #         make musl;
+  #         # copy toml configure file
+  #         mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64/etc
+  #         mv mo-service mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64/
 
-          mv ./etc/launch mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64/etc/
-          if [ -d "./etc/launch-with-python-udf-server" ]; then
-            mv ./etc/launch-with-python-udf-server ./mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64/etc/
-          fi
-          if [ -d "./pkg/udf/pythonservice/pyserver" ]; then
-            mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64/pkg/udf/pythonservice
-            mv ./pkg/udf/pythonservice/pyserver ./mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64/pkg/udf/pythonservice
-          fi
-          zip -r mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64.zip mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64
-      - name: Upload Release normal musl arm64
-        uses: actions/upload-release-asset@v1.0.2
-        env:
-          GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
-        with:
-          upload_url: ${{ steps.get_release.outputs.upload_url }}
-          asset_path: ./mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64.zip
-          asset_name: mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64.zip
-          asset_content_type: application/zip
+  #         mv ./etc/launch mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64/etc/
+  #         if [ -d "./etc/launch-with-python-udf-server" ]; then
+  #           mv ./etc/launch-with-python-udf-server ./mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64/etc/
+  #         fi
+  #         if [ -d "./pkg/udf/pythonservice" ]; then
+  #           mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64/pkg/udf
+  #           mv ./pkg/udf/pythonservice ./mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64/pkg/udf/
+  #         fi
+  #         if [ -d "./thirdparties/install/lib" ]; then
+  #           mv ./thirdparties/install/lib ./mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64/
+  #         fi
+  #         zip -r mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64.zip mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64
+  #     - name: Upload Release normal musl arm64
+  #       uses: actions/upload-release-asset@v1.0.2
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.TOKEN_ACTION }}
+  #       with:
+  #         upload_url: ${{ steps.get_release.outputs.upload_url }}
+  #         asset_path: ./mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64.zip
+  #         asset_name: mo-${{ steps.get_release.outputs.tag_name }}-musl-arm64.zip
+  #         asset_content_type: application/zip

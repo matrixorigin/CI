@@ -35,14 +35,22 @@ on:
         description: "matrixone cloud db"
         required: true
 
-
-
 jobs:
   ut-linux-x86:
     environment: ci
     runs-on: ubuntu-22.04
     name: UT Test on Ubuntu/x86
     steps:
+      - name: Pre Clean Some Unneeded Images
+        run: |
+          sudo df -h /*
+          echo "========================================="
+          sudo docker builder prune -f -a;
+          sudo docker images | grep -v REPOSITORY | awk '{system("sudo docker rmi "$1":"$2)}';
+          sudo docker volume prune -f;
+          echo "========================================="
+          sudo df -h /*
+
       - name: Parse Time for moc
         id: time
         run: |
@@ -54,19 +62,19 @@ jobs:
 
           # 获取格式化的日期时间字符串
           time=$(date '+%Y-%m-%d %H:%M:%S')
-          
+
           # action link
           action_link="https://github.com/${{ github.event.pull_request.base.repo.full_name }}/actions/runs/${{ github.run_id }}"
-          
+
           echo "ACTION_TIME=${ACTION_TIME}"
           echo "START_TIME=${time}"
           echo "ACTION_LINK=${action_link}"
-          
+
           echo "ACTION_TIME=${ACTION_TIME}" >> $GITHUB_OUTPUT
           echo "START_TIME=${time}" >> $GITHUB_OUTPUT
           echo "ACTION_LINK=${action_link}" >> $GITHUB_OUTPUT
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
@@ -74,7 +82,11 @@ jobs:
       - name: Set up Go
         uses: matrixorigin/CI/actions/setup-env@main
         with:
-          setup-java: false
+          setup-java: true
+          go-version-file: "${{ github.workspace }}/go.mod"
+      - uses: matrixorigin/setup-hdfs@master
+        with:
+          hdfs-download-url: "https://github.com/matrixorigin/CI/releases/download/hadoop-binary-3.4.1/hadoop-3.4.1.tar.gz"
       - name: Set env
         run: |
           echo "endpoint=${{ secrets.S3ENDPOINT }}" >> $GITHUB_ENV
@@ -127,7 +139,7 @@ jobs:
             cat "${file}";
             fail_ut_cases=${fail_ut_cases}$(basename "${file}")','
           done
-          
+
           echo "steps.ut.conclusion: ${{ steps.ut.conclusion }}"
           echo "FAIL_UT_CASES=${fail_ut_cases}"
           echo "FAIL_UT_CASES=${fail_ut_cases}" >> $GITHUB_OUTPUT
@@ -151,7 +163,6 @@ jobs:
         run: |
           find ./ut-report -name top.txt -exec cat {} \;
 
-
   ut-mac-x86:
     #if: ${{ !github.event.pull_request.draft }}
     if: ${{ false }}
@@ -160,7 +171,7 @@ jobs:
     name: UT Test on Darwin/x86
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
@@ -168,7 +179,11 @@ jobs:
       - name: Set up Go
         uses: matrixorigin/CI/actions/setup-env@main
         with:
-          setup-java: false
+          setup-java: true
+          go-version-file: "${{ github.workspace }}/go.mod"
+      - uses: matrixorigin/setup-hdfs@master
+        with:
+          hdfs-download-url: "https://github.com/matrixorigin/CI/releases/download/hadoop-binary-3.4.1/hadoop-3.4.1.tar.gz"
       - name: Set env
         run: |
           echo "endpoint=${{ secrets.S3ENDPOINT }}" >> $GITHUB_ENV
@@ -194,7 +209,7 @@ jobs:
     runs-on: ubuntu-22.04
     name: SCA Test on Ubuntu/x86
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
@@ -210,6 +225,7 @@ jobs:
         uses: matrixorigin/CI/actions/setup-env@main
         with:
           setup-java: false
+          go-version-file: "${{ github.workspace }}/go.mod"
       - name: Prepare ENV
         run: |
           cd $GITHUB_WORKSPACE && make clean && make config && make build

@@ -18,16 +18,16 @@ jobs:
       contents: read
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Check for any changed workflows
         id: check-for-changed-workflows
-        uses: tj-actions/changed-files@v45
+        uses: tj-actions/changed-files@v47
         with:
           files: |
             .github/workflows/**.yaml
       - name: Validate workflows
         if: steps.check-for-changed-workflows.outputs.any_changed == 'true'
-        uses: dsanders11/json-schema-validate-action@v1.2.0
+        uses: dsanders11/json-schema-validate-action@v1.4.0
         with:
           schema: https://json.schemastore.org/github-workflow.json
           files: .github/workflows/**.yaml 

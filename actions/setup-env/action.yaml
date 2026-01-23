@@ -1,24 +1,28 @@
 name: setup_env
 description: "setup build environment"
 inputs:
-  go-version:
-    description: 'version of golang'
+  go-version-file:
+    description: "path of go version file"
     required: false
-    default: "1.23.0"
+    default: ""
   setup-java:
-    description: 'version of golang'
+    description: "wether setup java"
+    required: false
+    default: "true"
+  setup-cmake:
+    description: "wethet hetupscmmkee"
     required: false
     default: "true"
   java-version:
-    description: 'version of java'
+    description: "version of java"
     required: false
     default: "8"
   java-distribution:
-    description: 'distribution of java'
+    description: "distribution of java"
     required: false
     default: "adopt"
   cache:
-    description: 'wether use cache'
+    description: "wether use cache"
     required: false
     default: "false"
 
@@ -29,11 +33,14 @@ runs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: ${{ inputs.go-version }} 
         cache: ${{ inputs.cache == 'true' }}
+        go-version-file: ${{ inputs.go-version-file }}
     - name: Set up JDK 8 for x64
       if: ${{ inputs.setup-java == 'true' }}
       uses: actions/setup-java@v4
       with:
-        java-version: ${{ inputs.java-version }} 
+        java-version: ${{ inputs.java-version }}
         distribution: ${{ inputs.java-distribution}}
+    - name: Setup CMake
+      if: ${{ inputs.setup-cmake == 'true' }}
+      uses: matrixorigin/CI/actions/setup-cmake@main
