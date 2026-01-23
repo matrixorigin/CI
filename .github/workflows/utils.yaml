@@ -216,7 +216,7 @@ jobs:
           if [ -d $THIRDPARTIES_DIR ] ; then
             make thirdparties
             CGO_CFLAGS="${CGO_CFLAGS} -I${THIRDPARTIES_INSTALL_DIR}/include"
-            CGO_LDFLAGS="${CGO_LDFLAGS} -L${THIRDPARTIES_INSTALL_DIR}/lib -Wl,-rpath,${THIRDPARTIES_INSTALL_DIR}/lib"
+            CGO_LDFLAGS="${CGO_LDFLAGS} -L${THIRDPARTIES_INSTALL_DIR}/lib -lusearch_c -Wl,-rpath,${THIRDPARTIES_INSTALL_DIR}/lib"
           fi
 
           echo "ut start"
