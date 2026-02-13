@@ -3,9 +3,6 @@ name: MatrixOne Compose Test
 on:
   workflow_call:
 
-env:
-  COMPOSE_PARALLEL_LIMIT: 1
-
 jobs:
   bvt-docker-compose-push:
     if: ${{ !github.event.pull_request.draft }}
@@ -69,8 +66,11 @@ jobs:
           # Handle various docker-compose volume formats: /test, /test:options, /test followed by space
           sed -i 's|:/test\b|:'"$GITHUB_WORKSPACE"'/test|g' ./etc/launch-tae-compose/compose.yaml
 
+          # build matrixone docker image first
+          docker build -t matrixorigin/matrixone:latest . -f ./optools/images/Dockerfile
+
           mkdir -p ${{ github.workspace }}/docker-compose-log
-          docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn up -d --build
+          docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn up -d
 
           # wait for ready
           i=1
@@ -227,8 +227,11 @@ jobs:
           # Handle various docker-compose volume formats: /test, /test:options, /test followed by space
           sed -i 's|:/test\b|:'"$GITHUB_WORKSPACE"'/test|g' ./etc/launch-tae-compose/compose.yaml
 
+          # build matrixone docker image first
+          docker build -t matrixorigin/matrixone:latest . -f ./optools/images/Dockerfile
+
           mkdir -p ${{ github.workspace }}/docker-compose-log
-          docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn up -d --build
+          docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn up -d
 
           # wait for ready
           i=1
