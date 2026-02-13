@@ -3,6 +3,9 @@ name: MatrixOne Compose Test
 on:
   workflow_call:
 
+env:
+  COMPOSE_PARALLEL_LIMIT: 1
+
 jobs:
   bvt-docker-compose-push:
     if: ${{ !github.event.pull_request.draft }}
