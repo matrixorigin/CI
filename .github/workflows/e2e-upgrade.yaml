@@ -199,7 +199,7 @@ jobs:
           mv $GITHUB_WORKSPACE/upload/workspace/mo-service-upstream $GITHUB_WORKSPACE/upload-2/
           mv $GITHUB_WORKSPACE/upload/workspace/mo-data $GITHUB_WORKSPACE/upload-2/
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
@@ -208,7 +208,7 @@ jobs:
             ${{ github.workspace }}/upload-1
           retention-days: 7
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
@@ -414,7 +414,7 @@ jobs:
           mv $GITHUB_WORKSPACE/upload/workspace/mo-service-upstream $GITHUB_WORKSPACE/upload-2/
           mv $GITHUB_WORKSPACE/upload/workspace/mo-data $GITHUB_WORKSPACE/upload-2/
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
@@ -423,7 +423,7 @@ jobs:
             ${{ github.workspace }}/upload-1
           retention-days: 7
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:

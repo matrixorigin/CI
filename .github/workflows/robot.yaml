@@ -251,7 +251,7 @@ jobs:
           echo 'Detail<<EOF' >> $GITHUB_ENV
           cat coverage_report.txt >> $GITHUB_ENV
           echo 'EOF' >> $GITHUB_ENV
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: ${{ always() && !cancelled() }}
         continue-on-error: true
         with:
@@ -259,7 +259,7 @@ jobs:
           path: |
             ${{ github.workspace }}/matrixone/code_quality_reports.zip
           retention-days: 7
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: ${{ failure() }}
         continue-on-error: true
         with:
