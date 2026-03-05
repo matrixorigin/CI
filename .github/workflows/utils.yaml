@@ -180,7 +180,7 @@ jobs:
           fi
 
           echo "ut start"
-          CGO_CFLAGS="${CGO_CFLAGS}" CGO_LDFLAGS="${CGO_LDFLAGS}" go test -json -short -v -tags matrixone_test -p 6 -covermode=set -coverprofile=${{ env.raw_ut_coverage }} -coverpkg=./... ${test_scope} | tee ${{ env.ut_report }}
+          CGO_CFLAGS="${CGO_CFLAGS}" CGO_LDFLAGS="${CGO_LDFLAGS}" go test -json -short -v -tags matrixone_test -p 6 -covermode=set -coverprofile=${{ env.raw_ut_coverage }} -coverpkg=./... ${test_scope} > ${{ env.ut_report }}
           echo "ut finished"
       - name: Analysis Fail UT Cases
         if: ${{ failure() }}
