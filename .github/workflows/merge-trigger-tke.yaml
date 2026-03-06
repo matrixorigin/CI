@@ -46,7 +46,7 @@ jobs:
           path: ./matrixone
           ref: ${{ github.event.pull_request.base.ref }}
       - name: Login to TCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: "ccr.ccs.tencentyun.com"
           username: ${{ secrets.TCR_USERNAME }}
