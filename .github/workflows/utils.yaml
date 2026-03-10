@@ -4,6 +4,12 @@ name: MatrixOne Utils CI
 on:
   workflow_call:
     secrets:
+      SYNC_APP_ID:
+        description: "GitHub App ID for private checkout"
+        required: false
+      SYNC_APP_KEY:
+        description: "GitHub App Private Key"
+        required: false
       TOKEN_ACTION:
         description: "A token passed from the caller workflow"
         required: true

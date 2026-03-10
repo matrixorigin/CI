@@ -4,6 +4,12 @@ name: MatrixOne CI
 on:
   workflow_call:
     secrets:
+      SYNC_APP_ID:
+        description: "GitHub App ID for private checkout"
+        required: false
+      SYNC_APP_KEY:
+        description: "GitHub App Private Key"
+        required: false
       S3ENDPOINT:
         description: "S3ENDPOINT For Test"
         required: true
