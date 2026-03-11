@@ -173,14 +173,13 @@ jobs:
           CGO_LDFLAGS="-L${GITHUB_WORKSPACE}/matrixone/cgo -lmo"
           THIRDPARTIES_DIR=$GITHUB_WORKSPACE/matrixone/thirdparties
           THIRDPARTIES_INSTALL_DIR=$THIRDPARTIES_DIR/install
-          if [ -d $THIRDPARTIES_DIR ] ; then
-            make thirdparties
-            CGO_CFLAGS="${CGO_CFLAGS} -I${THIRDPARTIES_INSTALL_DIR}/include"
-            CGO_LDFLAGS="${CGO_LDFLAGS} -L${THIRDPARTIES_INSTALL_DIR}/lib -lusearch_c -Wl,-rpath,${THIRDPARTIES_INSTALL_DIR}/lib -lm"
-          fi
+          make thirdparties
+          CGO_CFLAGS="${CGO_CFLAGS} -I${THIRDPARTIES_INSTALL_DIR}/include"
+          CGO_LDFLAGS="${CGO_LDFLAGS} -L${THIRDPARTIES_INSTALL_DIR}/lib -lusearch_c -Wl,-rpath,${THIRDPARTIES_INSTALL_DIR}/lib:${GITHUB_WORKSPACE}/matrixone/cgo -lm"
+          LD_LIBRARY_PATH="${THIRDPARTIES_INSTALL_DIR}/lib:${GITHUB_WORKSPACE}/matrixone/cgo"
 
           echo "ut start"
-          CGO_CFLAGS="${CGO_CFLAGS}" CGO_LDFLAGS="${CGO_LDFLAGS}" go test -json -short -v -tags matrixone_test -p 6 -covermode=set -coverprofile=${{ env.raw_ut_coverage }} -coverpkg=./... ${test_scope} > ${{ env.ut_report }}
+          LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" CGO_CFLAGS="${CGO_CFLAGS}" CGO_LDFLAGS="${CGO_LDFLAGS}" go test -json -short -v -tags matrixone_test -p 6 -covermode=set -coverprofile=${{ env.raw_ut_coverage }} -coverpkg=./... ${test_scope} > ${{ env.ut_report }}
           echo "ut finished"
       - name: Analysis Fail UT Cases
         if: ${{ failure() }}
