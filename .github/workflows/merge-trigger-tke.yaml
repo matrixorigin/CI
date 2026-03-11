@@ -27,6 +27,9 @@ on:
       TOKEN_ACTION:
         description: "TOKEN_ACTION"
         required: true
+      SYNC_APP_KEY:
+        description: "Token for checkout (optional; falls back to GITHUB_TOKEN)"
+        required: false
 
 jobs:
   docker_image_build:
@@ -43,6 +46,7 @@ jobs:
         if: ${{ always() && !cancelled() }}
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.SYNC_APP_KEY || github.token }}
           path: ./matrixone
       - name: Login to TCR
         uses: docker/login-action@v3
@@ -125,6 +129,7 @@ jobs:
         if: ${{ always() && !cancelled() }}
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.SYNC_APP_KEY || github.token }}
           path: ./matrixone
       - name: Clean TKE ENV
         run: |
@@ -292,6 +297,7 @@ jobs:
         if: ${{ always() && !cancelled() }}
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.SYNC_APP_KEY || github.token }}
           path: ./matrixone
       - name: Set JAVA PATH
         run: |

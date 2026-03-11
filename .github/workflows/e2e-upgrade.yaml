@@ -8,6 +8,10 @@ on:
         type: string
         default: "matrixorigin/matrixone"
         required: false
+    secrets:
+      SYNC_APP_KEY:
+        description: "Token for checkout (optional; falls back to GITHUB_TOKEN)"
+        required: false
 
 env:
   mo_reuse_enable_checker: true
@@ -23,6 +27,7 @@ jobs:
       - name: checkout head
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.SYNC_APP_KEY || github.token }}
           path: ./head
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
@@ -30,6 +35,7 @@ jobs:
       - name: checkout upstream
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.SYNC_APP_KEY || github.token }}
           path: ./upstream
           repository: ${{ github.event.pull_request.base.repo.full_name }}
           ref: ${{ github.event.pull_request.base.ref }}
@@ -83,6 +89,7 @@ jobs:
       - name: Clone test-tool repository
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.SYNC_APP_KEY || github.token }}
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
@@ -229,6 +236,7 @@ jobs:
       - name: Checkout Head
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.SYNC_APP_KEY || github.token }}
           path: ./head
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
@@ -243,6 +251,7 @@ jobs:
       - name: Checkout Upstream Release
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.SYNC_APP_KEY || github.token }}
           path: ./upstream
           repository: ${{ inputs.release-repo }}
           # ref: ${{ steps.get-latest-release.outputs.tag }} // restore to this line after new release includes d4051aebd6 - update bvt cases (#23317)
@@ -297,6 +306,7 @@ jobs:
       - name: Clone test-tool repository
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.SYNC_APP_KEY || github.token }}
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: 3.0-dev
@@ -363,6 +373,7 @@ jobs:
       - name: Clone test-tool repository for Head
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.SYNC_APP_KEY || github.token }}
           repository: matrixorigin/mo-tester
           path: ./mo-tester-head
           ref: main

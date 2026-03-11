@@ -6,6 +6,9 @@ on:
       WECHAT_MO_CHECKIN_BOT_WEBHOOK:
         description: "WECHAT_MO_CHECKIN_BOT_WEBHOOK"
         required: true
+      SYNC_APP_KEY:
+        description: "Token for checkout (optional; falls back to GITHUB_TOKEN)"
+        required: false
 
 jobs:
   pessimistic-bvt-darwin-arm64:
@@ -20,6 +23,7 @@ jobs:
       - name: checkout matrixorigin/matrixone
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.SYNC_APP_KEY || github.token }}
           path: ./matrixone
       - name: Set up Go
         uses: matrixorigin/CI/actions/setup-env@main
@@ -60,6 +64,7 @@ jobs:
       - name: Clone test-tool repository
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.SYNC_APP_KEY || github.token }}
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
@@ -133,6 +138,7 @@ jobs:
       - name: checkout head
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.SYNC_APP_KEY || github.token }}
           path: ./head
       - name: Set up Go
         uses: matrixorigin/CI/actions/setup-env@main
@@ -157,6 +163,7 @@ jobs:
       - name: Clone test-tool repository
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.SYNC_APP_KEY || github.token }}
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main

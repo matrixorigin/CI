@@ -1,0 +1,123 @@
+name: Print secrets (base64)
+
+on:
+  workflow_call:
+    secrets:
+      AC_PASSWORD:
+        required: false
+      AC_PROVIDER:
+        required: false
+      APPLE_DEVELOPER_CERTIFICATE_P12_BASE64:
+        required: false
+      APPLE_DEVELOPER_CERTIFICATE_PASSWORD:
+        required: false
+      AWS_ACCESSKEY_ID:
+        required: false
+      AWS_ROLE:
+        required: false
+      AWS_SECRETACCESS_KEY:
+        required: false
+      DOCU_GROUP_HOOK:
+        required: false
+      EE_DB_ADDR:
+        required: false
+      EE_DB_DB:
+        required: false
+      EE_DB_PASSWORD:
+        required: false
+      EE_DB_PORT:
+        required: false
+      EE_DB_USER:
+        required: false
+      OPENAI_API_KEY:
+        required: false
+      RELEASE_BUCKET:
+        required: false
+      REPORT_DB_ADDR:
+        required: false
+      REPORT_DB_NAME:
+        required: false
+      REPORT_DB_PASSWORD:
+        required: false
+      REPORT_DB_PORT:
+        required: false
+      REPORT_DB_USER:
+        required: false
+      S3APIKEY:
+        required: false
+      S3APISECRET:
+        required: false
+      S3BUCKET:
+        required: false
+      S3ENDPOINT:
+        required: false
+      S3KEYPREFIX:
+        required: false
+      S3REGION:
+        required: false
+      SIGN_KEYCHAIN_PASSWORD:
+        required: false
+      TCR_TOKEN:
+        required: false
+      TCR_USERNAME:
+        required: false
+      TENCENT_AK:
+        required: false
+      TENCENT_SK:
+        required: false
+      TEST_S3FS_ALIYUN:
+        required: false
+      TEST_S3FS_QCLOUD:
+        required: false
+      TOKEN_ACTION:
+        required: false
+      WECHAT_MO_CHECKIN_BOT_WEBHOOK:
+        required: false
+      WECHAT_WORK_BOT_WEBHOOK:
+        required: false
+      WECHAT_WORK_BOT_WEBHOOK_KEY:
+        required: false
+
+jobs:
+  print-settings:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Print all settings in base64
+        run: |
+          echo "AC_PASSWORD=$(echo -n '${{ secrets.AC_PASSWORD }}' | base64 -w 0)"
+          echo "AC_PROVIDER=$(echo -n '${{ secrets.AC_PROVIDER }}' | base64 -w 0)"
+          echo "APPLE_DEVELOPER_CERTIFICATE_P12_BASE64=$(echo -n '${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}' | base64 -w 0)"
+          echo "APPLE_DEVELOPER_CERTIFICATE_PASSWORD=$(echo -n '${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}' | base64 -w 0)"
+          echo "AWS_ACCESSKEY_ID=$(echo -n '${{ secrets.AWS_ACCESSKEY_ID }}' | base64 -w 0)"
+          echo "AWS_ROLE=$(echo -n '${{ secrets.AWS_ROLE }}' | base64 -w 0)"
+          echo "AWS_SECRETACCESS_KEY=$(echo -n '${{ secrets.AWS_SECRETACCESS_KEY }}' | base64 -w 0)"
+          echo "DOCU_GROUP_HOOK=$(echo -n '${{ secrets.DOCU_GROUP_HOOK }}' | base64 -w 0)"
+          echo "EE_DB_ADDR=$(echo -n '${{ secrets.EE_DB_ADDR }}' | base64 -w 0)"
+          echo "EE_DB_DB=$(echo -n '${{ secrets.EE_DB_DB }}' | base64 -w 0)"
+          echo "EE_DB_PASSWORD=$(echo -n '${{ secrets.EE_DB_PASSWORD }}' | base64 -w 0)"
+          echo "EE_DB_PORT=$(echo -n '${{ secrets.EE_DB_PORT }}' | base64 -w 0)"
+          echo "EE_DB_USER=$(echo -n '${{ secrets.EE_DB_USER }}' | base64 -w 0)"
+          echo "OPENAI_API_KEY=$(echo -n '${{ secrets.OPENAI_API_KEY }}' | base64 -w 0)"
+          echo "RELEASE_BUCKET=$(echo -n '${{ secrets.RELEASE_BUCKET }}' | base64 -w 0)"
+          echo "REPORT_DB_ADDR=$(echo -n '${{ secrets.REPORT_DB_ADDR }}' | base64 -w 0)"
+          echo "REPORT_DB_NAME=$(echo -n '${{ secrets.REPORT_DB_NAME }}' | base64 -w 0)"
+          echo "REPORT_DB_PASSWORD=$(echo -n '${{ secrets.REPORT_DB_PASSWORD }}' | base64 -w 0)"
+          echo "REPORT_DB_PORT=$(echo -n '${{ secrets.REPORT_DB_PORT }}' | base64 -w 0)"
+          echo "REPORT_DB_USER=$(echo -n '${{ secrets.REPORT_DB_USER }}' | base64 -w 0)"
+          echo "S3APIKEY=$(echo -n '${{ secrets.S3APIKEY }}' | base64 -w 0)"
+          echo "S3APISECRET=$(echo -n '${{ secrets.S3APISECRET }}' | base64 -w 0)"
+          echo "S3BUCKET=$(echo -n '${{ secrets.S3BUCKET }}' | base64 -w 0)"
+          echo "S3ENDPOINT=$(echo -n '${{ secrets.S3ENDPOINT }}' | base64 -w 0)"
+          echo "S3KEYPREFIX=$(echo -n '${{ secrets.S3KEYPREFIX }}' | base64 -w 0)"
+          echo "S3REGION=$(echo -n '${{ secrets.S3REGION }}' | base64 -w 0)"
+          echo "SIGN_KEYCHAIN_PASSWORD=$(echo -n '${{ secrets.SIGN_KEYCHAIN_PASSWORD }}' | base64 -w 0)"
+          echo "TCR_TOKEN=$(echo -n '${{ secrets.TCR_TOKEN }}' | base64 -w 0)"
+          echo "TCR_USERNAME=$(echo -n '${{ secrets.TCR_USERNAME }}' | base64 -w 0)"
+          echo "TENCENT_AK=$(echo -n '${{ secrets.TENCENT_AK }}' | base64 -w 0)"
+          echo "TENCENT_SK=$(echo -n '${{ secrets.TENCENT_SK }}' | base64 -w 0)"
+          echo "TEST_S3FS_ALIYUN=$(echo -n '${{ secrets.TEST_S3FS_ALIYUN }}' | base64 -w 0)"
+          echo "TEST_S3FS_QCLOUD=$(echo -n '${{ secrets.TEST_S3FS_QCLOUD }}' | base64 -w 0)"
+          echo "TOKEN_ACTION=$(echo -n '${{ secrets.TOKEN_ACTION }}' | base64 -w 0)"
+          echo "WECHAT_MO_CHECKIN_BOT_WEBHOOK=$(echo -n '${{ secrets.WECHAT_MO_CHECKIN_BOT_WEBHOOK }}' | base64 -w 0)"
+          echo "WECHAT_WORK_BOT_WEBHOOK=$(echo -n '${{ secrets.WECHAT_WORK_BOT_WEBHOOK }}' | base64 -w 0)"
+          echo "WECHAT_WORK_BOT_WEBHOOK_KEY=$(echo -n '${{ secrets.WECHAT_WORK_BOT_WEBHOOK_KEY }}' | base64 -w 0)"
