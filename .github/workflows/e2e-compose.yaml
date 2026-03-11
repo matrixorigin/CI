@@ -2,6 +2,10 @@ name: MatrixOne Compose Test
 
 on:
   workflow_call:
+    secrets:
+      TOKEN_ACTION:
+        description: "Token for checkout (e.g. pull from fork/private)"
+        required: false
 
 jobs:
   bvt-docker-compose-push:
@@ -24,6 +28,7 @@ jobs:
       - name: checkout
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
@@ -194,6 +199,7 @@ jobs:
       - name: checkout
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}

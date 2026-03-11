@@ -2,6 +2,10 @@ name: MatrixOne e2e upgrade CI
 
 on:
   workflow_call:
+    secrets:
+      TOKEN_ACTION:
+        description: "Token for checkout (e.g. pull from fork/private)"
+        required: false
     inputs:
       release-repo:
         description: "release version"
@@ -23,6 +27,7 @@ jobs:
       - name: checkout head
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.TOKEN_ACTION }}
           path: ./head
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
@@ -30,6 +35,7 @@ jobs:
       - name: checkout upstream
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.TOKEN_ACTION }}
           path: ./upstream
           repository: ${{ github.event.pull_request.base.repo.full_name }}
           ref: ${{ github.event.pull_request.base.ref }}
@@ -229,6 +235,7 @@ jobs:
       - name: Checkout Head
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.TOKEN_ACTION }}
           path: ./head
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
@@ -243,6 +250,7 @@ jobs:
       - name: Checkout Upstream Release
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.TOKEN_ACTION }}
           path: ./upstream
           repository: ${{ inputs.release-repo }}
           # ref: ${{ steps.get-latest-release.outputs.tag }} // restore to this line after new release includes d4051aebd6 - update bvt cases (#23317)

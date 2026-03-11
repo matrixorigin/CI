@@ -3,6 +3,9 @@ name: MO Checkin Regression(Standalone BVT)
 on:
   workflow_call:
     secrets:
+      TOKEN_ACTION:
+        description: "Token for checkout (e.g. pull from fork/private)"
+        required: false
       WECHAT_MO_CHECKIN_BOT_WEBHOOK:
         description: "WECHAT_MO_CHECKIN_BOT_WEBHOOK"
         required: true
@@ -20,6 +23,7 @@ jobs:
       - name: checkout matrixorigin/matrixone
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.TOKEN_ACTION }}
           path: ./matrixone
       - name: Set up Go
         uses: matrixorigin/CI/actions/setup-env@main
@@ -133,6 +137,7 @@ jobs:
       - name: checkout head
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.TOKEN_ACTION }}
           path: ./head
       - name: Set up Go
         uses: matrixorigin/CI/actions/setup-env@main

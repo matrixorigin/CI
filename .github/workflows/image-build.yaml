@@ -19,6 +19,9 @@ on:
         default: "p4n7f8j9"
         type: string
     secrets:
+      TOKEN_ACTION:
+        description: "Token for checkout (e.g. pull from fork/private)"
+        required: false
       DOCKERHUB_USERNAME: 
         description: 'DOCKERHUB_USERNAME'
         required: true
@@ -48,6 +51,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: 1
           
       # # github OIDC https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services
