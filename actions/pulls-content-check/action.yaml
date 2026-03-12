@@ -24,7 +24,7 @@ outputs:
     description: 'The result of this PR valid check'
 
 runs:
-  using: 'node20'
+  using: 'node24'
   main: 'dist/index.js'
 branding:
   icon: "arrow-down"
