@@ -2,12 +2,16 @@ name: MatrixOne Compose Test
 
 on:
   workflow_call:
+    secrets:
+      TOKEN_ACTION:
+        description: "Token for checkout (e.g. pull from fork/private)"
+        required: false
 
 jobs:
   bvt-docker-compose-push:
     if: ${{ !github.event.pull_request.draft }}
     environment: ci
-    runs-on: ubuntu-22.04
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
     name: multi cn e2e bvt test docker compose(Optimistic/PUSH)
     timeout-minutes: 60
 
@@ -24,6 +28,7 @@ jobs:
       - name: checkout
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
@@ -178,7 +183,7 @@ jobs:
   multi-CN-bvt-docker-compose-pessimistic:
     if: ${{ !github.event.pull_request.draft }}
     environment: ci
-    runs-on: ubuntu-22.04
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
     name: multi cn e2e bvt test docker compose(PESSIMISTIC)
     timeout-minutes: 60
     steps:
@@ -194,6 +199,7 @@ jobs:
       - name: checkout
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}

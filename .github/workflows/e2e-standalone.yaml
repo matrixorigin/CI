@@ -2,18 +2,23 @@ name: MatrixOne e2e CI(Standalone)
 
 on:
   workflow_call:
+    secrets:
+      TOKEN_ACTION:
+        description: "Token for checkout (e.g. pull from fork/private)"
+        required: false
 
 jobs:
   bvt-linux-x86:
     if: ${{ !github.event.pull_request.draft }}
     environment: ci
-    runs-on: ubuntu-22.04
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
     name: e2e BVT Test on Linux/x64(LAUNCH,Optimistic)
     timeout-minutes: 90
     steps:
       - name: checkout head
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
           path: ./head
           repository: ${{ github.event.pull_request.head.repo.full_name }}
@@ -140,7 +145,7 @@ jobs:
           retention-days: 7
 
   multi-cn-proxy-bvt-linux-x86:
-    runs-on: ubuntu-22.04
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
     name: Multi-CN e2e BVT Test on Linux/x64(LAUNCH, PROXY)
     timeout-minutes: 60
     env:
@@ -149,6 +154,7 @@ jobs:
       - name: checkout head
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.TOKEN_ACTION }}
           path: ./head
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
@@ -228,7 +234,7 @@ jobs:
           retention-days: 7
 
   pessimistic-bvt-linux-x86:
-    runs-on: ubuntu-22.04
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
     name: e2e BVT Test on Linux/x64(LAUNCH, PESSIMISTIC)
     timeout-minutes: 60
     env:
@@ -237,6 +243,7 @@ jobs:
       - name: checkout head
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
           path: ./head
           repository: ${{ github.event.pull_request.head.repo.full_name }}

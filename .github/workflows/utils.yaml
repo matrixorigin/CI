@@ -98,6 +98,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "1"
           path: ./matrixone
           repository: ${{ github.event.pull_request.head.repo.full_name }}
@@ -120,18 +121,30 @@ jobs:
           echo "$JAVA_HOME/bin" >> $GITHUB_PATH
 
       - name: Generate diff.patch
+        env:
+          GH_TOKEN: ${{ secrets.TOKEN_ACTION }}
         run: |
           cd $GITHUB_WORKSPACE/matrixone
           retry_times=5
           delay=3
-          url="https://github.com/${{ github.event.pull_request.base.repo.full_name }}/pull/${{ github.event.pull_request.number }}.diff"
+          # Only send Authorization when GH_TOKEN is set so public repos can be fetched anonymously (no 401).
+          url="https://api.github.com/repos/${{ github.event.pull_request.base.repo.full_name }}/pulls/${{ github.event.pull_request.number }}"
           for ((i = 1; i <= retry_times; i++)); do
-            echo "url: $url"
-            if curl -f --max-time 10 -L -o diff.patch $url;then
-              echo "Get diff.patch success..."
-              exit 0
+            if [ -n "${GH_TOKEN:-}" ]; then
+              if curl -f --max-time 30 -L \
+                -H "Accept: application/vnd.github.v3.diff" \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -o diff.patch "$url"; then
+                exit 0
+              fi
+            else
+              if curl -f --max-time 30 -L \
+                -H "Accept: application/vnd.github.v3.diff" \
+                -o diff.patch "$url"; then
+                exit 0
+              fi
             fi
-            echo "Get diff.patch failed...Retrying in 3 seconds..."
+            echo "Get diff.patch failed...Retrying in ${delay} seconds..."
             sleep $delay
           done
           echo "Max retries reached. Failed."
@@ -240,21 +253,6 @@ jobs:
           echo "steps.ut.conclusion: ${{ steps.ut.conclusion }}"
           echo "FAIL_UT_CASES=${fail_ut_cases}"
           echo "FAIL_UT_CASES=${fail_ut_cases}" >> $GITHUB_OUTPUT
-      - name: Insert Failed UT Cases to MOC
-        if: ${{ failure() }}
-        uses: matrixorigin/CI/actions/fail-ut-case@main
-        with:
-          action_time: ${{ steps.time.outputs.ACTION_TIME }}
-          ut_cases: ${{ steps.failed.outputs.FAIL_UT_CASES }}
-          pr_link: ${{ github.event.pull_request.html_url }}
-          action_link: ${{ steps.time.outputs.ACTION_LINK }}
-          job_time: ${{ steps.time.outputs.START_TIME }}
-          mo_host: ${{ secrets.EE_DB_ADDR }}
-          mo_port: ${{ secrets.EE_DB_PORT }}
-          mo_user: ${{ secrets.EE_DB_USER }}
-          mo_password: ${{ secrets.EE_DB_PASSWORD }}
-          mo_database: ${{ secrets.EE_DB_DB }}
-
       - name: Start BVT Test Service
         timeout-minutes: 10
         run: |
@@ -330,6 +328,7 @@ jobs:
         if: ${{ always() && !cancelled() }}
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.TOKEN_ACTION }}
           repository: matrixorigin/CI
           fetch-depth: "1"
           path: CI
@@ -349,22 +348,6 @@ jobs:
         if: ${{ always() }}
         run: |
           sudo dmesg -T
-      # - name: Check Coverage(compare with branch main)
-      #   if: ${{ always() && !cancelled() }}
-      #   #if: ${{ false }}
-      #   uses: matrixorigin/CI/actions/check-coverage@main
-      #   with:
-      #     type: open
-      #     ut_coverage_file: ${{ github.workspace }}/matrixone/ut_coverage_sort.out
-      #     bvt_coverage_file: ${{ github.workspace }}/matrixone/bvt_coverage.out
-      #     commit_id: ${{ github.event.pull_request.head.sha }}
-      #     branch: "main"
-      #     pr_number: ${{ github.event.pull_request.number }}
-      #     mo_host: ${{ secrets.EE_DB_ADDR }}
-      #     mo_port: ${{ secrets.EE_DB_PORT }}
-      #     mo_user: ${{ secrets.EE_DB_USER }}
-      #     mo_password: ${{ secrets.EE_DB_PASSWORD }}
-      #     mo_database: ${{ secrets.EE_DB_DB }}
 
       - name: Compress final result files
         id: compress_result
@@ -426,6 +409,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          token: ${{ secrets.TOKEN_ACTION }}
           path: ./matrixone
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}

@@ -35,6 +35,8 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.TOKEN_ACTION }}
       - name: Get release
         id: get_release
         uses: bruceadams/get-release@v1.3.2
@@ -101,6 +103,8 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.TOKEN_ACTION }}
       - name: Get release
         id: get_release
         uses: bruceadams/get-release@v1.3.2
@@ -168,6 +172,8 @@ jobs:
           exit 1;
       - name: Checkout source
         uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.TOKEN_ACTION }}
       - name: Get release
         id: get_release
         uses: bruceadams/get-release@v1.3.2
@@ -197,6 +203,7 @@ jobs:
       - name: Clone gon
         uses: actions/checkout@v6
         with:
+          token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "1"
           repository: matrixorigin/gon
           ref: master
@@ -270,6 +277,8 @@ jobs:
           exit 1;
       - name: Checkout source
         uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.TOKEN_ACTION }}
       - name: Get release
         id: get_release
         uses: bruceadams/get-release@v1.3.2
