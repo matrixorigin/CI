@@ -123,26 +123,34 @@ jobs:
       - name: Generate diff.patch
         env:
           GH_TOKEN: ${{ secrets.TOKEN_ACTION }}
+          IS_PUB_REPO: ${{ vars.IS_PUB_REPO }}
         run: |
           cd $GITHUB_WORKSPACE/matrixone
           retry_times=5
           delay=3
-          # Only send Authorization when GH_TOKEN is set so public repos can be fetched anonymously (no 401).
+
+          # If this is a public repo, fetch the PR diff directly from the .diff URL without token/API.
+          if [ -n "${IS_PUB_REPO:-}" ] && [ "${IS_PUB_REPO}" != "0" ] && [ "${IS_PUB_REPO}" != "false" ]; then
+            url="https://github.com/${{ github.event.pull_request.base.repo.full_name }}/pull/${{ github.event.pull_request.number }}.diff"
+            for ((i = 1; i <= retry_times; i++)); do
+              if curl -f --max-time 10 -L -o diff.patch "$url"; then
+                exit 0
+              fi
+              echo "Get diff.patch from public URL failed...Retrying in ${delay} seconds..."
+              sleep $delay
+            done
+            echo "Max retries reached (public URL). Failed."
+            exit 1
+          fi
+
+          # Private repo or no IS_PUB_REPO flag: use GitHub API with TOKEN_ACTION.
           url="https://api.github.com/repos/${{ github.event.pull_request.base.repo.full_name }}/pulls/${{ github.event.pull_request.number }}"
           for ((i = 1; i <= retry_times; i++)); do
-            if [ -n "${GH_TOKEN:-}" ]; then
-              if curl -f --max-time 30 -L \
-                -H "Accept: application/vnd.github.v3.diff" \
-                -H "Authorization: Bearer $GH_TOKEN" \
-                -o diff.patch "$url"; then
-                exit 0
-              fi
-            else
-              if curl -f --max-time 30 -L \
-                -H "Accept: application/vnd.github.v3.diff" \
-                -o diff.patch "$url"; then
-                exit 0
-              fi
+            if curl -f --max-time 10 -L \
+              -H "Accept: application/vnd.github.v3.diff" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -o diff.patch "$url"; then
+              exit 0
             fi
             echo "Get diff.patch failed...Retrying in ${delay} seconds..."
             sleep $delay
