@@ -207,8 +207,10 @@ jobs:
 
       - name: Prepare Data in cn-0
         timeout-minutes: 5
+        env:
+          TOKEN_ACTION: ${{ secrets.TOKEN_ACTION }}
         run: |
-          kubectl exec -it ${{ steps.get_mo_addr.outputs.cn_0 }} -n mo-checkin-regression-${{ github.event.pull_request.number }} -- env GITHUB_WORKSPACE=$GITHUB_WORKSPACE bash -c '
+          kubectl exec -it ${{ steps.get_mo_addr.outputs.cn_0 }} -n mo-checkin-regression-${{ github.event.pull_request.number }} -- env GITHUB_WORKSPACE=$GITHUB_WORKSPACE TOKEN_ACTION="$TOKEN_ACTION" bash -c '
           set -x;
           export https_proxy=http://proxy-service.proxy.svc.cluster.local:8001
           git config --global init.defaultBranch main
@@ -219,7 +221,7 @@ jobs:
             mkdir $path_matrixone/matrixone;
             git config --global --add safe.directory $path_matrixone/matrixone;
             cd $path_matrixone/matrixone && git init;
-            git remote add origin https://github.com/matrixorigin/matrixone.git;
+            git remote add origin https://x-access-token:${TOKEN_ACTION}@github.com/${{ github.repository }}.git;
             git config --local gc.auto 0;
             timeout 120 git -c protocol.version=2 fetch --no-tags --prune --progress --no-recurse-submodules --depth=1 origin +${{ github.sha }}:refs/remotes/origin/${{ github.ref_name }}
             git checkout --progress --force -B ${{ github.ref_name }} refs/remotes/origin/${{ github.ref_name }}
@@ -242,8 +244,10 @@ jobs:
           '
       - name: Prepare Data in cn-1
         timeout-minutes: 5
+        env:
+          TOKEN_ACTION: ${{ secrets.TOKEN_ACTION }}
         run: |
-          kubectl exec -it ${{ steps.get_mo_addr.outputs.cn_1 }} -n mo-checkin-regression-${{ github.event.pull_request.number }} -- env GITHUB_WORKSPACE=$GITHUB_WORKSPACE bash -c '
+          kubectl exec -it ${{ steps.get_mo_addr.outputs.cn_1 }} -n mo-checkin-regression-${{ github.event.pull_request.number }} -- env GITHUB_WORKSPACE=$GITHUB_WORKSPACE TOKEN_ACTION="$TOKEN_ACTION" bash -c '
           set -x;
           export https_proxy=http://proxy-service.proxy.svc.cluster.local:8001
           git config --global init.defaultBranch main
@@ -254,7 +258,7 @@ jobs:
             mkdir $path_matrixone/matrixone;
             git config --global --add safe.directory $path_matrixone/matrixone;
             cd $path_matrixone/matrixone && git init;
-            git remote add origin https://github.com/matrixorigin/matrixone.git;
+            git remote add origin https://x-access-token:${TOKEN_ACTION}@github.com/${{ github.repository }}.git;
             git config --local gc.auto 0;
             timeout 120 git -c protocol.version=2 fetch --no-tags --prune --progress --no-recurse-submodules --depth=1 origin +${{ github.sha }}:refs/remotes/origin/${{ github.ref_name }}
             git checkout --progress --force -B ${{ github.ref_name }} refs/remotes/origin/${{ github.ref_name }}
