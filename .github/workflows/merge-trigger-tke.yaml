@@ -219,7 +219,7 @@ jobs:
             mkdir $path_matrixone/matrixone;
             git config --global --add safe.directory $path_matrixone/matrixone;
             cd $path_matrixone/matrixone && git init;
-            git remote add origin https://github.com/matrixorigin/matrixone.git;
+            git remote add origin https://github.com/${{ github.repository }}.git;
             git config --local gc.auto 0;
             timeout 120 git -c protocol.version=2 fetch --no-tags --prune --progress --no-recurse-submodules --depth=1 origin +${{ github.sha }}:refs/remotes/origin/${{ github.ref_name }}
             git checkout --progress --force -B ${{ github.ref_name }} refs/remotes/origin/${{ github.ref_name }}
@@ -254,7 +254,7 @@ jobs:
             mkdir $path_matrixone/matrixone;
             git config --global --add safe.directory $path_matrixone/matrixone;
             cd $path_matrixone/matrixone && git init;
-            git remote add origin https://github.com/matrixorigin/matrixone.git;
+            git remote add origin https://github.com/${{ github.repository }}.git;
             git config --local gc.auto 0;
             timeout 120 git -c protocol.version=2 fetch --no-tags --prune --progress --no-recurse-submodules --depth=1 origin +${{ github.sha }}:refs/remotes/origin/${{ github.ref_name }}
             git checkout --progress --force -B ${{ github.ref_name }} refs/remotes/origin/${{ github.ref_name }}
