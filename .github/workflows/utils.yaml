@@ -98,7 +98,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "1"
           path: ./matrixone
           repository: ${{ github.event.pull_request.head.repo.full_name }}
@@ -417,7 +416,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          token: ${{ secrets.TOKEN_ACTION }}
           path: ./matrixone
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
