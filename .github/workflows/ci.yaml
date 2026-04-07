@@ -104,7 +104,7 @@ jobs:
         id: ut
         run: |
           cd $GITHUB_WORKSPACE && make clean && make config
-          make ut UT_PARALLEL=6 UT_TIMEOUT=40
+          make ut UT_PARALLEL=${{ vars.UT_PARALLEL || 6 }} UT_TIMEOUT=${{ vars.UT_TIMEOUT || 40 }}
       - name: Print Result(Old)
         if: ${{ always() }}
         continue-on-error: true
