@@ -221,9 +221,9 @@ jobs:
             cd $path_matrixone/matrixone && git init;
             git remote add origin https://github.com/matrixorigin/matrixone.git;
             git config --local gc.auto 0;
-            timeout 120 git -c protocol.version=2 fetch --no-tags --prune --progress --no-recurse-submodules --depth=1 origin +${{ github.sha }}:refs/remotes/origin/${{ github.ref_name }}
-            git checkout --progress --force -B ${{ github.ref_name }} refs/remotes/origin/${{ github.ref_name }}
-            if [ "$(git log -1 --format='%H')" == "${{ github.sha }}" ]; then
+            timeout 120 git -c protocol.version=2 fetch --no-tags --prune --progress --no-recurse-submodules --depth=1 origin +${{ github.event.pull_request.base.sha }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}
+            git checkout --progress --force -B ${{ github.event.pull_request.base.ref }} refs/remotes/origin/${{ github.event.pull_request.base.ref }}
+            if [ "$(git log -1 --format='%H')" == "${{ github.event.pull_request.base.sha }}" ]; then
               success="yes";
               break;
             fi
@@ -251,9 +251,9 @@ jobs:
             cd $path_matrixone/matrixone && git init;
             git remote add origin https://github.com/matrixorigin/matrixone.git;
             git config --local gc.auto 0;
-            timeout 120 git -c protocol.version=2 fetch --no-tags --prune --progress --no-recurse-submodules --depth=1 origin +${{ github.sha }}:refs/remotes/origin/${{ github.ref_name }}
-            git checkout --progress --force -B ${{ github.ref_name }} refs/remotes/origin/${{ github.ref_name }}
-            if [ "$(git log -1 --format='%H')" == "${{ github.sha }}" ]; then
+            timeout 120 git -c protocol.version=2 fetch --no-tags --prune --progress --no-recurse-submodules --depth=1 origin +${{ github.event.pull_request.base.sha }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}
+            git checkout --progress --force -B ${{ github.event.pull_request.base.ref }} refs/remotes/origin/${{ github.event.pull_request.base.ref }}
+            if [ "$(git log -1 --format='%H')" == "${{ github.event.pull_request.base.sha }}" ]; then
               success="yes";
               break;
             fi
