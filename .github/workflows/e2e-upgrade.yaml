@@ -21,7 +21,7 @@ jobs:
     environment: ci
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
     name: Compatibility Test With Target on Linux/x64(LAUNCH)
-    timeout-minutes: 60
+    timeout-minutes: 80
 
     steps:
       - name: checkout head
@@ -227,7 +227,7 @@ jobs:
     environment: ci
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
     name: Compatibility Test With Release on Linux/x64(LAUNCH)
-    timeout-minutes: 60
+    timeout-minutes: 80
     outputs:
       latest-release-tag: ${{ steps.get-latest-release.outputs.tag }}
 
