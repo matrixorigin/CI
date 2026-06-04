@@ -833,12 +833,10 @@ jobs:
         tpcc_test,
       ]
     steps:
-      - name: Check and Recreate Namespace
+      - name: Check Namespace
         if: ${{ needs.docker_image_build.result == 'success' }}
         run: |
-          if [ "$(kubectl get namespaces| grep -c mo-checkin-regression-${{ github.event.pull_request.number }})" -eq 0 ];then
-            kubectl create namespace mo-checkin-regression-${{ github.event.pull_request.number }};
-          fi
+          kubectl get namespace mo-checkin-regression-${{ github.event.pull_request.number }} || true
       - name: Check MO Status and Collect Trace
         if: ${{ needs.docker_image_build.result == 'success' }}
         continue-on-error: true
@@ -870,9 +868,18 @@ jobs:
           retention-days: 7
 
       - name: Check MO Status and Clean ENV
-        if: ${{ needs.docker_image_build.result == 'success' && needs.setup_mo_test_env.result == 'success' && needs.bvt_test.result == 'success' && needs.ssb_and_tpch_test.result == 'success' && needs.sysbench_test.result == 'success' && needs.tpcc_test.result == 'success'  }}
+        if: ${{ always() && needs.docker_image_build.result == 'success' }}
         run: |
           cd $GITHUB_WORKSPACE
+          namespace="mo-checkin-regression-${{ github.event.pull_request.number }}"
+          if ! namespace_check_error="$(kubectl get namespace "$namespace" 2>&1 >/dev/null)"; then
+            if echo "$namespace_check_error" | grep -q "NotFound"; then
+              echo "namespace $namespace does not exist, skip cleanup"
+              exit 0
+            fi
+            echo "$namespace_check_error" >&2
+            exit 1
+          fi
           kubectl -n mo-checkin-regression-${{ github.event.pull_request.number }} get pod -owide
           kubectl -n mo-checkin-regression-${{ github.event.pull_request.number }} get matrixonecluster        
           #delete matrixone cluster
