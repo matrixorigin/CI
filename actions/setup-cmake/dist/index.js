@@ -4847,12 +4847,24 @@ function getPlatformData(version, platform) {
             throw new Error(`Unsupported platform '${platformStr}'`);
     }
 }
+const MIN_LINUX_AARCH64_CMAKE = '3.22.6';
+function resolveCMakeVersion(version, platform) {
+    const platformStr = platform || process.platform;
+    if (platformStr === 'linux' && process.arch === 'arm64') {
+        const [major, minor] = version.split('.').map(Number);
+        if (major < 3 || (major === 3 && minor < 19)) {
+            core.info(`CMake ${version} has no Linux-aarch64 prebuilt binary, using ${MIN_LINUX_AARCH64_CMAKE} instead`);
+            return MIN_LINUX_AARCH64_CMAKE;
+        }
+    }
+    return version;
+}
 function cmake() {
     return __awaiter(this, void 0, void 0, function* () {
-        const version = core.getInput('cmake', {
-            required: true
-        });
         const platform = core.getInput('platform');
+        const version = resolveCMakeVersion(core.getInput('cmake', {
+            required: true
+        }), platform);
         const data = getPlatformData(version, platform);
         // Get an unique output directory name from the URL.
         const key = hashCode(data.url);
