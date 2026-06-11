@@ -22,7 +22,7 @@ jobs:
   Update_MOC:
     name: Update MOC
     environment: ci
-    runs-on: ubuntu-latest
+    runs-on: arm64-mo-shanghai-4c8g
     steps:
       - name: Update MOC Data
         uses: matrixorigin/CI/actions/check-coverage@main

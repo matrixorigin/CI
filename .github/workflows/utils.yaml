@@ -44,7 +44,7 @@ on:
 jobs:
   check_organization_user:
     environment: ci
-    runs-on: ubuntu-22.04
+    runs-on: arm64-mo-shanghai-4c8g
     outputs:
       in_org: ${{ steps.check_in_org.outputs.in_org }}
       safe_label: ${{ steps.check_safe_label.outputs.safe_label }}
@@ -94,7 +94,7 @@ jobs:
     needs: [check_organization_user]
     environment: ci
     # if you change runner, must modify L117
-    runs-on: amd64-mo-guangzhou-2xlarge16
+    runs-on: arm64-mo-shanghai-8c16g
     steps:
       - uses: actions/checkout@v6
         with:
@@ -389,7 +389,7 @@ jobs:
 
   pr-size-label:
     environment: ci
-    runs-on: ubuntu-22.04
+    runs-on: arm64-mo-shanghai-4c8g
     needs: [check_organization_user]
     steps:
       - name: size-label
@@ -413,7 +413,7 @@ jobs:
     needs:
       - check_organization_user
     environment: ci
-    runs-on: amd64-mo-guangzhou-2xlarge16
+    runs-on: arm64-mo-shanghai-8c16g
     steps:
       - uses: actions/checkout@v6
         with:

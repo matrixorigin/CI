@@ -99,7 +99,7 @@ jobs:
 
   linux-arm64-build-job:
     environment: ci
-    runs-on: arm64-mo-guangzhou-2xlarge16
+    runs-on: arm64-mo-shanghai-8c16g
     steps:
       - name: Checkout source
         uses: actions/checkout@v6
