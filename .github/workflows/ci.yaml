@@ -197,7 +197,7 @@ jobs:
 
   sca:
     environment: ci
-    runs-on: ${{ vars.SCA_RUNNER_LABEL || 'arm64-mo-shanghai-4c8g' }}
+    runs-on: ${{ vars.SCA_RUNNER_LABEL || 'arm64-mo-shanghai-8c16g' }}
     name: SCA Test on Linux/arm64
     steps:
       - uses: actions/checkout@v6
@@ -214,13 +214,13 @@ jobs:
             .github/ISSUE_TEMPLATE/*.yml
             .github/ISSUE_TEMPLATE/*.yaml
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@alter_runner_arm
         with:
           setup-java: false
           go-version-file: "${{ github.workspace }}/go.mod"
       - name: Prepare ENV
         run: |
-          cd $GITHUB_WORKSPACE && make clean && make config && make build
+          cd $GITHUB_WORKSPACE && make clean && make config && make cgo
           make install-static-check-tools
       - name: Static Code Analysis
         run: |
