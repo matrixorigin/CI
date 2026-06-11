@@ -43,4 +43,4 @@ runs:
         distribution: ${{ inputs.java-distribution}}
     - name: Setup CMake
       if: ${{ inputs.setup-cmake == 'true' }}
-      uses: ./setup-cmake
+      uses: ../setup-cmake
