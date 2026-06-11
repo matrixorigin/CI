@@ -5,9 +5,17 @@
  * Copyright (c) 2020 Luca Cappa.
  */
 import * as core from '@actions/core';
+import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as tools from '@actions/tool-cache';
+
+function runCommand(command: string, args: string[]): void {
+    const result = spawnSync(command, args, { stdio: 'inherit' });
+    if (result.status !== 0) {
+        throw new Error(`Command failed: ${command} ${args.join(' ')}`);
+    }
+}
 
 /**
  * Compute an unique number given some text.
@@ -58,6 +66,14 @@ export async function ninja(): Promise<string> {
     });
 
     const platform = getPlatform(core.getInput('platform'));
+
+    if (platform === 'linux' && process.arch === 'arm64') {
+        await core.group('Install ninja-build via apt on linux/arm64', async () => {
+            runCommand('sudo', ['apt-get', 'update', '-qq']);
+            runCommand('sudo', ['apt-get', 'install', '-y', 'ninja-build']);
+        });
+        return 'ninja';
+    }
 
     const url = `https://github.com/ninja-build/ninja/releases/download/v${version}/ninja-${platform}.zip`;
 

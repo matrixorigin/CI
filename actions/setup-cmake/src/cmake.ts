@@ -45,6 +45,31 @@ function getOutputPath(subDir: string): string {
     return path.join(process.env.RUNNER_TEMP, subDir);
 }
 
+function getCMakeArch(platformStr: string): string {
+    const arch = process.arch;
+    if (platformStr === 'linux') {
+        if (arch === 'arm64') {
+            return 'aarch64';
+        }
+        if (arch === 'x64') {
+            return 'x86_64';
+        }
+        throw new Error(`Unsupported linux arch '${arch}'`);
+    }
+
+    if (platformStr === 'mac' || platformStr === 'darwin') {
+        if (arch === 'arm64') {
+            return 'arm64';
+        }
+        if (arch === 'x64') {
+            return 'x86_64';
+        }
+        throw new Error(`Unsupported darwin arch '${arch}'`);
+    }
+
+    throw new Error(`Unsupported platform '${platformStr}' for arch detection`);
+}
+
 function getPlatformData(version: string, platform?: string): PackageInfo {
     const platformStr = platform || process.platform;
     switch (platformStr) {
@@ -58,20 +83,24 @@ function getPlatformData(version: string, platform?: string): PackageInfo {
                 url: `https://github.com/Kitware/CMake/releases/download/v${version}/cmake-${version}-win64-x64.zip`
             };
         case 'mac':
-        case 'darwin':
+        case 'darwin': {
+            const cmakeArch = getCMakeArch('darwin');
             return {
                 binPath: 'CMake.app/Contents/bin/',
                 dropSuffix: '.tar.gz',
                 extractFunction: tools.extractTar,
-                url: `https://github.com/Kitware/CMake/releases/download/v${version}/cmake-${version}-Darwin-x86_64.tar.gz`
+                url: `https://github.com/Kitware/CMake/releases/download/v${version}/cmake-${version}-Darwin-${cmakeArch}.tar.gz`
             };
-        case 'linux':
+        }
+        case 'linux': {
+            const cmakeArch = getCMakeArch('linux');
             return {
                 binPath: 'bin/',
                 dropSuffix: '.tar.gz',
                 extractFunction: tools.extractTar,
-                url: `https://github.com/Kitware/CMake/releases/download/v${version}/cmake-${version}-Linux-x86_64.tar.gz`
+                url: `https://github.com/Kitware/CMake/releases/download/v${version}/cmake-${version}-Linux-${cmakeArch}.tar.gz`
             };
+        }
         default:
             throw new Error(`Unsupported platform '${platformStr}'`);
     }

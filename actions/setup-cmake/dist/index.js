@@ -1525,6 +1525,20 @@ function ninja() {
             required: true
         });
         const platform = getPlatform(core.getInput('platform'));
+        if (platform === 'linux' && process.arch === 'arm64') {
+            yield core.group('Install ninja-build via apt on linux/arm64', () => __awaiter(this, void 0, void 0, function* () {
+                const child_process_1 = __webpack_require__(129);
+                const runCommand = (command, args) => {
+                    const result = child_process_1.spawnSync(command, args, { stdio: 'inherit' });
+                    if (result.status !== 0) {
+                        throw new Error(`Command failed: ${command} ${args.join(' ')}`);
+                    }
+                };
+                runCommand('sudo', ['apt-get', 'update', '-qq']);
+                runCommand('sudo', ['apt-get', 'install', '-y', 'ninja-build']);
+            }));
+            return 'ninja';
+        }
         const url = `https://github.com/ninja-build/ninja/releases/download/v${version}/ninja-${platform}.zip`;
         // Get an unique output directory name from the URL.
         const key = hashCode(url);
@@ -4776,6 +4790,28 @@ function getOutputPath(subDir) {
     }
     return path.join(process.env.RUNNER_TEMP, subDir);
 }
+function getCMakeArch(platformStr) {
+    const arch = process.arch;
+    if (platformStr === 'linux') {
+        if (arch === 'arm64') {
+            return 'aarch64';
+        }
+        if (arch === 'x64') {
+            return 'x86_64';
+        }
+        throw new Error(`Unsupported linux arch '${arch}'`);
+    }
+    if (platformStr === 'mac' || platformStr === 'darwin') {
+        if (arch === 'arm64') {
+            return 'arm64';
+        }
+        if (arch === 'x64') {
+            return 'x86_64';
+        }
+        throw new Error(`Unsupported darwin arch '${arch}'`);
+    }
+    throw new Error(`Unsupported platform '${platformStr}' for arch detection`);
+}
 function getPlatformData(version, platform) {
     const platformStr = platform || process.platform;
     switch (platformStr) {
@@ -4789,20 +4825,24 @@ function getPlatformData(version, platform) {
                 url: `https://github.com/Kitware/CMake/releases/download/v${version}/cmake-${version}-win64-x64.zip`
             };
         case 'mac':
-        case 'darwin':
+        case 'darwin': {
+            const cmakeArch = getCMakeArch('darwin');
             return {
                 binPath: 'CMake.app/Contents/bin/',
                 dropSuffix: '.tar.gz',
                 extractFunction: tools.extractTar,
-                url: `https://github.com/Kitware/CMake/releases/download/v${version}/cmake-${version}-Darwin-x86_64.tar.gz`
+                url: `https://github.com/Kitware/CMake/releases/download/v${version}/cmake-${version}-Darwin-${cmakeArch}.tar.gz`
             };
-        case 'linux':
+        }
+        case 'linux': {
+            const cmakeArch = getCMakeArch('linux');
             return {
                 binPath: 'bin/',
                 dropSuffix: '.tar.gz',
                 extractFunction: tools.extractTar,
-                url: `https://github.com/Kitware/CMake/releases/download/v${version}/cmake-${version}-Linux-x86_64.tar.gz`
+                url: `https://github.com/Kitware/CMake/releases/download/v${version}/cmake-${version}-Linux-${cmakeArch}.tar.gz`
             };
+        }
         default:
             throw new Error(`Unsupported platform '${platformStr}'`);
     }
