@@ -93,8 +93,8 @@ jobs:
     name: Coverage
     needs: [check_organization_user]
     environment: ci
-    # if you change runner, must modify java path config
-    runs-on: amd64-mo-shanghai-4xlarge32 #amd64-mo-guangzhou-2xlarge16
+    # if you change runner, must modify L117
+    runs-on: amd64-mo-guangzhou-2xlarge16
     steps:
       - uses: actions/checkout@v6
         with:
