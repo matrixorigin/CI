@@ -41,8 +41,8 @@ on:
 jobs:
   ut-linux-x86:
     environment: ci
-    runs-on: ${{ vars.UT_RUNNER_LABEL || 'arm64-mo-shanghai-8c16g' }}
-    name: UT Test on Linux/arm64
+    runs-on: ${{ vars.UT_RUNNER_LABEL || 'ubuntu-22.04' }}
+    name: UT Test on Ubuntu/x86
     steps:
       - name: Pre Clean Some Unneeded Images
         run: |
