@@ -80,7 +80,7 @@ jobs:
           echo "START_TIME=${time}" >> $GITHUB_OUTPUT
           echo "ACTION_LINK=${action_link}" >> $GITHUB_OUTPUT
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
@@ -177,7 +177,7 @@ jobs:
     name: UT Test on Darwin/x86
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
@@ -215,7 +215,7 @@ jobs:
     runs-on: ubuntu-22.04
     name: SCA Test on Ubuntu/x86
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
