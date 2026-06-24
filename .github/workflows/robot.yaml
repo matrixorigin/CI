@@ -19,7 +19,7 @@ jobs:
   issue-notify:
     if: github.event_name == 'issues' && github.event.action == 'assigned'
     environment: ci
-    runs-on: ubuntu-22.04
+    runs-on: arm64-mo-shanghai-4c8g
     steps:
       - name: ISSUE Triggered
         uses: chf007/action-wechat-work@master
@@ -34,7 +34,7 @@ jobs:
   check-bvt-issue:
     if: github.event_name == 'issues' && github.event.action == 'closed'
     environment: ci
-    runs-on: ubuntu-22.04
+    runs-on: arm64-mo-shanghai-4c8g
     steps:
       - name: CheckOut
         uses: actions/checkout@v6
@@ -73,7 +73,7 @@ jobs:
 
   issue-reopen:
     environment: ci
-    runs-on: ubuntu-22.04
+    runs-on: arm64-mo-shanghai-4c8g
     if: github.event_name == 'issues' && github.event.action == 'closed'
     steps:
       - name: Reopen Issue
@@ -86,7 +86,7 @@ jobs:
 
   issue_close_check:
     environment: ci
-    runs-on: ubuntu-22.04
+    runs-on: arm64-mo-shanghai-4c8g
     if: github.event_name == 'issues' && github.event.action == 'closed'
     steps:
       - uses: guguducken/pull-issue-reviewer@issue_close_check_with_name
@@ -293,7 +293,7 @@ jobs:
 
   issue-rm-labels:
     environment: ci
-    runs-on: ubuntu-latest
+    runs-on: arm64-mo-shanghai-4c8g
     if: ${{ github.event_name == 'issues' && github.event.action == 'assigned' }}
     steps:
       - name: Remove Labels
@@ -311,7 +311,7 @@ jobs:
 
   reopen-without-PR:
     environment: ci
-    runs-on: ubuntu-latest
+    runs-on: arm64-mo-shanghai-4c8g
     if: ${{ github.event_name == 'issues' && github.event.action == 'closed' && github.actor != 'sukki37' && github.actor != 'Ariznawlll' }}
     steps:
       - name: Reopen Issue Without PR
