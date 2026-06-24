@@ -214,7 +214,7 @@ jobs:
             .github/ISSUE_TEMPLATE/*.yml
             .github/ISSUE_TEMPLATE/*.yaml
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@alter_runner_arm
+        uses: matrixorigin/CI/actions/setup-env@main
         with:
           setup-java: false
           go-version-file: "${{ github.workspace }}/go.mod"
