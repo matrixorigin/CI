@@ -94,7 +94,7 @@ jobs:
     needs: [check_organization_user]
     environment: ci
     # if you change runner, must modify L117
-    runs-on: arm64-mo-shanghai-8c16g
+    runs-on: amd64-mo-guangzhou-2xlarge16
     steps:
       - uses: actions/checkout@v6
         with:
@@ -413,7 +413,7 @@ jobs:
     needs:
       - check_organization_user
     environment: ci
-    runs-on: arm64-mo-shanghai-8c16g
+    runs-on: amd64-mo-guangzhou-2xlarge16
     steps:
       - uses: actions/checkout@v6
         with:

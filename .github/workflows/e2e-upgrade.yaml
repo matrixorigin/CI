@@ -19,7 +19,7 @@ env:
 jobs:
   upgrade-ci-target-linux-amd64:
     environment: ci
-    runs-on: ${{ vars.RUNNER_LABEL || 'arm64-mo-shanghai-8c16g' }}
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
     name: Compatibility Test With Target on Linux/x64(LAUNCH)
     timeout-minutes: 80
 
@@ -225,7 +225,7 @@ jobs:
 
   upgrade-ci-release-linux-amd64:
     environment: ci
-    runs-on: ${{ vars.RUNNER_LABEL || 'arm64-mo-shanghai-8c16g' }}
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
     name: Compatibility Test With Release on Linux/x64(LAUNCH)
     timeout-minutes: 80
     outputs:
