@@ -51,6 +51,13 @@ jobs:
           echo "[cn.txn]" >> ./etc/launch/cn.toml
           echo "  enable-leak-check = 1" >> ./etc/launch/cn.toml
           echo '  max-active-ages = "2m"'>> ./etc/launch/cn.toml
+          # Mirror the cn.txn settings into the legacy v1/launch (DISK) config,
+          # which the upgrade run launches with when ./etc/v1/launch is present.
+          if [ -f ./etc/v1/launch/cn.toml ]; then
+            echo "[cn.txn]" >> ./etc/v1/launch/cn.toml
+            echo "  enable-leak-check = 1" >> ./etc/v1/launch/cn.toml
+            echo '  max-active-ages = "2m"'>> ./etc/v1/launch/cn.toml
+          fi
 
       - name: Build MatrixOne for head
         run: |
@@ -141,15 +148,19 @@ jobs:
           if [ -d "$GITHUB_WORKSPACE/head/lib" ]; then
             mv $GITHUB_WORKSPACE/head/lib .
           fi
-          echo "==============cn configuration of upstram=============="
-          cat ./etc/launch/cn.toml
-          echo "==============tn configuration of upstram=============="
-          if [[ -f ./etc/launch/dn.toml ]]; then
-            cat ./etc/launch/dn.toml     
-          else 
-            cat ./etc/launch/tn.toml     
+          # mo-data was written by the upstream binary in DISK (CRC) format.
+          # If head ships the legacy ./etc/v1/<profile> (DISK) config, launch
+          # with it so the new binary mounts the existing cluster in its
+          # original on-disk format. Fresh deploys use ./etc/<profile> (DISK-V2).
+          PROFILE=launch
+          LAUNCH_DIR=$PROFILE
+          if [ -d ./etc/v1/$PROFILE ]; then
+            LAUNCH_DIR=v1/$PROFILE
           fi
-          ./optools/run_bvt.sh $GITHUB_WORKSPACE/workspace launch;
+          echo "==============head launch dir: $LAUNCH_DIR=============="
+          echo "============== head launch configs =============="
+          cat ./etc/$LAUNCH_DIR/*.toml 2>/dev/null || true
+          ./optools/run_bvt.sh $GITHUB_WORKSPACE/workspace $LAUNCH_DIR;
           sleep 60;
       - name: Update BVT SQL Timeout for Head Branch
         run: |
@@ -267,6 +278,13 @@ jobs:
           echo "[cn.txn]" >> ./etc/launch/cn.toml
           echo "  enable-leak-check = 1" >> ./etc/launch/cn.toml
           echo '  max-active-ages = "2m"'>> ./etc/launch/cn.toml
+          # Mirror the cn.txn settings into the legacy v1/launch (DISK) config,
+          # which the upgrade run launches with when ./etc/v1/launch is present.
+          if [ -f ./etc/v1/launch/cn.toml ]; then
+            echo "[cn.txn]" >> ./etc/v1/launch/cn.toml
+            echo "  enable-leak-check = 1" >> ./etc/v1/launch/cn.toml
+            echo '  max-active-ages = "2m"'>> ./etc/v1/launch/cn.toml
+          fi
 
       - name: Build MatrixOne for head
         run: |
@@ -358,15 +376,19 @@ jobs:
           if [ -d "$GITHUB_WORKSPACE/head/lib" ]; then
             mv $GITHUB_WORKSPACE/head/lib .
           fi
-          echo "==============cn configuration of upstram=============="
-          cat ./etc/launch/cn.toml
-          echo "==============tn configuration of upstram=============="
-          if [[ -f ./etc/launch/dn.toml ]]; then
-            cat ./etc/launch/dn.toml     
-          else 
-            cat ./etc/launch/tn.toml     
+          # mo-data was written by the upstream binary in DISK (CRC) format.
+          # If head ships the legacy ./etc/v1/<profile> (DISK) config, launch
+          # with it so the new binary mounts the existing cluster in its
+          # original on-disk format. Fresh deploys use ./etc/<profile> (DISK-V2).
+          PROFILE=launch
+          LAUNCH_DIR=$PROFILE
+          if [ -d ./etc/v1/$PROFILE ]; then
+            LAUNCH_DIR=v1/$PROFILE
           fi
-          ./optools/run_bvt.sh $GITHUB_WORKSPACE/workspace launch;
+          echo "==============head launch dir: $LAUNCH_DIR=============="
+          echo "============== head launch configs =============="
+          cat ./etc/$LAUNCH_DIR/*.toml 2>/dev/null || true
+          ./optools/run_bvt.sh $GITHUB_WORKSPACE/workspace $LAUNCH_DIR;
           sleep 60;
       - name: Clone test-tool repository for Head
         uses: actions/checkout@v6
