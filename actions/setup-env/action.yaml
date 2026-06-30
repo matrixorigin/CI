@@ -43,4 +43,4 @@ runs:
         distribution: ${{ inputs.java-distribution}}
     - name: Setup CMake
       if: ${{ inputs.setup-cmake == 'true' }}
-      uses: matrixorigin/CI/actions/setup-cmake@main
+      uses: matrixorigin/CI/actions/setup-cmake@fix_arm_runner

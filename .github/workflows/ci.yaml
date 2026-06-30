@@ -214,13 +214,20 @@ jobs:
             .github/ISSUE_TEMPLATE/*.yml
             .github/ISSUE_TEMPLATE/*.yaml
       - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@fix_arm_runner
         with:
           setup-java: false
+          setup-cmake: true
           go-version-file: "${{ github.workspace }}/go.mod"
       - name: Prepare ENV
         run: |
-          cd $GITHUB_WORKSPACE && make clean && make config && make cgo
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          make clean && make config
+          make thirdparties
+          test -f thirdparties/install/include/xxhash.h
+          test -f thirdparties/install/include/usearch.h
+          make cgo
           make install-static-check-tools
       - name: Static Code Analysis
         run: |
