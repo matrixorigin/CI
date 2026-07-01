@@ -170,7 +170,7 @@ jobs:
           echo "bvt_html_coverage='bvt_coverage.html'" >> $GITHUB_ENV
           echo "ut_excluded_pkg='pkg/pb|pkg/sql/parsers/goyacc|yaccpar'" >> $GITHUB_ENV
           echo "bvt_excluded_pkg='pkg/pb|yaccpar'" >> $GITHUB_ENV
-          echo 'GOPROXY=http://goproxy.goproxy.svc.cluster.local|https://goproxy.cn|https://proxy.golang.org|direct' >> $GITHUB_ENV
+          echo 'GOPROXY=http://goproxy.goproxy.svc.cluster.local,https://goproxy.cn,https://proxy.golang.org' >> $GITHUB_ENV
 
 #      - uses: matrixorigin/setup-hdfs@master
 #        with:
@@ -475,7 +475,7 @@ jobs:
 
       - name: Set Variables and PATH
         run: |
-          echo 'GOPROXY=http://goproxy.goproxy.svc.cluster.local|https://goproxy.cn|https://proxy.golang.org|direct' >> $GITHUB_ENV
+          echo 'GOPROXY=http://goproxy.goproxy.svc.cluster.local,https://goproxy.cn,https://proxy.golang.org' >> $GITHUB_ENV
           echo "$JAVA_HOME/bin" >> $GITHUB_PATH
 
       - name: Build MatrixOne Service
