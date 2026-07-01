@@ -220,6 +220,8 @@ jobs:
           setup-cmake: true
           go-version-file: "${{ github.workspace }}/go.mod"
       - name: Prepare ENV
+        env:
+          GOPROXY: https://proxy.golang.com.cn,https://goproxy.cn,https://proxy.golang.org,direct
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
