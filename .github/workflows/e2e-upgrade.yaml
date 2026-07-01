@@ -137,6 +137,14 @@ jobs:
           mv mo-service mo-service-upstream
           mv mo-service.log upstream-mo-service.log
           rm -rf mo-data/etl
+          # Detect the on-disk format the upstream binary wrote, from its config
+          # (./etc is still the upstream config at this point). DISK-V2 present
+          # means the existing mo-data is raw; otherwise it is legacy DISK (CRC).
+          PROFILE=launch
+          UPSTREAM_V2=0
+          if grep -rq "DISK-V2" ./etc/$PROFILE 2>/dev/null; then
+            UPSTREAM_V2=1
+          fi
           rm -rf etc
           rm -rf optools
           rm -rf lib
@@ -148,16 +156,14 @@ jobs:
           if [ -d "$GITHUB_WORKSPACE/head/lib" ]; then
             mv $GITHUB_WORKSPACE/head/lib .
           fi
-          # mo-data was written by the upstream binary in DISK (CRC) format.
-          # If head ships the legacy ./etc/v1/<profile> (DISK) config, launch
-          # with it so the new binary mounts the existing cluster in its
-          # original on-disk format. Fresh deploys use ./etc/<profile> (DISK-V2).
-          PROFILE=launch
+          # Launch head with the config matching the upstream data format:
+          #   upstream DISK-V2 -> ./etc/$PROFILE      (the DISK-V2 default)
+          #   upstream DISK    -> ./etc/v1/$PROFILE   (legacy DISK, when head ships it)
           LAUNCH_DIR=$PROFILE
-          if [ -d ./etc/v1/$PROFILE ]; then
+          if [ "$UPSTREAM_V2" = "0" ] && [ -d ./etc/v1/$PROFILE ]; then
             LAUNCH_DIR=v1/$PROFILE
           fi
-          echo "==============head launch dir: $LAUNCH_DIR=============="
+          echo "==============head launch dir: $LAUNCH_DIR (upstream DISK-V2=$UPSTREAM_V2)=============="
           echo "============== head launch configs =============="
           cat ./etc/$LAUNCH_DIR/*.toml 2>/dev/null || true
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/workspace $LAUNCH_DIR;
@@ -364,6 +370,14 @@ jobs:
           mv mo-service mo-service-upstream
           mv mo-service.log upstream-mo-service.log
           rm -rf mo-data/etl
+          # Detect the on-disk format the upstream binary wrote, from its config
+          # (./etc is still the upstream config at this point). DISK-V2 present
+          # means the existing mo-data is raw; otherwise it is legacy DISK (CRC).
+          PROFILE=launch
+          UPSTREAM_V2=0
+          if grep -rq "DISK-V2" ./etc/$PROFILE 2>/dev/null; then
+            UPSTREAM_V2=1
+          fi
           rm -rf etc
           rm -rf optools
           rm -rf lib
@@ -376,16 +390,14 @@ jobs:
           if [ -d "$GITHUB_WORKSPACE/head/lib" ]; then
             mv $GITHUB_WORKSPACE/head/lib .
           fi
-          # mo-data was written by the upstream binary in DISK (CRC) format.
-          # If head ships the legacy ./etc/v1/<profile> (DISK) config, launch
-          # with it so the new binary mounts the existing cluster in its
-          # original on-disk format. Fresh deploys use ./etc/<profile> (DISK-V2).
-          PROFILE=launch
+          # Launch head with the config matching the upstream data format:
+          #   upstream DISK-V2 -> ./etc/$PROFILE      (the DISK-V2 default)
+          #   upstream DISK    -> ./etc/v1/$PROFILE   (legacy DISK, when head ships it)
           LAUNCH_DIR=$PROFILE
-          if [ -d ./etc/v1/$PROFILE ]; then
+          if [ "$UPSTREAM_V2" = "0" ] && [ -d ./etc/v1/$PROFILE ]; then
             LAUNCH_DIR=v1/$PROFILE
           fi
-          echo "==============head launch dir: $LAUNCH_DIR=============="
+          echo "==============head launch dir: $LAUNCH_DIR (upstream DISK-V2=$UPSTREAM_V2)=============="
           echo "============== head launch configs =============="
           cat ./etc/$LAUNCH_DIR/*.toml 2>/dev/null || true
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/workspace $LAUNCH_DIR;
