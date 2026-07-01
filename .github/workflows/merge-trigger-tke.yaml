@@ -41,7 +41,7 @@ jobs:
     steps:
       - name: Clone Repo Matrixorigin/Matrixone
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           path: ./matrixone
@@ -124,7 +124,7 @@ jobs:
     steps:
       - name: Clone Repo Matrixorigin/Matrixone
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           path: ./matrixone
@@ -288,14 +288,14 @@ jobs:
     steps:
       - name: Clone MO-Tester
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
           ref: main
       - name: Clone matrixone Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           path: ./matrixone
@@ -341,7 +341,7 @@ jobs:
     steps:
       - name: Clone mo-load-data Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: matrixorigin/mo-load-data
           token: ${{secrets.TOKEN_ACTION}}
@@ -350,7 +350,7 @@ jobs:
 
       - name: Clone mo-ssb Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: matrixorigin/mo-ssb
           token: ${{secrets.TOKEN_ACTION}}
@@ -359,7 +359,7 @@ jobs:
 
       - name: Clone mo-tpch Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: matrixorigin/mo-tpch
           token: ${{secrets.TOKEN_ACTION}}
@@ -367,7 +367,7 @@ jobs:
           ref: main
       - name: Clone mo-night-regression Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: matrixorigin/mo-nightly-regression
           token: ${{secrets.TOKEN_ACTION}}
@@ -562,7 +562,7 @@ jobs:
     steps:
       - name: Clone mo-load Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: matrixorigin/mo-load
           token: ${{secrets.TOKEN_ACTION}}
@@ -570,7 +570,7 @@ jobs:
           ref: "1.0"
       - name: Clone mo-night-regression Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: matrixorigin/mo-nightly-regression
           token: ${{secrets.TOKEN_ACTION}}
@@ -683,7 +683,7 @@ jobs:
     steps:
       - name: Clone mo-load-data Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: matrixorigin/mo-load-data
           token: ${{secrets.TOKEN_ACTION}}
@@ -692,7 +692,7 @@ jobs:
 
       - name: Clone mo-tpcc Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: matrixorigin/mo-tpcc
           token: ${{secrets.TOKEN_ACTION}}
@@ -700,7 +700,7 @@ jobs:
           ref: main
       - name: Clone mo-night-regression Repo
         if: ${{ always() && !cancelled() }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: matrixorigin/mo-nightly-regression
           token: ${{secrets.TOKEN_ACTION}}

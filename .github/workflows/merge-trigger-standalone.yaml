@@ -21,7 +21,7 @@ jobs:
       mo_reuse_enable_checker: true
     steps:
       - name: checkout matrixorigin/matrixone
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           path: ./matrixone
@@ -62,7 +62,7 @@ jobs:
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/matrixone launch
 
       - name: Clone test-tool repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
@@ -135,7 +135,7 @@ jobs:
       mo_reuse_enable_checker: true
     steps:
       - name: checkout head
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           path: ./head
@@ -160,7 +160,7 @@ jobs:
           cd $GITHUB_WORKSPACE/head
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/head launch
       - name: Clone test-tool repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester

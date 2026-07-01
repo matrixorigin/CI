@@ -25,7 +25,7 @@ jobs:
 
     steps:
       - name: checkout head
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           path: ./head
@@ -33,7 +33,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
 
       - name: checkout upstream
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           path: ./upstream
@@ -101,7 +101,7 @@ jobs:
           sleep 60;
 
       - name: Clone test-tool repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
@@ -257,7 +257,7 @@ jobs:
 
     steps:
       - name: Checkout Head
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           path: ./head
@@ -272,7 +272,7 @@ jobs:
           echo "tag=$LATEST_RELEASE_TAG" >> $GITHUB_OUTPUT
 
       - name: Checkout Upstream Release
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           path: ./upstream
@@ -341,7 +341,7 @@ jobs:
           sleep 60;
 
       - name: Clone test-tool repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
@@ -417,7 +417,7 @@ jobs:
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/workspace $LAUNCH_DIR;
           sleep 60;
       - name: Clone test-tool repository for Head
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester-head

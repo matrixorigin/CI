@@ -37,7 +37,7 @@ jobs:
     runs-on: arm64-mo-shanghai-4c8g
     steps:
       - name: CheckOut
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.TOKEN_ACTION }}
 
@@ -102,7 +102,7 @@ jobs:
     environment: ci
     runs-on: amd64-mo-shanghai-4xlarge32
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
@@ -126,7 +126,7 @@ jobs:
           echo 'GOPROXY=http://goproxy.goproxy.svc.cluster.local|https://goproxy.cn|direct' >> $GITHUB_ENV
           echo "$JAVA_HOME/bin" >> $GITHUB_PATH;
       - name: Clone test-tool repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: matrixorigin/mo-tester
           path: ./mo-tester
