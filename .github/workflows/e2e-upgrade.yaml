@@ -40,7 +40,7 @@ jobs:
           repository: ${{ github.event.pull_request.base.repo.full_name }}
           ref: ${{ github.event.pull_request.base.ref }}
 
-      - name: Set up Go And Java
+      - name: Set up Go And Java for head
         uses: matrixorigin/CI/actions/setup-env@main
         with:
           go-version-file: "${{ github.workspace }}/head/go.mod"
@@ -63,6 +63,13 @@ jobs:
           echo "[cn.txn]" >> ./etc/launch/cn.toml
           echo "  enable-leak-check = 1" >> ./etc/launch/cn.toml
           echo '  max-active-ages = "2m"'>> ./etc/launch/cn.toml
+
+      - name: Set up Go for upstream
+        uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          setup-java: false
+          setup-cmake: false
+          go-version-file: "${{ github.workspace }}/upstream/go.mod"
 
       - name: Build MatrixOne for upstream
         run: |
@@ -256,7 +263,7 @@ jobs:
           # ref: ${{ steps.get-latest-release.outputs.tag }} // restore to this line after new release includes d4051aebd6 - update bvt cases (#23317)
           ref: v3.0.4-hotfix
 
-      - name: Set up Go And Java
+      - name: Set up Go And Java for head
         uses: matrixorigin/CI/actions/setup-env@main
         with:
           go-version-file: "${{ github.workspace }}/head/go.mod"
@@ -279,6 +286,13 @@ jobs:
           echo "[cn.txn]" >> ./etc/launch/cn.toml
           echo "  enable-leak-check = 1" >> ./etc/launch/cn.toml
           echo '  max-active-ages = "2m"'>> ./etc/launch/cn.toml
+
+      - name: Set up Go for upstream release
+        uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          setup-java: false
+          setup-cmake: false
+          go-version-file: "${{ github.workspace }}/upstream/go.mod"
 
       - name: Build MatrixOne for upstream release
         run: |
