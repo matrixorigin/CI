@@ -230,7 +230,19 @@ jobs:
           test -f thirdparties/install/include/xxhash.h
           test -f thirdparties/install/include/usearch.h
           make cgo
-          make install-static-check-tools
+          retry_times=5
+          delay=10
+          for ((i = 1; i <= retry_times; i++)); do
+            if make install-static-check-tools; then
+              break
+            fi
+            if [ "$i" -eq "$retry_times" ]; then
+              echo "install-static-check-tools failed after ${retry_times} attempts"
+              exit 1
+            fi
+            echo "install-static-check-tools attempt ${i} failed, retrying in ${delay}s..."
+            sleep $delay
+          done
       - name: Static Code Analysis
         run: |
           cd $GITHUB_WORKSPACE
