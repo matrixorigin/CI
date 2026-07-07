@@ -246,7 +246,6 @@ jobs:
 
       - name: Checkout CI repository for UT summary
         if: ${{ failure() && !cancelled() }}
-        continue-on-error: true
         uses: actions/checkout@v6
         with:
           token: ${{ secrets.TOKEN_ACTION }}
@@ -256,7 +255,6 @@ jobs:
       - name: Summarize Unit Test Failure
         if: ${{ failure() && !cancelled() }}
         id: failed
-        continue-on-error: true
         run: |
           cd "$GITHUB_WORKSPACE"
           SUMMARY_FILE="$GITHUB_WORKSPACE/ut-failure-summary.md"
@@ -286,13 +284,26 @@ jobs:
               cat "${file}" | tee -a "$SUMMARY_FILE"
               fail_ut_cases=${fail_ut_cases}$(basename "${file}")','
             done
-            echo "steps.ut.conclusion: ${{ steps.ut.conclusion }}"
+            echo "steps.ut.conclusion: ${{ steps.ut.outcome }}"
             echo "FAIL_UT_CASES=${fail_ut_cases}"
-            echo "FAIL_UT_CASES=${fail_ut_cases}" >> $GITHUB_OUTPUT
+            echo "FAIL_UT_CASES=${fail_ut_cases}" >> "$GITHUB_OUTPUT"
           fi
 
           if [ -n "${GITHUB_STEP_SUMMARY:-}" ] && [ -s "$SUMMARY_FILE" ]; then
             cat "$SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          ut_failed=0
+          if [ "${{ steps.ut.outcome }}" = "failure" ]; then
+            ut_failed=1
+          fi
+          if grep -qE "^- build failures: \`[1-9][0-9]*\`" "$SUMMARY_FILE" || \
+             grep -qE "^- failed test/package events: \`[1-9][0-9]*\`" "$SUMMARY_FILE"; then
+            ut_failed=1
+          fi
+          if [ "$ut_failed" -eq 1 ]; then
+            echo "Unit tests failed; see summary above"
+            exit 1
           fi
 
       - name: Start BVT Test Service
