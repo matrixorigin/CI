@@ -205,27 +205,6 @@ jobs:
           echo "ut start"
           CGO_CFLAGS="${CGO_CFLAGS}" CGO_LDFLAGS="${CGO_LDFLAGS}" go test -json -short -v -tags matrixone_test -p 6 -covermode=set -coverprofile=${{ env.raw_ut_coverage }} -coverpkg="${cover_pkgs}" ${test_scope} > ${{ env.ut_report }}
           echo "ut finished"
-      - name: Checkout CI repository for UT summary
-        if: ${{ failure() && !cancelled() }}
-        continue-on-error: true
-        uses: actions/checkout@v6
-        with:
-          token: ${{ secrets.TOKEN_ACTION }}
-          repository: matrixorigin/CI
-          fetch-depth: "1"
-          path: CI
-      - name: Summarize Unit Test Failure
-        if: ${{ failure() && !cancelled() }}
-        continue-on-error: true
-        run: |
-          if [ ! -f "$GITHUB_WORKSPACE/matrixone/${{ env.ut_report }}" ]; then
-            echo "UT report not found, skip summary"
-            exit 0
-          fi
-          python "$GITHUB_WORKSPACE/CI/scripts/summarize_ut_report.py" "$GITHUB_WORKSPACE/matrixone/${{ env.ut_report }}" | tee "$GITHUB_WORKSPACE/ut-failure-summary.md"
-          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-            cat "$GITHUB_WORKSPACE/ut-failure-summary.md" >> "$GITHUB_STEP_SUMMARY"
-          fi
       - name: Analysis Fail UT Cases
         if: ${{ failure() }}
         run: |
@@ -265,29 +244,57 @@ jobs:
           echo "START_TIME=${time}" >> $GITHUB_OUTPUT
           echo "ACTION_LINK=${action_link}" >> $GITHUB_OUTPUT
 
-      - name: Get failed ut cases
-        if: ${{ failure() }}
+      - name: Checkout CI repository for UT summary
+        if: ${{ failure() && !cancelled() }}
+        continue-on-error: true
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.TOKEN_ACTION }}
+          repository: matrixorigin/CI
+          fetch-depth: "1"
+          path: CI
+      - name: Summarize Unit Test Failure
+        if: ${{ failure() && !cancelled() }}
         id: failed
+        continue-on-error: true
         run: |
-          cd $GITHUB_WORKSPACE;
-          if [ "$(find ./ut-report/failed | wc -l)" -le "2" ]; then
-            exit 0;
-          fi
-          find ./ut-report/failed -name result.txt -exec cat {} \;
-          fail_ut_cases=''
-          files=($(find ./ut-report/failed | grep -v result.txt))
-          for file in "${files[@]}"; do
-            if [ -d "$file" ]; then
-              continue
-            fi
-            echo "============================================"
-            cat "${file}";
-            fail_ut_cases=${fail_ut_cases}$(basename "${file}")','
-          done
+          cd "$GITHUB_WORKSPACE"
+          SUMMARY_FILE="$GITHUB_WORKSPACE/ut-failure-summary.md"
+          : > "$SUMMARY_FILE"
 
-          echo "steps.ut.conclusion: ${{ steps.ut.conclusion }}"
-          echo "FAIL_UT_CASES=${fail_ut_cases}"
-          echo "FAIL_UT_CASES=${fail_ut_cases}" >> $GITHUB_OUTPUT
+          if [ -f "$GITHUB_WORKSPACE/matrixone/${{ env.ut_report }}" ] && [ -f "$GITHUB_WORKSPACE/CI/scripts/summarize_ut_report.py" ]; then
+            python "$GITHUB_WORKSPACE/CI/scripts/summarize_ut_report.py" "$GITHUB_WORKSPACE/matrixone/${{ env.ut_report }}" | tee -a "$SUMMARY_FILE"
+          elif [ ! -f "$GITHUB_WORKSPACE/matrixone/${{ env.ut_report }}" ]; then
+            echo "UT report not found, skip JSON summary" | tee -a "$SUMMARY_FILE"
+          else
+            echo "UT summary script not found, skip JSON summary" | tee -a "$SUMMARY_FILE"
+          fi
+
+          if [ -d "./ut-report/failed" ] && [ "$(find ./ut-report/failed | wc -l)" -gt "2" ]; then
+            echo "" | tee -a "$SUMMARY_FILE"
+            echo "# Failed UT Cases (go-ut-analysis)" | tee -a "$SUMMARY_FILE"
+            echo "" | tee -a "$SUMMARY_FILE"
+            find ./ut-report/failed -name result.txt -exec cat {} \; | tee -a "$SUMMARY_FILE"
+            fail_ut_cases=''
+            files=($(find ./ut-report/failed | grep -v result.txt))
+            for file in "${files[@]}"; do
+              if [ -d "$file" ]; then
+                continue
+              fi
+              echo "" | tee -a "$SUMMARY_FILE"
+              echo "============================================" | tee -a "$SUMMARY_FILE"
+              cat "${file}" | tee -a "$SUMMARY_FILE"
+              fail_ut_cases=${fail_ut_cases}$(basename "${file}")','
+            done
+            echo "steps.ut.conclusion: ${{ steps.ut.conclusion }}"
+            echo "FAIL_UT_CASES=${fail_ut_cases}"
+            echo "FAIL_UT_CASES=${fail_ut_cases}" >> $GITHUB_OUTPUT
+          fi
+
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ] && [ -s "$SUMMARY_FILE" ]; then
+            cat "$SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Start BVT Test Service
         timeout-minutes: 10
         run: |
