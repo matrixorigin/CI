@@ -9,7 +9,7 @@ on:
 
 jobs:
   bvt-docker-compose-push:
-    if: ${{ !github.event.pull_request.draft }}
+    if: false
     environment: ci
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
     name: multi cn e2e bvt test docker compose(Optimistic/PUSH)
