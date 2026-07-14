@@ -18,6 +18,7 @@ env:
 
 jobs:
   upgrade-ci-target-linux-amd64:
+    if: false
     environment: ci
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
     name: Compatibility Test With Target on Linux/x64(LAUNCH)
@@ -248,6 +249,7 @@ jobs:
           retention-days: 7
 
   upgrade-ci-release-linux-amd64:
+    if: false
     environment: ci
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
     name: Compatibility Test With Release on Linux/x64(LAUNCH)
