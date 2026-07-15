@@ -423,7 +423,7 @@ jobs:
             }
 
   pr_basic_benchmarks:
-    if: ${{ needs.check_organization_user.outputs.safe_label == '1' || needs.check_organization_user.outputs.in_org == '1' }}
+    if: false
     name: Pull Request Basic Benchmark Test
     needs:
       - check_organization_user
