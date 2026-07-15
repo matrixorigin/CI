@@ -49,13 +49,35 @@ jobs:
     steps:
       - name: Pre Clean Some Unneeded Images
         run: |
-          sudo df -h /*
+          echo "===== disk before clean ====="
+          sudo df -h /
+          sudo df -h /mnt || true
           echo "========================================="
-          sudo docker builder prune -f -a;
-          sudo docker images | grep -v REPOSITORY | awk '{system("sudo docker rmi "$1":"$2)}';
-          sudo docker volume prune -f;
+          # Free space on GitHub-hosted root disk (preinstalled toolchains)
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+          sudo rm -rf /usr/local/.ghcup || true
+          sudo rm -rf /usr/share/swift || true
+          sudo rm -rf /usr/local/share/powershell || true
+          sudo docker builder prune -f -a || true
+          sudo docker images | grep -v REPOSITORY | awk '{system("sudo docker rmi "$1":"$2)}' || true
+          sudo docker volume prune -f || true
+          sudo docker system prune -af || true
           echo "========================================="
-          sudo df -h /*
+          # Redirect TAE UT workspace (/tmp/runner-ut-workspace) to /mnt which has more free space
+          if [ -d /mnt ]; then
+            sudo mkdir -p /mnt/runner-ut-workspace
+            sudo chmod 777 /mnt/runner-ut-workspace
+            sudo rm -rf /tmp/runner-ut-workspace
+            sudo ln -sfn /mnt/runner-ut-workspace /tmp/runner-ut-workspace
+            ls -ld /tmp/runner-ut-workspace
+          fi
+          echo "===== disk after clean ====="
+          sudo df -h /
+          sudo df -h /mnt || true
+          df -h /tmp
 
       - name: Parse Time for moc
         id: time
