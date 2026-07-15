@@ -325,11 +325,14 @@ jobs:
           repository: ${{ github.repository }} # 获取执行该作业的仓库名 形如: matrixorigin/CI
           issue_number: ${{ github.event.issue.number }} # 获取当前操作的issue number
           assignees: "sukki37" #issue指定分配对象
-          LABELS: "no-pr-linked" #相关自定义label配置 形如 label1,label2
-          LABELS_NEED: "kind/bug,Bug fix,bug_fix,bug/ut" # 指定需要排查的标签 label1,label2,...
+          labels: "no-pr-linked" #相关自定义label配置 形如 label1,label2
+          labels_need: "kind/bug,Bug fix,bug_fix,bug/ut" # 指定需要排查的标签 label1,label2,...
         uses: matrixorigin/CI/actions/reopen-without-PR@main
       - name: WeChat Work notification
-        if: ${{ failure() || cancelled() || steps.step1.outputs.send == 'yes' }}
+        # Only notify when the action confirms no linked PR (send=yes).
+        # Do NOT notify on failure/cancelled — runner/action errors were
+        # falsely alerting "Close Issue Without PR" for issues that already have PRs.
+        if: ${{ steps.step1.outputs.send == 'yes' }}
         id: notification
         uses: chf007/action-wechat-work@master
         env:
