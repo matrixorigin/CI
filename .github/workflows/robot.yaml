@@ -311,7 +311,7 @@ jobs:
 
   reopen-without-PR:
     environment: ci
-    runs-on: arm64-mo-shanghai-4c8g
+    runs-on: ubuntu-22.04
     if: ${{ github.event_name == 'issues' && github.event.action == 'closed' && github.actor != 'sukki37' && github.actor != 'Ariznawlll' }}
     steps:
       - name: Reopen Issue Without PR
