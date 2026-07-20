@@ -99,7 +99,7 @@ jobs:
           echo "START_TIME=${time}" >> $GITHUB_OUTPUT
           echo "ACTION_LINK=${action_link}" >> $GITHUB_OUTPUT
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
@@ -183,7 +183,7 @@ jobs:
     name: UT Test on Darwin/x86
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
@@ -222,7 +222,7 @@ jobs:
     runs-on: ${{ vars.SCA_RUNNER_LABEL || 'arm64-mo-shanghai-8c16g' }}
     name: SCA Test on Linux/arm64
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
