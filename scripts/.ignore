@@ -24,6 +24,9 @@ pkg/common/morpc/examples/*
 *pkg/sql/compile/remoterun.go
 *pkg/sql/compile/remoterunClient.go
 *pkg/sql/compile/remoterunServer.go
+*pkg/vectorindex/metric/distance_func_amd64.go
 *pkg/vectorindex/metric/distance_func_narrow_amd64.go
+*pkg/vectorindex/metric/distance_func_narrow_avx2_amd64.go
 *pkg/vectorindex/metric/distance_func_narrow_f16_amd64.go
 *pkg/vectorindex/metric/distance_func_narrow_int8_amd64.go
+*pkg/vectorindex/metric/distance_func_narrow_uint8_amd64.go
