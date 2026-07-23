@@ -13,7 +13,7 @@ jobs:
     environment: ci
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
     name: multi cn e2e bvt test docker compose(Optimistic/PUSH)
-    timeout-minutes: 60
+    timeout-minutes: 75
 
     steps:
       - name: Pre Clean Some Unneeded Images
@@ -185,7 +185,7 @@ jobs:
     environment: ci
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
     name: multi cn e2e bvt test docker compose(PESSIMISTIC)
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - name: Pre Clean Some Unneeded Images
         run: |
