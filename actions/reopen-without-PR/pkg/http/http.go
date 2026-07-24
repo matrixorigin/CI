@@ -16,6 +16,8 @@ func Request(method, url, token string, data io.Reader, contentType string) (res
 		return nil, err
 	}
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}

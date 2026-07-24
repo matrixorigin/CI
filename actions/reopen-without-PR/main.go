@@ -67,7 +67,11 @@ func task() {
 
 	// 转交给sukki37
 	assigneeURL := fmt.Sprintf("%s/repos/%s/issues/%d/assignees", baseURL, repo, issueNumber)
-	assigneeData := map[string]string{"assignees": assignees}
+	assigneeList := strings.Split(assignees, ",")
+	for i := range assigneeList {
+		assigneeList[i] = strings.TrimSpace(assigneeList[i])
+	}
+	assigneeData := map[string][]string{"assignees": assigneeList}
 	jsonData, err = json.Marshal(assigneeData)
 	if err != nil {
 		panic("json.Marshal assigneeData failed")
@@ -77,7 +81,9 @@ func task() {
 		panic(fmt.Sprintf("Error creating assignee request:%v", err))
 	}
 	if assigneeResp.StatusCode != 201 {
-		panic(fmt.Sprintf("Failed to assign a problem to a specified person,assigneeStatusCode:%d", assigneeResp.StatusCode))
+		body, _ := io.ReadAll(assigneeResp.Body)
+		assigneeResp.Body.Close()
+		panic(fmt.Sprintf("Failed to assign a problem to a specified person,assigneeStatusCode:%d body:%s", assigneeResp.StatusCode, string(body)))
 	}
 	defer assigneeResp.Body.Close()
 	fmt.Printf("Issue labeled and assigned to %s successfully.\n", assignees)
@@ -201,14 +207,15 @@ func main() {
 			panic(fmt.Sprintf("issueUrl http.Request failed,err:%v", err))
 		}
 		if issueResp.StatusCode != http.StatusOK {
-			panic(fmt.Sprintf("connect issueUrl failed,resp.statusCode:%d", issueResp.StatusCode))
+			body, _ := io.ReadAll(issueResp.Body)
+			issueResp.Body.Close()
+			panic(fmt.Sprintf("connect issueUrl failed,resp.statusCode:%d body:%s", issueResp.StatusCode, string(body)))
 		}
-		defer issueResp.Body.Close()
 		fmt.Printf("get issue %d info successfully.\n", issueNumber)
 
-		// 解析响应内容（这里省略了具体的解析过程，你可以根据需要自行处理）
 		// 检查issue是否有关联的pull request
 		body, err := io.ReadAll(issueResp.Body)
+		issueResp.Body.Close()
 		if err != nil {
 			panic(fmt.Sprintf("Error reading issue response body:%v", err))
 		}
@@ -224,16 +231,35 @@ func main() {
 		}
 
 		for _, data := range issueData {
-			dataMap := data.(map[string]interface{})
-			typeEvent := dataMap["event"]
-			if typeEvent == "cross-referenced" {
-				sourceMap := dataMap["source"].(map[string]interface{})
-				issueMap := sourceMap["issue"].(map[string]interface{})
-				_, ok := issueMap["pull_request"]
-				if ok {
+			dataMap, ok := data.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			switch dataMap["event"] {
+			case "cross-referenced":
+				// PR/issue that mentioned this issue in body or commit.
+				sourceMap, _ := dataMap["source"].(map[string]interface{})
+				issueMap, _ := sourceMap["issue"].(map[string]interface{})
+				if _, ok := issueMap["pull_request"]; ok {
 					hasRelatedPR = true
-					break
 				}
+			case "connected":
+				// Linked via Development sidebar (Fixes/Closes) or manual link.
+				// subject may be an issue or a PR; only count PRs.
+				if subject, ok := dataMap["subject"].(map[string]interface{}); ok {
+					if _, isPR := subject["pull_request"]; isPR {
+						hasRelatedPR = true
+					}
+				} else if source, ok := dataMap["source"].(map[string]interface{}); ok {
+					if issueMap, ok := source["issue"].(map[string]interface{}); ok {
+						if _, isPR := issueMap["pull_request"]; isPR {
+							hasRelatedPR = true
+						}
+					}
+				}
+			}
+			if hasRelatedPR {
+				break
 			}
 		}
 		if hasRelatedPR {
