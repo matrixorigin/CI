@@ -2,6 +2,15 @@ name: MatrixOne Compose Test
 
 on:
   workflow_call:
+    inputs:
+      repository:
+        description: "Optional MatrixOne repository override for manual integration runs"
+        required: false
+        type: string
+      ref:
+        description: "Optional MatrixOne ref override for manual integration runs"
+        required: false
+        type: string
     secrets:
       TOKEN_ACTION:
         description: "Token for checkout (e.g. pull from fork/private)"
@@ -30,8 +39,8 @@ jobs:
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ inputs.repository || github.event.pull_request.head.repo.full_name }}
+          ref: ${{ inputs.ref || github.event.pull_request.head.ref }}
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
         with:
@@ -181,7 +190,7 @@ jobs:
           retention-days: 7
 
   multi-CN-bvt-docker-compose-pessimistic:
-    if: ${{ !github.event.pull_request.draft }}
+    if: ${{ inputs.repository != '' || !github.event.pull_request.draft }}
     environment: ci
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
     name: multi cn e2e bvt test docker compose(PESSIMISTIC)
@@ -201,8 +210,8 @@ jobs:
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ inputs.repository || github.event.pull_request.head.repo.full_name }}
+          ref: ${{ inputs.ref || github.event.pull_request.head.ref }}
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
         with:

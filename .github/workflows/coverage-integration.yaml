@@ -1,0 +1,50 @@
+name: MatrixOne coverage integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: MatrixOne repository to test
+        required: true
+        default: matrixorigin/matrixone
+        type: string
+      ref:
+        description: MatrixOne branch or SHA to test
+        required: true
+        type: string
+      pr_number:
+        description: MatrixOne PR number used for the diff coverage gate
+        required: true
+        type: string
+
+jobs:
+  matrixone-ci:
+    uses: ./.github/workflows/ci.yaml
+    with:
+      repository: ${{ inputs.repository }}
+      ref: ${{ inputs.ref }}
+    secrets: inherit
+
+  matrixone-compose-ci:
+    uses: ./.github/workflows/e2e-compose.yaml
+    with:
+      repository: ${{ inputs.repository }}
+      ref: ${{ inputs.ref }}
+    secrets: inherit
+
+  matrixone-standalone-ci:
+    uses: ./.github/workflows/e2e-standalone.yaml
+    with:
+      repository: ${{ inputs.repository }}
+      ref: ${{ inputs.ref }}
+    secrets: inherit
+
+  matrixone-utils-ci:
+    needs: [matrixone-ci, matrixone-compose-ci, matrixone-standalone-ci]
+    if: ${{ always() }}
+    uses: ./.github/workflows/utils.yaml
+    with:
+      repository: ${{ inputs.repository }}
+      ref: ${{ inputs.ref }}
+      pr_number: ${{ inputs.pr_number }}
+    secrets: inherit

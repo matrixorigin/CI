@@ -3,6 +3,19 @@ name: MatrixOne Utils CI
 
 on:
   workflow_call:
+    inputs:
+      repository:
+        description: "Optional MatrixOne repository override for manual integration runs"
+        required: false
+        type: string
+      ref:
+        description: "Optional MatrixOne ref override for manual integration runs"
+        required: false
+        type: string
+      pr_number:
+        description: "Optional MatrixOne PR number override for manual integration runs"
+        required: false
+        type: string
     secrets:
       TOKEN_ACTION:
         description: "A token passed from the caller workflow"
@@ -52,6 +65,10 @@ jobs:
       - id: check_in_org
         name: CHECK ORGANIZATION USER
         run: |
+          if [ -n "${{ inputs.repository }}" ]; then
+            echo "in_org=1" >> $GITHUB_OUTPUT;
+            exit 0;
+          fi
           PAGE=1;
           PER_PAGE=100;
           USER_IN_ORG="0";
@@ -77,6 +94,10 @@ jobs:
       - id: check_safe_label
         name: CHECK PULL REQUEST LABEL
         run: |
+          if [ -n "${{ inputs.repository }}" ]; then
+            echo "safe_label=1" >> $GITHUB_OUTPUT;
+            exit 0;
+          fi
           labels=$(curl -L \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${{ secrets.TOKEN_ACTION }}" \
@@ -103,8 +124,8 @@ jobs:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "1"
           path: ./matrixone
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ inputs.repository || github.event.pull_request.head.repo.full_name }}
+          ref: ${{ inputs.ref || github.event.pull_request.head.ref }}
       - name: Clone test-tool repository
         uses: actions/checkout@v6
         with:
@@ -463,8 +484,8 @@ jobs:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "1"
           path: ./matrixone
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ inputs.repository || github.event.pull_request.head.repo.full_name }}
+          ref: ${{ inputs.ref || github.event.pull_request.head.ref }}
 
       - name: Checkout coverage parser
         uses: actions/checkout@v6
@@ -487,15 +508,17 @@ jobs:
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE/matrixone"
+          pr_repo="${{ inputs.repository || github.event.pull_request.base.repo.full_name }}"
+          pr_number="${{ inputs.pr_number || github.event.pull_request.number }}"
           if [ -n "${IS_PUB_REPO:-}" ] && [ "${IS_PUB_REPO}" != "0" ] && [ "${IS_PUB_REPO}" != "false" ]; then
             curl -fL --retry 5 --retry-delay 3 \
-              "https://github.com/${{ github.event.pull_request.base.repo.full_name }}/pull/${{ github.event.pull_request.number }}.diff" \
+              "https://github.com/${pr_repo}/pull/${pr_number}.diff" \
               -o diff.patch
           else
             curl -fL --retry 5 --retry-delay 3 \
               -H "Accept: application/vnd.github.v3.diff" \
               -H "Authorization: Bearer ${GH_TOKEN}" \
-              "https://api.github.com/repos/${{ github.event.pull_request.base.repo.full_name }}/pulls/${{ github.event.pull_request.number }}" \
+              "https://api.github.com/repos/${pr_repo}/pulls/${pr_number}" \
               -o diff.patch
           fi
 
@@ -558,6 +581,7 @@ jobs:
           retention-days: 7
 
   pr-size-label:
+    if: ${{ inputs.repository == '' }}
     environment: ci
     runs-on: arm64-mo-shanghai-4c8g
     needs: [check_organization_user]
