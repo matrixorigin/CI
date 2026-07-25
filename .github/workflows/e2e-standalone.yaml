@@ -29,7 +29,7 @@ jobs:
           go-version-file: "${{ github.workspace }}/head/go.mod"
       - name: Build MatrixOne
         run: |
-          cd $GITHUB_WORKSPACE/head && make clean && make build
+          cd $GITHUB_WORKSPACE/head && make clean && make GOBUILD_OPT=-cover build
           git rev-parse --short HEAD
       - name: echo config
         run: |
@@ -182,6 +182,9 @@ jobs:
         run: |
           sudo cat /etc/hosts | grep '127.0.0.1';
           cd $GITHUB_WORKSPACE/head
+          export GOCOVERDIR="${RUNNER_TEMP}/bvt-coverage-proxy"
+          rm -rf "${GOCOVERDIR}"
+          mkdir -p "${GOCOVERDIR}"
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/head launch-dynamic-with-proxy -with-proxy
       - name: Clone test-tool repository
         uses: actions/checkout@v6
@@ -214,6 +217,39 @@ jobs:
           cd $GITHUB_WORKSPACE/head
           # one node in one Process
           ./optools/check_log_count.sh 1000 60 # {count threshold} {metric collected interval}
+      - name: Generate proxy BVT coverage profile
+        if: ${{ always() && !cancelled() }}
+        run: |
+          set -uo pipefail
+          coverage_dir="${RUNNER_TEMP}/bvt-coverage-proxy"
+          pids=$(pgrep -f 'mo-service' || true)
+          if [ -n "${pids}" ]; then
+            kill -TERM ${pids} || true
+          fi
+          for _ in $(seq 1 30); do
+            pgrep -f 'mo-service' >/dev/null || break
+            sleep 1
+          done
+          pids=$(pgrep -f 'mo-service' || true)
+          if [ -n "${pids}" ]; then
+            kill -KILL ${pids} || true
+          fi
+          if go tool covdata textfmt -i="${coverage_dir}" -o "${coverage_dir}/bvt-proxy.out"; then
+            test -s "${coverage_dir}/bvt-proxy.out"
+          elif [ "${{ steps.bvt_on_pr_version.conclusion }}" = "success" ]; then
+            echo "::error::failed to generate proxy BVT coverage after a successful BVT"
+            exit 1
+          else
+            echo "::warning::proxy BVT coverage unavailable because BVT did not finish successfully"
+          fi
+      - name: Upload proxy BVT coverage
+        if: ${{ always() && !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: bvt-coverage-proxy
+          path: ${{ runner.temp }}/bvt-coverage-proxy/bvt-proxy.out
+          if-no-files-found: warn
+          retention-days: 7
       - name: generate upload files
         if: ${{ always() }}
         continue-on-error: true
@@ -256,7 +292,7 @@ jobs:
 
       - name: Build MatrixOne
         run: |
-          cd $GITHUB_WORKSPACE/head && make clean && make build
+          cd $GITHUB_WORKSPACE/head && make clean && make GOBUILD_OPT=-cover build
           git rev-parse --short HEAD
 
       - name: Add cn.txn
@@ -275,6 +311,9 @@ jobs:
       - name: Start MO
         run: |
           cd $GITHUB_WORKSPACE/head
+          export GOCOVERDIR="${RUNNER_TEMP}/bvt-coverage-pessimistic"
+          rm -rf "${GOCOVERDIR}"
+          mkdir -p "${GOCOVERDIR}"
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/head launch
 
       - name: Clone test-tool repository
@@ -311,10 +350,39 @@ jobs:
           # 4 nodes in one Process
           ./optools/check_log_count.sh 4000 60 # {count threshold} {metric collected interval}
 
-      - name: Check mo-service Status
+      - name: Generate pessimistic BVT coverage profile
         if: ${{ always() && !cancelled() }}
         run: |
-          if [ "$(ps -ef | grep 'mo-service' | grep -v "grep" | wc -l)" -gt 0 ]; then pkill -9 mo-service; else echo 'current mo-service has already crashed'; exit 1; fi
+          set -uo pipefail
+          coverage_dir="${RUNNER_TEMP}/bvt-coverage-pessimistic"
+          pids=$(pgrep -f 'mo-service' || true)
+          if [ -n "${pids}" ]; then
+            kill -TERM ${pids} || true
+          fi
+          for _ in $(seq 1 30); do
+            pgrep -f 'mo-service' >/dev/null || break
+            sleep 1
+          done
+          pids=$(pgrep -f 'mo-service' || true)
+          if [ -n "${pids}" ]; then
+            kill -KILL ${pids} || true
+          fi
+          if go tool covdata textfmt -i="${coverage_dir}" -o "${coverage_dir}/bvt-pessimistic.out"; then
+            test -s "${coverage_dir}/bvt-pessimistic.out"
+          elif [ "${{ steps.bvt_on_pr_version.conclusion }}" = "success" ]; then
+            echo "::error::failed to generate pessimistic BVT coverage after a successful BVT"
+            exit 1
+          else
+            echo "::warning::pessimistic BVT coverage unavailable because BVT did not finish successfully"
+          fi
+      - name: Upload pessimistic BVT coverage
+        if: ${{ always() && !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: bvt-coverage-pessimistic
+          path: ${{ runner.temp }}/bvt-coverage-pessimistic/bvt-pessimistic.out
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: generate upload files
         if: ${{ always() }}

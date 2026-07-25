@@ -122,8 +122,20 @@ jobs:
       - name: Unit Testing
         id: ut
         run: |
+          set -euo pipefail
+          coverage_dir="${RUNNER_TEMP}/race-ut-coverage"
+          rm -rf "${coverage_dir}"
+          mkdir -p "${coverage_dir}"
           cd $GITHUB_WORKSPACE && make clean && make config
-          make ut UT_PARALLEL=${{ vars.UT_PARALLEL || 6 }} UT_TIMEOUT=${{ vars.UT_TIMEOUT || 40 }}
+          make ut UT_PARALLEL=${{ vars.UT_PARALLEL || 6 }} UT_TIMEOUT=${{ vars.UT_TIMEOUT || 40 }} UT_COVERAGE_DIR="${coverage_dir}"
+      - name: Upload race UT coverage
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: race-ut-coverage
+          path: ${{ runner.temp }}/race-ut-coverage/ut-race-*.out
+          if-no-files-found: error
+          retention-days: 7
       - name: Print Result(Old)
         if: ${{ always() }}
         continue-on-error: true

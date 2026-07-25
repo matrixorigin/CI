@@ -224,6 +224,10 @@ jobs:
       - name: docker compose launch-multi-cn
         timeout-minutes: 10
         run: |
+          set -euo pipefail
+          export GOCOVERDIR="${GITHUB_WORKSPACE}/coverage"
+          rm -rf "${GOCOVERDIR}"
+          mkdir -p "${GOCOVERDIR}"
           cat ./etc/launch-tae-compose/config/cn-0.toml
           cat ./etc/launch-tae-compose/config/cn-1.toml
           cat ./etc/launch-tae-compose/config/tn.toml
@@ -234,7 +238,7 @@ jobs:
           sed -i 's|:/test\b|:'"$GITHUB_WORKSPACE"'/test|g' ./etc/launch-tae-compose/compose.yaml
 
           # build matrixone docker image first
-          docker build -t matrixorigin/matrixone:latest . -f ./optools/images/Dockerfile
+          docker build --build-arg GOBUILD_OPT=-cover -t matrixorigin/matrixone:latest . -f ./optools/images/Dockerfile
 
           mkdir -p ${{ github.workspace }}/docker-compose-log
           docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn up -d
@@ -331,6 +335,30 @@ jobs:
           docker ps
           docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn down --remove-orphans
           docker volume rm launch-tae-compose_minio_storage
+
+      - name: Generate compose BVT coverage profile
+        if: ${{ always() && !cancelled() }}
+        run: |
+          set -uo pipefail
+          coverage_dir="${GITHUB_WORKSPACE}/coverage"
+          sudo chown -R "$(id -u):$(id -g)" "${coverage_dir}" || true
+          if go tool covdata textfmt -i="${coverage_dir}" -o "${coverage_dir}/bvt-compose.out"; then
+            test -s "${coverage_dir}/bvt-compose.out"
+          elif [ "${{ steps.bvt_on_pr_version.conclusion }}" = "success" ]; then
+            echo "::error::failed to generate compose BVT coverage after a successful BVT"
+            exit 1
+          else
+            echo "::warning::compose BVT coverage unavailable because BVT did not finish successfully"
+          fi
+
+      - name: Upload compose BVT coverage
+        if: ${{ always() && !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: bvt-coverage-compose
+          path: ${{ github.workspace }}/coverage/bvt-compose.out
+          if-no-files-found: warn
+          retention-days: 7
 
       - uses: actions/upload-artifact@v7
         if: ${{ failure() || cancelled()}}

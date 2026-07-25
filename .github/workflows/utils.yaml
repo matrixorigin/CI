@@ -88,9 +88,11 @@ jobs:
             echo "safe_label=0" >> $GITHUB_OUTPUT;
           fi
 
-  pr_coverage:
-    if: ${{ needs.check_organization_user.outputs.safe_label == '1' || needs.check_organization_user.outputs.in_org == '1' }}
-    name: Coverage
+  pr_coverage_legacy_disabled:
+    # Replaced by coverage_merge below. Keep the old definition temporarily so
+    # its failure-analysis history remains easy to compare during rollout.
+    if: ${{ github.event.pull_request.number == 0 }}
+    name: Legacy serial coverage (disabled)
     needs: [check_organization_user]
     environment: ci
     # if you change runner, must modify L117
@@ -447,6 +449,112 @@ jobs:
             ${{ github.workspace }}/matrixone/pr_coverage.html
             ${{ github.workspace }}/pr_coverage.out
             ${{ github.workspace }}/merged_coverage.out
+          retention-days: 7
+
+  coverage_merge:
+    if: ${{ needs.check_organization_user.outputs.safe_label == '1' || needs.check_organization_user.outputs.in_org == '1' }}
+    name: Coverage
+    needs: [check_organization_user]
+    environment: ci
+    runs-on: amd64-mo-guangzhou-2xlarge16
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          token: ${{ secrets.TOKEN_ACTION }}
+          fetch-depth: "1"
+          path: ./matrixone
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Checkout coverage parser
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.TOKEN_ACTION }}
+          repository: matrixorigin/CI
+          fetch-depth: "1"
+          path: ./CI
+
+      - name: Set up Go
+        uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          setup-java: false
+          go-version-file: "${{ github.workspace }}/matrixone/go.mod"
+
+      - name: Generate diff.patch
+        env:
+          GH_TOKEN: ${{ secrets.TOKEN_ACTION }}
+          IS_PUB_REPO: ${{ vars.IS_PUB_REPO }}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/matrixone"
+          if [ -n "${IS_PUB_REPO:-}" ] && [ "${IS_PUB_REPO}" != "0" ] && [ "${IS_PUB_REPO}" != "false" ]; then
+            curl -fL --retry 5 --retry-delay 3 \
+              "https://github.com/${{ github.event.pull_request.base.repo.full_name }}/pull/${{ github.event.pull_request.number }}.diff" \
+              -o diff.patch
+          else
+            curl -fL --retry 5 --retry-delay 3 \
+              -H "Accept: application/vnd.github.v3.diff" \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              "https://api.github.com/repos/${{ github.event.pull_request.base.repo.full_name }}/pulls/${{ github.event.pull_request.number }}" \
+              -o diff.patch
+          fi
+
+      - name: Download test coverage artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: '*-coverage*'
+          merge-multiple: true
+          path: ${{ github.workspace }}/coverage-artifacts
+
+      - name: Merge UT and BVT coverage
+        run: |
+          set -euo pipefail
+          artifact_dir="$GITHUB_WORKSPACE/coverage-artifacts"
+          processed_dir="$GITHUB_WORKSPACE/coverage-processed"
+          mkdir -p "${processed_dir}"
+
+          mapfile -t ut_profiles < <(find "${artifact_dir}" -type f -name 'ut-race-*.out' | sort)
+          mapfile -t bvt_profiles < <(find "${artifact_dir}" -type f -name 'bvt-*.out' | sort)
+          if [ "${#ut_profiles[@]}" -eq 0 ]; then
+            echo "::error::race UT coverage artifact is missing"
+            exit 1
+          fi
+          if [ "${#bvt_profiles[@]}" -lt 3 ]; then
+            echo "::error::expected coverage from proxy, pessimistic, and compose BVT; found ${#bvt_profiles[@]} profile(s)"
+            find "${artifact_dir}" -type f -print || true
+            exit 1
+          fi
+
+          coverage_files=()
+          for profile in "${ut_profiles[@]}"; do
+            output="${processed_dir}/$(basename "${profile}")"
+            grep -Ev 'pkg/pb|pkg/sql/parsers/goyacc|yaccpar' "${profile}" > "${output}" || true
+            test -s "${output}"
+            coverage_files+=("${output}")
+          done
+          for profile in "${bvt_profiles[@]}"; do
+            output="${processed_dir}/$(basename "${profile}")"
+            grep -Ev 'pkg/pb|yaccpar' "${profile}" > "${output}" || true
+            test -s "${output}"
+            coverage_files+=("${output}")
+          done
+
+          cd "$GITHUB_WORKSPACE"
+          python CI/scripts/parse_coverage.py \
+            -coverage_files "${coverage_files[@]}" \
+            -diff_path "$GITHUB_WORKSPACE/matrixone/diff.patch"
+          go tool cover -o "$GITHUB_WORKSPACE/matrixone/pr_coverage.html" -html=merged_coverage.out
+
+      - name: Upload coverage result
+        if: ${{ always() && !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-result-files
+          path: |
+            ${{ github.workspace }}/matrixone/pr_coverage.html
+            ${{ github.workspace }}/pr_coverage.out
+            ${{ github.workspace }}/merged_coverage.out
+            ${{ github.workspace }}/coverage-artifacts
           retention-days: 7
 
   pr-size-label:
