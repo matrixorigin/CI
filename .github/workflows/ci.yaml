@@ -110,9 +110,6 @@ jobs:
         with:
           setup-java: true
           go-version-file: "${{ github.workspace }}/go.mod"
-      - uses: matrixorigin/setup-hdfs@master
-        with:
-          hdfs-download-url: "https://github.com/matrixorigin/CI/releases/download/hadoop-binary-3.4.1/hadoop-3.4.1.tar.gz"
       - name: Set env
         run: |
           echo "endpoint=${{ secrets.S3ENDPOINT }}" >> $GITHUB_ENV
