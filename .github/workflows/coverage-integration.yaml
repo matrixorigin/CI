@@ -1,6 +1,9 @@
 name: MatrixOne coverage integration
 
 on:
+  push:
+    branches:
+      - xp/ci-race-coverage-artifacts
   workflow_dispatch:
     inputs:
       repository:
@@ -21,22 +24,22 @@ jobs:
   matrixone-ci:
     uses: ./.github/workflows/ci.yaml
     with:
-      repository: ${{ inputs.repository }}
-      ref: ${{ inputs.ref }}
+      repository: ${{ inputs.repository || 'matrixorigin/matrixone' }}
+      ref: ${{ inputs.ref || 'xp/ci-race-coverage-artifacts' }}
     secrets: inherit
 
   matrixone-compose-ci:
     uses: ./.github/workflows/e2e-compose.yaml
     with:
-      repository: ${{ inputs.repository }}
-      ref: ${{ inputs.ref }}
+      repository: ${{ inputs.repository || 'matrixorigin/matrixone' }}
+      ref: ${{ inputs.ref || 'xp/ci-race-coverage-artifacts' }}
     secrets: inherit
 
   matrixone-standalone-ci:
     uses: ./.github/workflows/e2e-standalone.yaml
     with:
-      repository: ${{ inputs.repository }}
-      ref: ${{ inputs.ref }}
+      repository: ${{ inputs.repository || 'matrixorigin/matrixone' }}
+      ref: ${{ inputs.ref || 'xp/ci-race-coverage-artifacts' }}
     secrets: inherit
 
   matrixone-utils-ci:
@@ -44,7 +47,7 @@ jobs:
     if: ${{ always() }}
     uses: ./.github/workflows/utils.yaml
     with:
-      repository: ${{ inputs.repository }}
-      ref: ${{ inputs.ref }}
-      pr_number: ${{ inputs.pr_number }}
+      repository: ${{ inputs.repository || 'matrixorigin/matrixone' }}
+      ref: ${{ inputs.ref || 'xp/ci-race-coverage-artifacts' }}
+      pr_number: ${{ inputs.pr_number || '26179' }}
     secrets: inherit
