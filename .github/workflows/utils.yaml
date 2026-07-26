@@ -120,7 +120,7 @@ jobs:
     name: Coverage
     needs: [check_organization_user]
     environment: ci
-    # if you change runner, must modify L117
+    # If the runner/workspace layout changes, also update setup-env's go-version-file below.
     runs-on: amd64-mo-guangzhou-2xlarge16
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
