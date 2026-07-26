@@ -347,9 +347,17 @@ jobs:
           sed -i 's/  port: [0-9]*/  port: 12345/g' "$GITHUB_WORKSPACE/mo-tester/mo.yml"
           cat "$GITHUB_WORKSPACE/mo-tester/mo.yml"
           echo "============================="
-          pr_number="${{ github.event.pull_request.number }}"
-          bvt_group=$(( (pr_number + 1) % 3 ))
-          echo "Pessimistic BVT: PR ${pr_number}, group ${bvt_group}"
+          run_id="${{ github.run_id }}"
+          run_attempt="${{ github.run_attempt }}"
+          group_seed=$(( (run_id + run_attempt) % 3 ))
+          bvt_group=$(( (group_seed + 1) % 3 ))
+          echo "Pessimistic BVT: run ${run_id}, attempt ${run_attempt}, seed ${group_seed}, group ${bvt_group}"
+          {
+            echo "### BVT group assignment"
+            echo "- CI run: ${run_id}, attempt: ${run_attempt}"
+            echo "- Deployment: native launch (PESSIMISTIC)"
+            echo "- Group: ${bvt_group}"
+          } >> "$GITHUB_STEP_SUMMARY"
           cd $GITHUB_WORKSPACE/head
           bash ./optools/run_bvt_group.sh \
             "$GITHUB_WORKSPACE/mo-tester" \
@@ -388,6 +396,9 @@ jobs:
           fi
           if go tool covdata textfmt -i="${coverage_dir}" -o "${coverage_profile}"; then
             test -s "${coverage_profile}"
+            grep -Ev 'pkg/pb|yaccpar' "${coverage_profile}" > "${coverage_profile}.filtered" || true
+            test -s "${coverage_profile}.filtered"
+            mv "${coverage_profile}.filtered" "${coverage_profile}"
           elif [ "${{ steps.bvt_on_pr_version.conclusion }}" = "success" ]; then
             echo "::error::failed to generate pessimistic BVT coverage after a successful BVT"
             exit 1

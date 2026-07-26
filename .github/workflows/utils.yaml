@@ -477,7 +477,10 @@ jobs:
     name: Coverage
     needs: [check_organization_user]
     environment: ci
-    runs-on: amd64-mo-guangzhou-2xlarge16
+    # This job only downloads and merges text coverage profiles; it does not
+    # build MatrixOne or run CGo. Keep its queue independent from heavy tests.
+    runs-on: ${{ vars.COVERAGE_MERGE_RUNNER_LABEL || 'arm64-mo-shanghai-4c8g' }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -563,10 +566,24 @@ jobs:
           done
 
           cd "$GITHUB_WORKSPACE"
+          # parse_coverage.py intentionally resolves .ignore from its current
+          # working directory. The legacy job staged this file; keep that
+          # contract in the artifact-based merge job too.
+          cp "$GITHUB_WORKSPACE/CI/scripts/.ignore" "$GITHUB_WORKSPACE/.ignore"
           python CI/scripts/parse_coverage.py \
             -coverage_files "${coverage_files[@]}" \
             -diff_path "$GITHUB_WORKSPACE/matrixone/diff.patch"
           go tool cover -o "$GITHUB_WORKSPACE/matrixone/pr_coverage.html" -html=merged_coverage.out
+
+      - name: Measure coverage outputs
+        if: ${{ always() && !cancelled() }}
+        run: |
+          du -sh \
+            "$GITHUB_WORKSPACE/coverage-artifacts" \
+            "$GITHUB_WORKSPACE/coverage-processed" \
+            "$GITHUB_WORKSPACE/merged_coverage.out" \
+            "$GITHUB_WORKSPACE/pr_coverage.out" \
+            "$GITHUB_WORKSPACE/matrixone/pr_coverage.html" 2>/dev/null || true
 
       - name: Upload coverage result
         if: ${{ always() && !cancelled() }}
@@ -577,8 +594,19 @@ jobs:
             ${{ github.workspace }}/matrixone/pr_coverage.html
             ${{ github.workspace }}/pr_coverage.out
             ${{ github.workspace }}/merged_coverage.out
-            ${{ github.workspace }}/coverage-artifacts
           retention-days: 7
+
+      - name: Upload raw coverage inputs for failed merge
+        if: ${{ failure() && !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-merge-debug
+          path: |
+            ${{ github.workspace }}/coverage-artifacts
+            ${{ github.workspace }}/coverage-processed
+            ${{ github.workspace }}/matrixone/diff.patch
+          if-no-files-found: warn
+          retention-days: 1
 
   pr-size-label:
     if: ${{ inputs.repository == '' }}

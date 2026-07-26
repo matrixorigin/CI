@@ -232,6 +232,9 @@ jobs:
             -covermode=set -coverprofile="${coverage_profile}" -coverpkg="${cover_pkgs}" \
             ${test_scope} | tee "${RUNNER_TEMP}/ut-coverage-report.json"
           test -s "${coverage_profile}"
+          grep -Ev 'pkg/pb|pkg/sql/parsers/goyacc|yaccpar' "${coverage_profile}" > "${coverage_profile}.filtered" || true
+          test -s "${coverage_profile}.filtered"
+          mv "${coverage_profile}.filtered" "${coverage_profile}"
       - name: Upload UT coverage
         if: ${{ always() && !cancelled() }}
         uses: actions/upload-artifact@v7

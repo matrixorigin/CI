@@ -219,13 +219,13 @@ jobs:
     needs: build-compose-proxy-image
     environment: ci
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
-    name: multi cn e2e bvt test docker compose(PROXY, group ${{ matrix.group_offset }})
+    name: multi cn e2e bvt test docker compose(PROXY, slot ${{ matrix.group_offset }})
     timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
-        # Together with the native launch job's (PR + 1) group, these two
-        # slots execute every non-optimistic BVT case exactly once per PR.
+        # Together with the native launch job's seed+1 group, these two slots
+        # execute every non-optimistic BVT case exactly once per CI run.
         group_offset: [0, 2]
     steps:
       - name: Pre Clean Some Unneeded Images
@@ -347,9 +347,17 @@ jobs:
           cat mo.yml
           echo "============================="
 
-          pr_number="${{ github.event.pull_request.number }}"
-          bvt_group=$(( (pr_number + ${{ matrix.group_offset }}) % 3 ))
-          echo "Compose Proxy BVT: PR ${pr_number}, group ${bvt_group}"
+          run_id="${{ github.run_id }}"
+          run_attempt="${{ github.run_attempt }}"
+          group_seed=$(( (run_id + run_attempt) % 3 ))
+          bvt_group=$(( (group_seed + ${{ matrix.group_offset }}) % 3 ))
+          echo "Compose Proxy BVT: run ${run_id}, attempt ${run_attempt}, seed ${group_seed}, group ${bvt_group}"
+          {
+            echo "### BVT group assignment"
+            echo "- CI run: ${run_id}, attempt: ${run_attempt}"
+            echo "- Deployment: Compose Multi-CN + Proxy"
+            echo "- Group: ${bvt_group}"
+          } >> "$GITHUB_STEP_SUMMARY"
           cd "$GITHUB_WORKSPACE"
           bash ./optools/run_bvt_group.sh \
             "$GITHUB_WORKSPACE/mo-tester" \
@@ -403,6 +411,9 @@ jobs:
           sudo chown -R "$(id -u):$(id -g)" "${coverage_dir}" || true
           if go tool covdata textfmt -i="${coverage_dir}" -o "${coverage_profile}"; then
             test -s "${coverage_profile}"
+            grep -Ev 'pkg/pb|yaccpar' "${coverage_profile}" > "${coverage_profile}.filtered" || true
+            test -s "${coverage_profile}.filtered"
+            mv "${coverage_profile}.filtered" "${coverage_profile}"
           elif [ "${{ steps.bvt_on_pr_version.conclusion }}" = "success" ]; then
             echo "::error::failed to generate compose BVT coverage after a successful BVT"
             exit 1
