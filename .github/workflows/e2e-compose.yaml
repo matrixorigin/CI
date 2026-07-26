@@ -317,19 +317,31 @@ jobs:
         run: |
           set -euo pipefail
           report="${RUNNER_TEMP}/bvt-compose.log"
-          echo '### Compose + Proxy BVT result' >> "$GITHUB_STEP_SUMMARY"
+          timing="${RUNNER_TEMP}/bvt-compose-slowest.tsv"
           if [ ! -s "${report}" ]; then
-            echo '- No BVT execution log was produced.' >> "$GITHUB_STEP_SUMMARY"
+            echo '### Compose + Proxy BVT result' | tee -a "$GITHUB_STEP_SUMMARY"
+            echo '- No BVT execution log was produced.' | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          grep '^Run BVT group' "${report}" | sed 's/^/- /' >> "$GITHUB_STEP_SUMMARY" || true
-          echo '' >> "$GITHUB_STEP_SUMMARY"
-          echo '#### Top 10 slow BVT scripts' >> "$GITHUB_STEP_SUMMARY"
-          echo '' >> "$GITHUB_STEP_SUMMARY"
-          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo '### Compose + Proxy BVT result'
+            grep '^Run BVT group' "${report}" | sed 's/^/- /' || true
+            echo
+            echo '#### Top 10 slow BVT scripts'
+            echo
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
           sed -nE 's#.*script file\[(.*)\] has been executed, and cost: ([0-9.]+)s.*#\2s\t\1#p' "${report}" \
-            | sort -nr -k1,1 | head -n 10 >> "$GITHUB_STEP_SUMMARY" || true
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+            | sort -nr -k1,1 | awk 'NR <= 10 { print }' > "${timing}"
+          if [ ! -s "${timing}" ]; then
+            echo 'No per-script timing records found in BVT output.' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo '```text'
+            cat "${timing}"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Compose BVT execution log
         if: ${{ always() && !cancelled() }}
