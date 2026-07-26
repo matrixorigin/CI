@@ -1,0 +1,127 @@
+name: MatrixOne UT Coverage
+
+on:
+  workflow_call:
+    outputs:
+      coverage_ready:
+        description: "Whether the UT coverage profile was eligible to run"
+        value: ${{ jobs.ut-coverage-linux-x86.outputs.coverage_ready }}
+    secrets:
+      TOKEN_ACTION:
+        description: "Token for checkout (e.g. pull from fork/private)"
+        required: false
+      TEST_S3FS_ALIYUN:
+        description: "Object storage configuration for UT coverage"
+        required: false
+      TEST_S3FS_QCLOUD:
+        description: "Object storage configuration for UT coverage"
+        required: false
+      S3ENDPOINT:
+        description: "S3ENDPOINT For Test"
+        required: true
+      S3REGION:
+        description: "S3REGION For Test"
+        required: true
+      S3APIKEY:
+        description: "S3APIKEY For Test"
+        required: true
+      S3APISECRET:
+        description: "S3APISECRET For Test"
+        required: true
+      S3BUCKET:
+        description: "S3BUCKET For Test"
+        required: true
+
+jobs:
+  ut-coverage-linux-x86:
+    name: UT Coverage on Ubuntu/x86
+    environment: ci
+    # Match the existing PR BVT runner policy: use the configured runner label
+    # when present, otherwise use GitHub-hosted Ubuntu.
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
+    timeout-minutes: 60
+    outputs:
+      coverage_ready: ${{ steps.coverage_secrets.outputs.ready }}
+    steps:
+      - id: coverage_secrets
+        name: Check coverage secrets
+        env:
+          TEST_S3FS_ALIYUN: ${{ secrets.TEST_S3FS_ALIYUN }}
+          TEST_S3FS_QCLOUD: ${{ secrets.TEST_S3FS_QCLOUD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TEST_S3FS_ALIYUN:-}" ] || [ -z "${TEST_S3FS_QCLOUD:-}" ]; then
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+            echo '::notice::UT coverage skipped because TEST_S3FS_ALIYUN or TEST_S3FS_QCLOUD is unavailable'
+          else
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Free hosted-runner disk space
+        if: ${{ steps.coverage_secrets.outputs.ready == 'true' }}
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/.ghcup /usr/share/swift \
+            /usr/local/share/powershell
+          sudo docker system prune -af || true
+          if [ -d /mnt ]; then
+            sudo mkdir -p /mnt/runner-ut-workspace
+            sudo chmod 777 /mnt/runner-ut-workspace
+            sudo rm -rf /tmp/runner-ut-workspace
+            sudo ln -sfn /mnt/runner-ut-workspace /tmp/runner-ut-workspace
+          fi
+          df -h / /mnt || true
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        if: ${{ steps.coverage_secrets.outputs.ready == 'true' }}
+        with:
+          token: ${{ secrets.TOKEN_ACTION }}
+          fetch-depth: "3"
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Set up Go
+        if: ${{ steps.coverage_secrets.outputs.ready == 'true' }}
+        uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          setup-java: true
+          go-version-file: "${{ github.workspace }}/go.mod"
+      - name: Run coverage unit tests
+        if: ${{ steps.coverage_secrets.outputs.ready == 'true' }}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          export endpoint='${{ secrets.S3ENDPOINT }}'
+          export region='${{ secrets.S3REGION }}'
+          export apikey='${{ secrets.S3APIKEY }}'
+          export apisecret='${{ secrets.S3APISECRET }}'
+          export bucket='${{ secrets.S3BUCKET }}'
+          export TEST_S3FS_ALIYUN='${{ secrets.TEST_S3FS_ALIYUN }}'
+          export TEST_S3FS_QCLOUD='${{ secrets.TEST_S3FS_QCLOUD }}'
+
+          test_scope=$(go list -mod=readonly ./... | grep -v 'driver\|engine/aoe\|engine/memEngine\|pkg/catalog')
+          cover_pkgs=$(printf '%s\n' "${test_scope}" | paste -sd, -)
+          test -n "${cover_pkgs}"
+
+          make clean && make config && make cgo && make thirdparties
+          thirdparties_install_dir="$GITHUB_WORKSPACE/thirdparties/install"
+          cgo_cflags="-I${GITHUB_WORKSPACE}/cgo -I${thirdparties_install_dir}/include"
+          cgo_ldflags="-L${GITHUB_WORKSPACE}/cgo -lmo -L${thirdparties_install_dir}/lib -lusearch_c -Wl,-rpath,${thirdparties_install_dir}/lib -lm"
+          coverage_profile="${RUNNER_TEMP}/ut-coverage.out"
+
+          CGO_CFLAGS="${cgo_cflags}" CGO_LDFLAGS="${cgo_ldflags}" \
+            go test -mod=readonly -json -short -v -tags matrixone_test -p 6 \
+            -covermode=set -coverprofile="${coverage_profile}" -coverpkg="${cover_pkgs}" \
+            ${test_scope} | tee "${RUNNER_TEMP}/ut-coverage-report.json"
+          test -s "${coverage_profile}"
+          grep -Ev 'pkg/pb|pkg/sql/parsers/goyacc|yaccpar' "${coverage_profile}" > "${coverage_profile}.filtered" || true
+          test -s "${coverage_profile}.filtered"
+          mv "${coverage_profile}.filtered" "${coverage_profile}"
+      - name: Upload UT coverage
+        if: ${{ always() && !cancelled() && steps.coverage_secrets.outputs.ready == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ut-coverage
+          path: |
+            ${{ runner.temp }}/ut-coverage.out
+            ${{ runner.temp }}/ut-coverage-report.json
+          if-no-files-found: warn
+          retention-days: 7

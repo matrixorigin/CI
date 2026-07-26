@@ -111,9 +111,10 @@ jobs:
           fi
 
   pr_coverage:
-    # Secrets cannot be referenced directly in job-level conditions; preflight prevents allocating the large ARC runner.
-    if: ${{ (needs.check_organization_user.outputs.safe_label == '1' || needs.check_organization_user.outputs.in_org == '1') && needs.check_organization_user.outputs.coverage_secrets_available == 'true' }}
-    name: Coverage
+    # Replaced by coverage-ut.yaml plus coverage-merge.yaml. Keep this job
+    # disabled during the rollout so the legacy serial UT+BVT path cannot run.
+    if: ${{ false }}
+    name: Legacy serial coverage (disabled)
     needs: [check_organization_user]
     environment: ci
     # If the runner/workspace layout changes, also update setup-env's go-version-file below.

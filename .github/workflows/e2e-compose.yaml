@@ -180,11 +180,12 @@ jobs:
             ${{ github.workspace }}/docker-compose-log
           retention-days: 7
 
-  multi-CN-bvt-docker-compose-pessimistic:
+  multi-CN-bvt-docker-compose-proxy:
     if: ${{ !github.event.pull_request.draft }}
     environment: ci
+    # Match the existing PR BVT runner policy.
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
-    name: multi cn e2e bvt test docker compose(PESSIMISTIC)
+    name: multi cn e2e bvt test docker compose(PROXY)
     timeout-minutes: 75
     steps:
       - name: Pre Clean Some Unneeded Images
@@ -233,8 +234,11 @@ jobs:
           # Handle various docker-compose volume formats: /test, /test:options, /test followed by space
           sed -i 's|:/test\b|:'"$GITHUB_WORKSPACE"'/test|g' ./etc/launch-tae-compose/compose.yaml
 
-          # build matrixone docker image first
-          docker build -t matrixorigin/matrixone:latest . -f ./optools/images/Dockerfile
+          # Build once for this single Compose job. Splitting this image build
+          # into an artifact would add transfer time without reducing latency.
+          mkdir -p "$GITHUB_WORKSPACE/coverage"
+          docker build --build-arg GOBUILD_OPT=-cover \
+            -t matrixorigin/matrixone:latest . -f ./optools/images/Dockerfile
 
           mkdir -p ${{ github.workspace }}/docker-compose-log
           docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn up -d
@@ -292,7 +296,20 @@ jobs:
           cat mo.yml
           echo "============================="
 
-          ./run.sh -n -g -o -p $GITHUB_WORKSPACE/test/distributed/cases -e optimistic 2>&1
+          run_id="${{ github.run_id }}"
+          run_attempt="${{ github.run_attempt }}"
+          bvt_group=$(( (run_id + run_attempt) % 2 ))
+          echo "Compose + Proxy BVT: run ${run_id}, attempt ${run_attempt}, group ${bvt_group}"
+          {
+            echo "### BVT group assignment"
+            echo "- Deployment: Compose Multi-CN + Proxy"
+            echo "- Group: ${bvt_group}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          cd "$GITHUB_WORKSPACE"
+          bash ./optools/run_bvt_group.sh \
+            "$GITHUB_WORKSPACE/mo-tester" \
+            "$GITHUB_WORKSPACE/test/distributed/cases" \
+            "${bvt_group}" 2>&1
 
       - name: Print Docker Info Before Container Shutdown
         if: ${{ always() }}
@@ -330,13 +347,37 @@ jobs:
         run: |
           docker ps
           docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn down --remove-orphans
-          docker volume rm launch-tae-compose_minio_storage
+          docker volume rm launch-tae-compose_minio_storage || true
+
+      - name: Generate Compose BVT coverage profile
+        if: ${{ always() && !cancelled() }}
+        run: |
+          set -uo pipefail
+          coverage_dir="$GITHUB_WORKSPACE/coverage"
+          coverage_profile="$RUNNER_TEMP/bvt-compose.out"
+          if go tool covdata textfmt -i="${coverage_dir}" -o "${coverage_profile}"; then
+            test -s "${coverage_profile}"
+          elif [ "${{ steps.bvt_on_pr_version.conclusion }}" = "success" ]; then
+            echo '::error::failed to generate Compose BVT coverage after a successful BVT'
+            exit 1
+          else
+            echo '::warning::Compose BVT coverage unavailable because BVT did not finish successfully'
+          fi
+
+      - name: Upload Compose BVT coverage
+        if: ${{ always() && !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: bvt-coverage-compose
+          path: ${{ runner.temp }}/bvt-compose.out
+          if-no-files-found: warn
+          retention-days: 7
 
       - uses: actions/upload-artifact@v7
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
-          name: Compose-multi-cn-e2e-bvt-test-docker-log(PESSIMISTIC)
+          name: Compose-multi-cn-e2e-bvt-test-docker-log(PROXY)
           path: |
             ${{ github.workspace }}/docker-compose-log
           retention-days: 7

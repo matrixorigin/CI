@@ -145,6 +145,9 @@ jobs:
           retention-days: 7
 
   multi-cn-proxy-bvt-linux-x86:
+    # Compose + Proxy is the active proxy coverage deployment. Keep the
+    # native proxy launcher out of the PR matrix until it has a distinct role.
+    if: false
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
     name: Multi-CN e2e BVT Test on Linux/x64(LAUNCH, PROXY)
     timeout-minutes: 75
@@ -234,6 +237,7 @@ jobs:
           retention-days: 7
 
   pessimistic-bvt-linux-x86:
+    # Match the existing PR BVT runner policy.
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
     name: e2e BVT Test on Linux/x64(LAUNCH, PESSIMISTIC)
     timeout-minutes: 75
@@ -256,7 +260,7 @@ jobs:
 
       - name: Build MatrixOne
         run: |
-          cd $GITHUB_WORKSPACE/head && make clean && make build
+          cd $GITHUB_WORKSPACE/head && make clean && make GOBUILD_OPT=-cover build
           git rev-parse --short HEAD
 
       - name: Add cn.txn
@@ -275,6 +279,9 @@ jobs:
       - name: Start MO
         run: |
           cd $GITHUB_WORKSPACE/head
+          export GOCOVERDIR="${RUNNER_TEMP}/bvt-coverage-pessimistic"
+          rm -rf "${GOCOVERDIR}"
+          mkdir -p "${GOCOVERDIR}"
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/head launch
 
       - name: Clone test-tool repository
@@ -292,12 +299,25 @@ jobs:
         run: |
           export LC_ALL="C.UTF-8"
           locale
-          cd $GITHUB_WORKSPACE/mo-tester
+          cd "$GITHUB_WORKSPACE/mo-tester"
           sed -i 's/  port: [0-9]*/  port: 12345/g' mo.yml
           cat mo.yml
           echo "============================="
 
-          ./run.sh -n -g -o -p $GITHUB_WORKSPACE/head/test/distributed/cases -s  $GITHUB_WORKSPACE/head/test/distributed/resources -e optimistic 2>&1
+          run_id="${{ github.run_id }}"
+          run_attempt="${{ github.run_attempt }}"
+          bvt_group=$(( 1 - ((run_id + run_attempt) % 2) ))
+          echo "Launch + Pessimistic BVT: run ${run_id}, attempt ${run_attempt}, group ${bvt_group}"
+          {
+            echo "### BVT group assignment"
+            echo "- Deployment: native launch (PESSIMISTIC)"
+            echo "- Group: ${bvt_group}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          cd "$GITHUB_WORKSPACE/head"
+          bash ./optools/run_bvt_group.sh \
+            "$GITHUB_WORKSPACE/mo-tester" \
+            "$GITHUB_WORKSPACE/head/test/distributed/cases" \
+            "${bvt_group}" 2>&1
 
       - name: Dump mo-service goroutines
         if: ${{ always() && !cancelled() }}
@@ -311,10 +331,41 @@ jobs:
           # 4 nodes in one Process
           ./optools/check_log_count.sh 4000 60 # {count threshold} {metric collected interval}
 
-      - name: Check mo-service Status
+      - name: Stop service and generate BVT coverage profile
         if: ${{ always() && !cancelled() }}
         run: |
-          if [ "$(ps -ef | grep 'mo-service' | grep -v "grep" | wc -l)" -gt 0 ]; then pkill -9 mo-service; else echo 'current mo-service has already crashed'; exit 1; fi
+          set -uo pipefail
+          coverage_dir="${RUNNER_TEMP}/bvt-coverage-pessimistic"
+          coverage_profile="${RUNNER_TEMP}/bvt-pessimistic.out"
+          pids=$(pgrep -f 'mo-service' || true)
+          if [ -n "${pids}" ]; then
+            kill -TERM ${pids} || true
+          fi
+          for _ in $(seq 1 30); do
+            pgrep -f 'mo-service' >/dev/null || break
+            sleep 1
+          done
+          pids=$(pgrep -f 'mo-service' || true)
+          if [ -n "${pids}" ]; then
+            kill -KILL ${pids} || true
+          fi
+          if go tool covdata textfmt -i="${coverage_dir}" -o "${coverage_profile}"; then
+            test -s "${coverage_profile}"
+          elif [ "${{ steps.bvt_on_pr_version.conclusion }}" = "success" ]; then
+            echo '::error::failed to generate Launch + Pessimistic BVT coverage after a successful BVT'
+            exit 1
+          else
+            echo '::warning::Launch + Pessimistic BVT coverage unavailable because BVT did not finish successfully'
+          fi
+
+      - name: Upload Launch + Pessimistic BVT coverage
+        if: ${{ always() && !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: bvt-coverage-pessimistic
+          path: ${{ runner.temp }}/bvt-pessimistic.out
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: generate upload files
         if: ${{ always() }}
