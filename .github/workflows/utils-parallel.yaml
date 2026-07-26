@@ -1,0 +1,29 @@
+# Utilities that remain outside the parallel coverage pipeline.
+name: MatrixOne Utils CI
+
+on:
+  workflow_call:
+    secrets:
+      TOKEN_ACTION:
+        description: "A token passed from the caller workflow"
+        required: true
+
+jobs:
+  pr-size-label:
+    environment: ci
+    runs-on: arm64-mo-shanghai-4c8g
+    steps:
+      - name: size-label
+        uses: matrixorigin/CI/actions/label-size-action@main
+        with:
+          size_token: ${{ secrets.TOKEN_ACTION }}
+          ignore: ".md,.pb.go"
+          sizes: >
+            {
+              "XS":0,
+              "S":10,
+              "M":100,
+              "L":500,
+              "XL":1000,
+              "XXL":2000
+            }

@@ -2,6 +2,17 @@ name: MatrixOne Compose Test
 
 on:
   workflow_call:
+    inputs:
+      bvt_group:
+        description: "BVT group assigned by the caller (0 or 1)"
+        required: false
+        type: string
+        default: ""
+      bvt_generation:
+        description: "Shared assignment generation for complementary BVT jobs"
+        required: false
+        type: string
+        default: ""
     secrets:
       TOKEN_ACTION:
         description: "Token for checkout (e.g. pull from fork/private)"
@@ -31,7 +42,7 @@ jobs:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
         with:
@@ -39,7 +50,7 @@ jobs:
 
       - name: Print run attempt
         run: echo "run attempt is ${{ github.run_attempt }}"
-        
+
       - name: Print Disk Usage Before Container Start
         if: ${{ always() }}
         run: |
@@ -61,7 +72,7 @@ jobs:
           echo 'mode = "Optimistic"' >> ./etc/launch-tae-compose/config/cn-1.toml
           echo ""  >> ./etc/launch-tae-compose/config/tn.toml
           echo '[tn.txn]' >> ./etc/launch-tae-compose/config/tn.toml
-          echo 'mode = "Optimistic"' >> ./etc/launch-tae-compose/config/tn.toml    
+          echo 'mode = "Optimistic"' >> ./etc/launch-tae-compose/config/tn.toml
           cat ./etc/launch-tae-compose/config/cn-0.toml
           cat ./etc/launch-tae-compose/config/cn-1.toml
           cat ./etc/launch-tae-compose/config/tn.toml
@@ -180,11 +191,11 @@ jobs:
             ${{ github.workspace }}/docker-compose-log
           retention-days: 7
 
-  multi-CN-bvt-docker-compose-pessimistic:
-    if: ${{ !github.event.pull_request.draft }}
+  multi-CN-bvt-docker-compose-proxy:
     environment: ci
+    # Match the existing PR BVT runner policy.
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
-    name: multi cn e2e bvt test docker compose(PESSIMISTIC)
+    name: multi cn e2e bvt test docker compose(PROXY)
     timeout-minutes: 75
     steps:
       - name: Pre Clean Some Unneeded Images
@@ -202,7 +213,7 @@ jobs:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
         with:
@@ -233,8 +244,9 @@ jobs:
           # Handle various docker-compose volume formats: /test, /test:options, /test followed by space
           sed -i 's|:/test\b|:'"$GITHUB_WORKSPACE"'/test|g' ./etc/launch-tae-compose/compose.yaml
 
-          # build matrixone docker image first
-          docker build -t matrixorigin/matrixone:latest . -f ./optools/images/Dockerfile
+          mkdir -p "$GITHUB_WORKSPACE/coverage"
+          docker build --build-arg GOBUILD_OPT=-cover \
+            -t matrixorigin/matrixone:latest . -f ./optools/images/Dockerfile
 
           mkdir -p ${{ github.workspace }}/docker-compose-log
           docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn up -d
@@ -269,7 +281,7 @@ jobs:
           sudo docker builder prune -f -a;
           echo "===========================================";
           sudo docker system df -v;
-          
+
       - name: Clone test-tool repository
         uses: actions/checkout@v6
         with:
@@ -292,7 +304,80 @@ jobs:
           cat mo.yml
           echo "============================="
 
-          ./run.sh -n -g -o -p $GITHUB_WORKSPACE/test/distributed/cases -e optimistic 2>&1
+          bvt_group='${{ inputs.bvt_group }}'
+          bvt_generation='${{ inputs.bvt_generation }}'
+          if [ -z "${bvt_group}" ]; then
+            bvt_group=$(( (${{ github.run_id }} + ${{ github.run_attempt }}) % 2 ))
+          fi
+          if [ -z "${bvt_generation}" ]; then
+            bvt_generation='${{ github.run_id }}-${{ github.run_attempt }}'
+          fi
+          if [[ ! "${bvt_group}" =~ ^[01]$ ]] || [ -z "${bvt_generation}" ]; then
+            echo "::error::invalid BVT assignment: group=${bvt_group}, generation=${bvt_generation}"
+            exit 1
+          fi
+          echo "bvt_group=${bvt_group}" >> "$GITHUB_OUTPUT"
+          echo "bvt_generation=${bvt_generation}" >> "$GITHUB_OUTPUT"
+          jq -n \
+            --arg deployment 'compose-proxy' \
+            --argjson group "${bvt_group}" \
+            --arg generation "${bvt_generation}" \
+            --arg head_sha '${{ github.event.pull_request.head.sha }}' \
+            '{schema_version: 1, deployment: $deployment, group: $group, generation: $generation, head_sha: $head_sha}' \
+            > "${RUNNER_TEMP}/bvt-compose-manifest.json"
+          echo "Compose + Proxy BVT: generation ${bvt_generation}, group ${bvt_group}"
+          {
+            echo "### BVT group assignment"
+            echo "- Deployment: Compose Multi-CN + Proxy"
+            echo "- Group: ${bvt_group}"
+            echo "- Generation: ${bvt_generation}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          cd "$GITHUB_WORKSPACE"
+          set -o pipefail
+          bash ./optools/run_bvt_group.sh \
+            "$GITHUB_WORKSPACE/mo-tester" \
+            "$GITHUB_WORKSPACE/test/distributed/cases" \
+            "${bvt_group}" 2>&1 | tee "${RUNNER_TEMP}/bvt-compose.log"
+
+      - name: Summarize Compose BVT result
+        if: ${{ always() && !cancelled() }}
+        run: |
+          set -euo pipefail
+          report="${RUNNER_TEMP}/bvt-compose.log"
+          timing="${RUNNER_TEMP}/bvt-compose-slowest.tsv"
+          if [ ! -s "${report}" ]; then
+            echo '### Compose + Proxy BVT result' | tee -a "$GITHUB_STEP_SUMMARY"
+            echo '- No BVT execution log was produced.' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo '### Compose + Proxy BVT result'
+            grep '^Run BVT group' "${report}" | sed 's/^/- /' || true
+            echo
+            echo '#### Top 10 slow BVT scripts'
+            echo
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+          sed -nE 's#.*script file\[(.*)\] has been executed, and cost: ([0-9.]+)s.*#\2s\t\1#p' "${report}" \
+            | sort -nr -k1,1 | awk 'NR <= 10 { print }' > "${timing}"
+          if [ ! -s "${timing}" ]; then
+            echo 'No per-script timing records found in BVT output.' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo '```text'
+            cat "${timing}"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Compose BVT execution log
+        if: ${{ always() && !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: bvt-execution-compose
+          path: ${{ runner.temp }}/bvt-compose.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Print Docker Info Before Container Shutdown
         if: ${{ always() }}
@@ -305,13 +390,13 @@ jobs:
           sudo du -hs /var/lib/docker;
           echo "===========================================";
           sudo docker system df -v;
-      
+
       - name: Print System Dmesg
         if: ${{ always() }}
         continue-on-error: true
         run: |
           sudo dmesg -T
-  
+
       - name: export log
         if: ${{ failure() || cancelled()}}
         run: |
@@ -330,13 +415,39 @@ jobs:
         run: |
           docker ps
           docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn down --remove-orphans
-          docker volume rm launch-tae-compose_minio_storage
+          docker volume rm launch-tae-compose_minio_storage || true
+
+      - name: Generate Compose BVT coverage profile
+        if: ${{ always() && !cancelled() }}
+        run: |
+          set -uo pipefail
+          coverage_dir="$GITHUB_WORKSPACE/coverage"
+          coverage_profile="$RUNNER_TEMP/bvt-compose.out"
+          if go tool covdata textfmt -i="${coverage_dir}" -o "${coverage_profile}"; then
+            test -s "${coverage_profile}"
+          elif [ "${{ steps.bvt_on_pr_version.conclusion }}" = "success" ]; then
+            echo '::error::failed to generate Compose BVT coverage after a successful BVT'
+            exit 1
+          else
+            echo '::warning::Compose BVT coverage unavailable because BVT did not finish successfully'
+          fi
+
+      - name: Upload Compose BVT coverage
+        if: ${{ always() && !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: bvt-coverage-compose-generation-${{ steps.bvt_on_pr_version.outputs.bvt_generation || format('{0}-{1}', github.run_id, github.run_attempt) }}-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/bvt-compose.out
+            ${{ runner.temp }}/bvt-compose-manifest.json
+          if-no-files-found: warn
+          retention-days: 7
 
       - uses: actions/upload-artifact@v7
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
-          name: Compose-multi-cn-e2e-bvt-test-docker-log(PESSIMISTIC)
+          name: Compose-multi-cn-e2e-bvt-test-docker-log(PROXY)
           path: |
             ${{ github.workspace }}/docker-compose-log
           retention-days: 7

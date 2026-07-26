@@ -3,12 +3,6 @@ name: MatrixOne Utils CI
 
 on:
   workflow_call:
-    inputs:
-      enable_legacy_coverage:
-        description: "Keep the serial coverage job until the caller enables parallel coverage producers"
-        required: false
-        type: boolean
-        default: true
     secrets:
       TOKEN_ACTION:
         description: "A token passed from the caller workflow"
@@ -117,11 +111,9 @@ jobs:
           fi
 
   pr_coverage:
-    # Default-on preserves coverage for existing callers while MatrixOne rolls
-    # out the parallel producers. The new entrypoint disables this job in the
-    # same commit that starts coverage-ut.yaml and coverage-merge.yaml.
-    if: ${{ inputs.enable_legacy_coverage && (needs.check_organization_user.outputs.safe_label == '1' || needs.check_organization_user.outputs.in_org == '1') && needs.check_organization_user.outputs.coverage_secrets_available == 'true' }}
-    name: ${{ inputs.enable_legacy_coverage && 'Coverage' || 'Legacy Coverage (disabled)' }}
+    # Secrets cannot be referenced directly in job-level conditions; preflight prevents allocating the large ARC runner.
+    if: ${{ (needs.check_organization_user.outputs.safe_label == '1' || needs.check_organization_user.outputs.in_org == '1') && needs.check_organization_user.outputs.coverage_secrets_available == 'true' }}
+    name: Coverage
     needs: [check_organization_user]
     environment: ci
     # If the runner/workspace layout changes, also update setup-env's go-version-file below.
