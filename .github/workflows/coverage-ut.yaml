@@ -36,9 +36,9 @@ jobs:
   ut-coverage-linux-x86:
     name: UT Coverage on Ubuntu/x86
     environment: ci
-    # Match the existing PR BVT runner policy: use the configured runner label
-    # when present, otherwise use GitHub-hosted Ubuntu.
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
+    # Match main's legacy coverage job. The external Aliyun/QCloud integration
+    # tests depend on its Guangzhou network path as well as their credentials.
+    runs-on: amd64-mo-guangzhou-2xlarge16
     timeout-minutes: 60
     outputs:
       coverage_ready: ${{ steps.coverage_secrets.outputs.ready }}
@@ -56,21 +56,6 @@ jobs:
           else
             echo 'ready=true' >> "$GITHUB_OUTPUT"
           fi
-      - name: Free hosted-runner disk space
-        if: ${{ steps.coverage_secrets.outputs.ready == 'true' }}
-        run: |
-          set -euo pipefail
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /opt/hostedtoolcache/CodeQL /usr/local/.ghcup /usr/share/swift \
-            /usr/local/share/powershell
-          sudo docker system prune -af || true
-          if [ -d /mnt ]; then
-            sudo mkdir -p /mnt/runner-ut-workspace
-            sudo chmod 777 /mnt/runner-ut-workspace
-            sudo rm -rf /tmp/runner-ut-workspace
-            sudo ln -sfn /mnt/runner-ut-workspace /tmp/runner-ut-workspace
-          fi
-          df -h / /mnt || true
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         if: ${{ steps.coverage_secrets.outputs.ready == 'true' }}
         with:
