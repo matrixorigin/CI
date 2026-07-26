@@ -9,10 +9,10 @@ on:
         required: true
       TEST_S3FS_ALIYUN:
         description: "TEST_S3FS_ALIYUN For UT Test"
-        required: true
+        required: false
       TEST_S3FS_QCLOUD:
         description: "TEST_S3FS_QCLOUD For UT Test"
-        required: true
+        required: false
       DOCU_GROUP_HOOK:
         description: "DOCU_GROUP_HOOK For Notice"
         required: true
@@ -48,7 +48,29 @@ jobs:
     outputs:
       in_org: ${{ steps.check_in_org.outputs.in_org }}
       safe_label: ${{ steps.check_safe_label.outputs.safe_label }}
+      coverage_secrets_available: ${{ steps.check_coverage_secrets.outputs.coverage_secrets_available }}
     steps:
+      - id: check_coverage_secrets
+        name: CHECK COVERAGE SECRETS
+        env:
+          TEST_S3FS_ALIYUN: ${{ secrets.TEST_S3FS_ALIYUN }}
+          TEST_S3FS_QCLOUD: ${{ secrets.TEST_S3FS_QCLOUD }}
+        run: |
+          missing_secrets=""
+          if [ -z "${TEST_S3FS_ALIYUN:-}" ]; then
+            missing_secrets="${missing_secrets:+$missing_secrets, }TEST_S3FS_ALIYUN"
+          fi
+          if [ -z "${TEST_S3FS_QCLOUD:-}" ]; then
+            missing_secrets="${missing_secrets:+$missing_secrets, }TEST_S3FS_QCLOUD"
+          fi
+
+          if [ -n "$missing_secrets" ]; then
+            echo "coverage_secrets_available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Coverage secrets unavailable: $missing_secrets"
+          else
+            echo "coverage_secrets_available=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - id: check_in_org
         name: CHECK ORGANIZATION USER
         run: |
@@ -89,11 +111,12 @@ jobs:
           fi
 
   pr_coverage:
-    if: ${{ needs.check_organization_user.outputs.safe_label == '1' || needs.check_organization_user.outputs.in_org == '1' }}
+    # Secrets cannot be referenced directly in job-level conditions; preflight prevents allocating the large ARC runner.
+    if: ${{ (needs.check_organization_user.outputs.safe_label == '1' || needs.check_organization_user.outputs.in_org == '1') && needs.check_organization_user.outputs.coverage_secrets_available == 'true' }}
     name: Coverage
     needs: [check_organization_user]
     environment: ci
-    # if you change runner, must modify L117
+    # If the runner/workspace layout changes, also update setup-env's go-version-file below.
     runs-on: amd64-mo-guangzhou-2xlarge16
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
