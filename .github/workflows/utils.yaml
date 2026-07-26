@@ -9,10 +9,10 @@ on:
         required: true
       TEST_S3FS_ALIYUN:
         description: "TEST_S3FS_ALIYUN For UT Test"
-        required: true
+        required: false
       TEST_S3FS_QCLOUD:
         description: "TEST_S3FS_QCLOUD For UT Test"
-        required: true
+        required: false
       DOCU_GROUP_HOOK:
         description: "DOCU_GROUP_HOOK For Notice"
         required: true
@@ -53,14 +53,10 @@ jobs:
       - id: check_coverage_secrets
         name: CHECK COVERAGE SECRETS
         env:
-          TOKEN_ACTION: ${{ secrets.TOKEN_ACTION }}
           TEST_S3FS_ALIYUN: ${{ secrets.TEST_S3FS_ALIYUN }}
           TEST_S3FS_QCLOUD: ${{ secrets.TEST_S3FS_QCLOUD }}
         run: |
           missing_secrets=""
-          if [ -z "${TOKEN_ACTION:-}" ]; then
-            missing_secrets="TOKEN_ACTION"
-          fi
           if [ -z "${TEST_S3FS_ALIYUN:-}" ]; then
             missing_secrets="${missing_secrets:+$missing_secrets, }TEST_S3FS_ALIYUN"
           fi
