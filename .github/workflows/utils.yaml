@@ -478,8 +478,9 @@ jobs:
     needs: [check_organization_user]
     environment: ci
     # This job only downloads and merges text coverage profiles; it does not
-    # build MatrixOne or run CGo. Keep its queue independent from heavy tests.
-    runs-on: ${{ vars.COVERAGE_MERGE_RUNNER_LABEL || 'arm64-mo-shanghai-4c8g' }}
+    # build MatrixOne or run CGo. Use a GitHub-hosted runner so it is isolated
+    # from the self-hosted queues used by heavy UT and coverage producers.
+    runs-on: ${{ vars.COVERAGE_MERGE_RUNNER_LABEL || 'ubuntu-22.04' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
