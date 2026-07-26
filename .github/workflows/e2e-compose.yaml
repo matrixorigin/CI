@@ -2,6 +2,17 @@ name: MatrixOne Compose Test
 
 on:
   workflow_call:
+    inputs:
+      bvt_group:
+        description: "BVT group assigned by the caller (0 or 1)"
+        required: false
+        type: string
+        default: ""
+      bvt_generation:
+        description: "Shared assignment generation for complementary BVT jobs"
+        required: false
+        type: string
+        default: ""
     secrets:
       TOKEN_ACTION:
         description: "Token for checkout (e.g. pull from fork/private)"
@@ -31,7 +42,7 @@ jobs:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
         with:
@@ -181,7 +192,6 @@ jobs:
           retention-days: 7
 
   multi-CN-bvt-docker-compose-proxy:
-    if: ${{ !github.event.pull_request.draft }}
     environment: ci
     # Match the existing PR BVT runner policy.
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
@@ -203,7 +213,7 @@ jobs:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Set up Go And Java
         uses: matrixorigin/CI/actions/setup-env@main
         with:
@@ -296,14 +306,33 @@ jobs:
           cat mo.yml
           echo "============================="
 
-          run_id="${{ github.run_id }}"
-          run_attempt="${{ github.run_attempt }}"
-          bvt_group=$(( (run_id + run_attempt) % 2 ))
-          echo "Compose + Proxy BVT: run ${run_id}, attempt ${run_attempt}, group ${bvt_group}"
+          bvt_group='${{ inputs.bvt_group }}'
+          bvt_generation='${{ inputs.bvt_generation }}'
+          if [ -z "${bvt_group}" ]; then
+            bvt_group=$(( (${{ github.run_id }} + ${{ github.run_attempt }}) % 2 ))
+          fi
+          if [ -z "${bvt_generation}" ]; then
+            bvt_generation='${{ github.run_id }}-${{ github.run_attempt }}'
+          fi
+          if [[ ! "${bvt_group}" =~ ^[01]$ ]] || [ -z "${bvt_generation}" ]; then
+            echo "::error::invalid BVT assignment: group=${bvt_group}, generation=${bvt_generation}"
+            exit 1
+          fi
+          echo "bvt_group=${bvt_group}" >> "$GITHUB_OUTPUT"
+          echo "bvt_generation=${bvt_generation}" >> "$GITHUB_OUTPUT"
+          jq -n \
+            --arg deployment 'compose-proxy' \
+            --argjson group "${bvt_group}" \
+            --arg generation "${bvt_generation}" \
+            --arg head_sha '${{ github.event.pull_request.head.sha }}' \
+            '{schema_version: 1, deployment: $deployment, group: $group, generation: $generation, head_sha: $head_sha}' \
+            > "${RUNNER_TEMP}/bvt-compose-manifest.json"
+          echo "Compose + Proxy BVT: generation ${bvt_generation}, group ${bvt_group}"
           {
             echo "### BVT group assignment"
             echo "- Deployment: Compose Multi-CN + Proxy"
             echo "- Group: ${bvt_group}"
+            echo "- Generation: ${bvt_generation}"
           } >> "$GITHUB_STEP_SUMMARY"
           cd "$GITHUB_WORKSPACE"
           set -o pipefail
@@ -409,8 +438,10 @@ jobs:
         if: ${{ always() && !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
-          name: bvt-coverage-compose
-          path: ${{ runner.temp }}/bvt-compose.out
+          name: bvt-coverage-compose-generation-${{ steps.bvt_on_pr_version.outputs.bvt_generation || format('{0}-{1}', github.run_id, github.run_attempt) }}-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/bvt-compose.out
+            ${{ runner.temp }}/bvt-compose-manifest.json
           if-no-files-found: warn
           retention-days: 7
 

@@ -2,6 +2,22 @@ name: MatrixOne Coverage Merge
 
 on:
   workflow_call:
+    inputs:
+      prerequisites_ready:
+        description: "Whether every coverage producer completed successfully"
+        required: false
+        type: boolean
+        default: true
+      expected_bvt_generation:
+        description: "Assignment generation expected in both BVT manifests"
+        required: false
+        type: string
+        default: ""
+      ci_ref:
+        description: "CI ref containing the coverage parser"
+        required: false
+        type: string
+        default: "main"
     secrets:
       TOKEN_ACTION:
         description: "Token for checkout and pull-request metadata"
@@ -14,18 +30,27 @@ jobs:
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
     timeout-minutes: 20
     steps:
+      - name: Verify coverage prerequisites
+        env:
+          PREREQUISITES_READY: ${{ inputs.prerequisites_ready }}
+        run: |
+          if [ "${PREREQUISITES_READY}" != 'true' ]; then
+            echo '::error::coverage merge skipped because at least one required producer was skipped or failed'
+            exit 1
+          fi
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "1"
           path: ./matrixone
           repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Checkout coverage parser
         uses: actions/checkout@v6
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           repository: matrixorigin/CI
+          ref: ${{ inputs.ci_ref }}
           fetch-depth: "1"
           path: ./CI
       - name: Set up Go
@@ -37,11 +62,22 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.TOKEN_ACTION }}
           IS_PUB_REPO: ${{ vars.IS_PUB_REPO }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE/matrixone"
           pr_repo='${{ github.event.pull_request.base.repo.full_name }}'
           pr_number='${{ github.event.pull_request.number }}'
+          current_head_sha=$(curl -fsSL --retry 5 --retry-delay 3 \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${pr_repo}/pulls/${pr_number}" \
+            | jq -r '.head.sha')
+          if [ "${current_head_sha}" != "${EXPECTED_HEAD_SHA}" ]; then
+            echo "::error::PR head moved from ${EXPECTED_HEAD_SHA} to ${current_head_sha}; refusing to merge coverage against a different diff"
+            exit 1
+          fi
           if [ -n "${IS_PUB_REPO:-}" ] && [ "${IS_PUB_REPO}" != "0" ] && [ "${IS_PUB_REPO}" != "false" ]; then
             curl -fL --retry 5 --retry-delay 3 "https://github.com/${pr_repo}/pull/${pr_number}.diff" -o diff.patch
           else
@@ -53,18 +89,22 @@ jobs:
       - name: Download test coverage artifacts
         uses: actions/download-artifact@v7
         with:
-          # The producers use ut-coverage and bvt-coverage-<deployment>.
-          # '*-coverage' only matches the former; retain all three inputs.
-          pattern: '*coverage*'
+          # A full rerun rotates the shared generation. Filter out artifacts
+          # left by previous attempts while retaining successful producers
+          # from an earlier attempt during "Re-run failed jobs".
+          pattern: ${{ inputs.expected_bvt_generation != '' && format('*coverage*generation-{0}-*', inputs.expected_bvt_generation) || '*coverage*' }}
           merge-multiple: true
           path: ${{ github.workspace }}/coverage-artifacts
-      - name: Merge UT and BVT coverage
+      - name: Merge profiles and check coverage rate
         id: merge_coverage
         run: |
           set -euo pipefail
           artifact_dir="$GITHUB_WORKSPACE/coverage-artifacts"
           processed_dir="$GITHUB_WORKSPACE/coverage-processed"
           mkdir -p "${processed_dir}"
+          find "${artifact_dir}" -type f -printf '%P %s bytes\n' | sort \
+            | tee "${RUNNER_TEMP}/coverage-inputs.txt"
+
           mapfile -t ut_profiles < <(find "${artifact_dir}" -type f -name 'ut-coverage.out' | sort)
           mapfile -t bvt_profiles < <(find "${artifact_dir}" -type f -name 'bvt-*.out' | sort)
           if [ "${#ut_profiles[@]}" -ne 1 ] || [ "${#bvt_profiles[@]}" -ne 2 ]; then
@@ -72,6 +112,30 @@ jobs:
             find "${artifact_dir}" -type f -print || true
             exit 1
           fi
+
+          mapfile -t manifests < <(find "${artifact_dir}" -type f -name 'bvt-*-manifest.json' | sort)
+          if [ "${#manifests[@]}" -ne 2 ]; then
+            echo "::error::expected exactly two BVT manifests, found ${#manifests[@]}"
+            exit 1
+          fi
+          jq -s '.' "${manifests[@]}" > "${RUNNER_TEMP}/bvt-group-manifests.json"
+          if ! jq -e \
+            --arg expected_generation '${{ inputs.expected_bvt_generation }}' \
+            --arg expected_sha '${{ github.event.pull_request.head.sha }}' \
+            '
+              length == 2
+              and (map(.schema_version) == [1, 1])
+              and ((map(.deployment) | sort) == ["compose-proxy", "launch-pessimistic"])
+              and ((map(.group) | sort) == [0, 1])
+              and ((map(.generation) | unique | length) == 1)
+              and ($expected_generation == "" or all(.[]; .generation == $expected_generation))
+              and all(.[]; .head_sha == $expected_sha)
+            ' "${RUNNER_TEMP}/bvt-group-manifests.json" >/dev/null; then
+            echo '::error::BVT manifests do not describe complementary groups from the expected generation and PR head'
+            jq . "${RUNNER_TEMP}/bvt-group-manifests.json" || true
+            exit 1
+          fi
+
           coverage_files=()
           for profile in "${ut_profiles[@]}"; do
             output="${processed_dir}/$(basename "${profile}")"
@@ -87,15 +151,35 @@ jobs:
           done
           cd "$GITHUB_WORKSPACE"
           cp "$GITHUB_WORKSPACE/CI/scripts/.ignore" "$GITHUB_WORKSPACE/.ignore"
+          set +e
           python CI/scripts/parse_coverage.py \
             -coverage_files "${coverage_files[@]}" \
-            -diff_path "$GITHUB_WORKSPACE/matrixone/diff.patch"
-          # Coverage entries use MatrixOne module import paths. Run cover from
-          # that module root while keeping the merged profile in the workspace.
-          cd "$GITHUB_WORKSPACE/matrixone"
-          go tool cover \
-            -o "$GITHUB_WORKSPACE/matrixone/pr_coverage.html" \
-            -html="$GITHUB_WORKSPACE/merged_coverage.out"
+            -diff_path "$GITHUB_WORKSPACE/matrixone/diff.patch" \
+            -minimal_coverage 0.75 \
+            -summary_path "$GITHUB_WORKSPACE/coverage-summary.json" \
+            2>&1 | tee "${RUNNER_TEMP}/coverage-parser.log"
+          parser_status=${PIPESTATUS[0]}
+          set -e
+
+          has_pr_coverage=false
+          if [ -s "$GITHUB_WORKSPACE/coverage-summary.json" ]; then
+            has_pr_coverage=$(jq -r '.has_pr_coverage' "$GITHUB_WORKSPACE/coverage-summary.json")
+            echo "overall_coverage=$(jq -r '.overall_coverage' "$GITHUB_WORKSPACE/coverage-summary.json")" >> "$GITHUB_OUTPUT"
+            echo "pr_coverage=$(jq -r '.pr_coverage' "$GITHUB_WORKSPACE/coverage-summary.json")" >> "$GITHUB_OUTPUT"
+            echo "coverage_approved=$(jq -r '.approved' "$GITHUB_WORKSPACE/coverage-summary.json")" >> "$GITHUB_OUTPUT"
+          fi
+          echo "has_pr_coverage=${has_pr_coverage}" >> "$GITHUB_OUTPUT"
+
+          # Preserve the legacy PR-focused HTML semantics and generate it even
+          # when the coverage threshold rejects the PR.
+          if [ "${has_pr_coverage}" = 'true' ]; then
+            test -s "$GITHUB_WORKSPACE/pr_coverage.out"
+            cd "$GITHUB_WORKSPACE/matrixone"
+            go tool cover \
+              -o "$GITHUB_WORKSPACE/matrixone/pr_coverage.html" \
+              -html="$GITHUB_WORKSPACE/pr_coverage.out"
+          fi
+          exit "${parser_status}"
       - name: Summarize coverage merge result
         if: ${{ always() && !cancelled() }}
         run: |
@@ -103,22 +187,64 @@ jobs:
           echo '### Coverage merge result' >> "$GITHUB_STEP_SUMMARY"
           echo "- Merge step: \`${{ steps.merge_coverage.outcome }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo '- Expected inputs: one UT profile and two BVT profiles.' >> "$GITHUB_STEP_SUMMARY"
+          summary="$GITHUB_WORKSPACE/coverage-summary.json"
+          if [ -s "${summary}" ]; then
+            overall=$(jq -r '.overall_coverage' "${summary}")
+            pr_rate=$(jq -r '.pr_coverage' "${summary}")
+            threshold=$(jq -r '.minimal_coverage' "${summary}")
+            covered=$(jq -r '.covered_modified_lines' "${summary}")
+            total=$(jq -r '.total_modified_lines' "${summary}")
+            has_changes=$(jq -r '.has_go_changes' "${summary}")
+            has_pr_coverage=$(jq -r '.has_pr_coverage' "${summary}")
+            approved=$(jq -r '.approved' "${summary}")
+            overall_pct=$(awk -v rate="${overall}" 'BEGIN { printf "%.2f%%", rate * 100 }')
+            pr_pct=$(awk -v rate="${pr_rate}" 'BEGIN { printf "%.2f%%", rate * 100 }')
+            threshold_pct=$(awk -v rate="${threshold}" 'BEGIN { printf "%.2f%%", rate * 100 }')
+            echo "- Overall coverage: \`${overall_pct}\`" >> "$GITHUB_STEP_SUMMARY"
+            if [ "${has_pr_coverage}" = 'true' ]; then
+              if [ "${approved}" = 'true' ]; then
+                gate='PASS'
+              else
+                gate='FAIL'
+              fi
+              echo "- Changed-code coverage: \`${covered}/${total} (${pr_pct})\`" >> "$GITHUB_STEP_SUMMARY"
+              echo "- Required changed-code coverage: \`>${threshold_pct}\`" >> "$GITHUB_STEP_SUMMARY"
+              echo "- Coverage gate: \`${gate}\`" >> "$GITHUB_STEP_SUMMARY"
+            elif [ "${has_changes}" = 'true' ]; then
+              if [ "${approved}" = 'true' ]; then
+                gate='PASS'
+              else
+                gate='FAIL'
+              fi
+              echo '- Changed-code coverage: Go changes were found, but no instrumented blocks matched the coverage profiles.' >> "$GITHUB_STEP_SUMMARY"
+              echo "- Coverage gate: \`${gate}\`" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo '- Changed-code coverage: no modified Go blocks; gate passes.' >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo '- Coverage rates unavailable because profile processing failed before the summary was written.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -s "${RUNNER_TEMP}/bvt-group-manifests.json" ]; then
+            echo '' >> "$GITHUB_STEP_SUMMARY"
+            echo '#### BVT group manifests' >> "$GITHUB_STEP_SUMMARY"
+            echo '' >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            jq . "${RUNNER_TEMP}/bvt-group-manifests.json" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
           echo '' >> "$GITHUB_STEP_SUMMARY"
           echo '#### Downloaded profiles' >> "$GITHUB_STEP_SUMMARY"
           echo '' >> "$GITHUB_STEP_SUMMARY"
           echo '```text' >> "$GITHUB_STEP_SUMMARY"
-          inventory="${RUNNER_TEMP}/coverage-inputs.txt"
-          find "$GITHUB_WORKSPACE/coverage-artifacts" -type f -name '*.out' \
-            -printf '%f %s bytes\n' 2>/dev/null | sort > "${inventory}" || true
-          cat "${inventory}" >> "$GITHUB_STEP_SUMMARY"
+          cat "${RUNNER_TEMP}/coverage-inputs.txt" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           if [ "${{ steps.merge_coverage.outcome }}" = 'success' ]; then
-            echo '- Result: `final-result-files` contains the merged profile and HTML report.' >> "$GITHUB_STEP_SUMMARY"
+            echo '- Result: `final-result-files` contains the changed-code profile, merged profile, summary, and PR coverage HTML.' >> "$GITHUB_STEP_SUMMARY"
           else
             echo '- Diagnostics: `coverage-merge-debug` contains the input inventory and PR diff; `final-result-files` retains any merged outputs.' >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Upload coverage result
-        if: ${{ always() && !cancelled() }}
+        if: ${{ always() && !cancelled() && steps.merge_coverage.outputs.has_pr_coverage == 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: final-result-files
@@ -126,7 +252,8 @@ jobs:
             ${{ github.workspace }}/matrixone/pr_coverage.html
             ${{ github.workspace }}/pr_coverage.out
             ${{ github.workspace }}/merged_coverage.out
-          if-no-files-found: warn
+            ${{ github.workspace }}/coverage-summary.json
+          if-no-files-found: error
           retention-days: 7
       - name: Upload coverage merge diagnostics
         if: ${{ failure() && !cancelled() }}
@@ -135,6 +262,9 @@ jobs:
           name: coverage-merge-debug
           path: |
             ${{ runner.temp }}/coverage-inputs.txt
+            ${{ runner.temp }}/coverage-parser.log
+            ${{ runner.temp }}/bvt-group-manifests.json
             ${{ github.workspace }}/matrixone/diff.patch
+            ${{ github.workspace }}/coverage-summary.json
           if-no-files-found: warn
           retention-days: 1

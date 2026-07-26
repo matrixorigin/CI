@@ -121,7 +121,7 @@ jobs:
     # out the parallel producers. The new entrypoint disables this job in the
     # same commit that starts coverage-ut.yaml and coverage-merge.yaml.
     if: ${{ inputs.enable_legacy_coverage && (needs.check_organization_user.outputs.safe_label == '1' || needs.check_organization_user.outputs.in_org == '1') && needs.check_organization_user.outputs.coverage_secrets_available == 'true' }}
-    name: Coverage
+    name: ${{ inputs.enable_legacy_coverage && 'Coverage' || 'Legacy Coverage (disabled)' }}
     needs: [check_organization_user]
     environment: ci
     # If the runner/workspace layout changes, also update setup-env's go-version-file below.
