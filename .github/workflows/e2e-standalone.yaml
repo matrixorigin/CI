@@ -3,6 +3,11 @@ name: MatrixOne e2e CI(Standalone)
 on:
   workflow_call:
     inputs:
+      enable_parallel_bvt:
+        description: "Run only complementary Launch + Pessimistic BVT and emit coverage"
+        required: false
+        type: boolean
+        default: false
       bvt_group:
         description: "BVT group assigned by the caller (0 or 1)"
         required: false
@@ -158,9 +163,9 @@ jobs:
   multi-cn-proxy-bvt-linux-x86:
     # Compose + Proxy is the active proxy coverage deployment. Keep the
     # native proxy launcher out of the PR matrix until it has a distinct role.
-    if: false
+    if: ${{ !inputs.enable_parallel_bvt }}
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
-    name: Legacy Multi-CN e2e BVT Test on Linux/x64(LAUNCH, PROXY) (disabled)
+    name: ${{ inputs.enable_parallel_bvt && 'Legacy Multi-CN e2e BVT Test on Linux/x64(LAUNCH, PROXY) (disabled)' || 'Multi-CN e2e BVT Test on Linux/x64(LAUNCH, PROXY)' }}
     timeout-minutes: 75
     env:
       mo_reuse_enable_checker: true
@@ -271,7 +276,12 @@ jobs:
 
       - name: Build MatrixOne
         run: |
-          cd $GITHUB_WORKSPACE/head && make clean && make GOBUILD_OPT=-cover build
+          cd "$GITHUB_WORKSPACE/head"
+          if [ '${{ inputs.enable_parallel_bvt }}' = 'true' ]; then
+            make clean && make GOBUILD_OPT=-cover build
+          else
+            make clean && make build
+          fi
           git rev-parse --short HEAD
 
       - name: Add cn.txn
@@ -290,9 +300,11 @@ jobs:
       - name: Start MO
         run: |
           cd $GITHUB_WORKSPACE/head
-          export GOCOVERDIR="${RUNNER_TEMP}/bvt-coverage-pessimistic"
-          rm -rf "${GOCOVERDIR}"
-          mkdir -p "${GOCOVERDIR}"
+          if [ '${{ inputs.enable_parallel_bvt }}' = 'true' ]; then
+            export GOCOVERDIR="${RUNNER_TEMP}/bvt-coverage-pessimistic"
+            rm -rf "${GOCOVERDIR}"
+            mkdir -p "${GOCOVERDIR}"
+          fi
           ./optools/run_bvt.sh $GITHUB_WORKSPACE/head launch
 
       - name: Clone test-tool repository
@@ -314,6 +326,14 @@ jobs:
           sed -i 's/  port: [0-9]*/  port: 12345/g' mo.yml
           cat mo.yml
           echo "============================="
+
+          if [ '${{ inputs.enable_parallel_bvt }}' != 'true' ]; then
+            ./run.sh -n -g -o \
+              -p "$GITHUB_WORKSPACE/head/test/distributed/cases" \
+              -s "$GITHUB_WORKSPACE/head/test/distributed/resources" \
+              -e optimistic 2>&1
+            exit
+          fi
 
           bvt_group='${{ inputs.bvt_group }}'
           bvt_generation='${{ inputs.bvt_generation }}'
@@ -353,7 +373,7 @@ jobs:
             2>&1 | tee "${RUNNER_TEMP}/bvt-pessimistic.log"
 
       - name: Summarize Launch + Pessimistic BVT result
-        if: ${{ always() && !cancelled() }}
+        if: ${{ inputs.enable_parallel_bvt && always() && !cancelled() }}
         run: |
           set -euo pipefail
           report="${RUNNER_TEMP}/bvt-pessimistic.log"
@@ -384,7 +404,7 @@ jobs:
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Launch + Pessimistic BVT execution log
-        if: ${{ always() && !cancelled() }}
+        if: ${{ inputs.enable_parallel_bvt && always() && !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
           name: bvt-execution-pessimistic
@@ -408,6 +428,15 @@ jobs:
         if: ${{ always() && !cancelled() }}
         run: |
           set -uo pipefail
+          if [ '${{ inputs.enable_parallel_bvt }}' != 'true' ]; then
+            if pgrep -f 'mo-service' >/dev/null; then
+              pkill -9 mo-service
+            else
+              echo 'current mo-service has already crashed'
+              exit 1
+            fi
+            exit
+          fi
           coverage_dir="${RUNNER_TEMP}/bvt-coverage-pessimistic"
           coverage_profile="${RUNNER_TEMP}/bvt-pessimistic.out"
           pids=$(pgrep -f 'mo-service' || true)
@@ -432,7 +461,7 @@ jobs:
           fi
 
       - name: Upload Launch + Pessimistic BVT coverage
-        if: ${{ always() && !cancelled() }}
+        if: ${{ inputs.enable_parallel_bvt && always() && !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
           name: bvt-coverage-pessimistic-generation-${{ steps.bvt_on_pr_version.outputs.bvt_generation || format('{0}-{1}', github.run_id, github.run_attempt) }}-attempt-${{ github.run_attempt }}

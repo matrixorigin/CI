@@ -3,6 +3,11 @@ name: MatrixOne Compose Test
 on:
   workflow_call:
     inputs:
+      enable_parallel_bvt:
+        description: "Run the complementary Compose + Proxy BVT and emit coverage"
+        required: false
+        type: boolean
+        default: false
       bvt_group:
         description: "BVT group assigned by the caller (0 or 1)"
         required: false
@@ -192,10 +197,11 @@ jobs:
           retention-days: 7
 
   multi-CN-bvt-docker-compose-proxy:
+    if: ${{ inputs.enable_parallel_bvt || !github.event.pull_request.draft }}
     environment: ci
     # Match the existing PR BVT runner policy.
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
-    name: multi cn e2e bvt test docker compose(PROXY)
+    name: ${{ inputs.enable_parallel_bvt && 'multi cn e2e bvt test docker compose(PROXY)' || 'multi cn e2e bvt test docker compose(PESSIMISTIC)' }}
     timeout-minutes: 75
     steps:
       - name: Pre Clean Some Unneeded Images
@@ -244,11 +250,15 @@ jobs:
           # Handle various docker-compose volume formats: /test, /test:options, /test followed by space
           sed -i 's|:/test\b|:'"$GITHUB_WORKSPACE"'/test|g' ./etc/launch-tae-compose/compose.yaml
 
-          # Build once for this single Compose job. Splitting this image build
-          # into an artifact would add transfer time without reducing latency.
-          mkdir -p "$GITHUB_WORKSPACE/coverage"
-          docker build --build-arg GOBUILD_OPT=-cover \
-            -t matrixorigin/matrixone:latest . -f ./optools/images/Dockerfile
+          # Existing callers keep the legacy image and full Pessimistic BVT.
+          # The new MatrixOne main entrypoint explicitly enables coverage.
+          if [ '${{ inputs.enable_parallel_bvt }}' = 'true' ]; then
+            mkdir -p "$GITHUB_WORKSPACE/coverage"
+            docker build --build-arg GOBUILD_OPT=-cover \
+              -t matrixorigin/matrixone:latest . -f ./optools/images/Dockerfile
+          else
+            docker build -t matrixorigin/matrixone:latest . -f ./optools/images/Dockerfile
+          fi
 
           mkdir -p ${{ github.workspace }}/docker-compose-log
           docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn up -d
@@ -306,6 +316,11 @@ jobs:
           cat mo.yml
           echo "============================="
 
+          if [ '${{ inputs.enable_parallel_bvt }}' != 'true' ]; then
+            ./run.sh -n -g -o -p "$GITHUB_WORKSPACE/test/distributed/cases" -e optimistic 2>&1
+            exit
+          fi
+
           bvt_group='${{ inputs.bvt_group }}'
           bvt_generation='${{ inputs.bvt_generation }}'
           if [ -z "${bvt_group}" ]; then
@@ -342,7 +357,7 @@ jobs:
             "${bvt_group}" 2>&1 | tee "${RUNNER_TEMP}/bvt-compose.log"
 
       - name: Summarize Compose BVT result
-        if: ${{ always() && !cancelled() }}
+        if: ${{ inputs.enable_parallel_bvt && always() && !cancelled() }}
         run: |
           set -euo pipefail
           report="${RUNNER_TEMP}/bvt-compose.log"
@@ -373,7 +388,7 @@ jobs:
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Compose BVT execution log
-        if: ${{ always() && !cancelled() }}
+        if: ${{ inputs.enable_parallel_bvt && always() && !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
           name: bvt-execution-compose
@@ -420,7 +435,7 @@ jobs:
           docker volume rm launch-tae-compose_minio_storage || true
 
       - name: Generate Compose BVT coverage profile
-        if: ${{ always() && !cancelled() }}
+        if: ${{ inputs.enable_parallel_bvt && always() && !cancelled() }}
         run: |
           set -uo pipefail
           coverage_dir="$GITHUB_WORKSPACE/coverage"
@@ -435,7 +450,7 @@ jobs:
           fi
 
       - name: Upload Compose BVT coverage
-        if: ${{ always() && !cancelled() }}
+        if: ${{ inputs.enable_parallel_bvt && always() && !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
           name: bvt-coverage-compose-generation-${{ steps.bvt_on_pr_version.outputs.bvt_generation || format('{0}-{1}', github.run_id, github.run_attempt) }}-attempt-${{ github.run_attempt }}
@@ -449,7 +464,7 @@ jobs:
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
-          name: Compose-multi-cn-e2e-bvt-test-docker-log(PROXY)
+          name: ${{ inputs.enable_parallel_bvt && 'Compose-multi-cn-e2e-bvt-test-docker-log(PROXY)' || 'Compose-multi-cn-e2e-bvt-test-docker-log(PESSIMISTIC)' }}
           path: |
             ${{ github.workspace }}/docker-compose-log
           retention-days: 7
