@@ -121,21 +121,28 @@ jobs:
         run: |
           set -euo pipefail
           report="${RUNNER_TEMP}/ut-coverage-report.json"
-          echo '### Coverage UT timing' >> "$GITHUB_STEP_SUMMARY"
+          timing="${RUNNER_TEMP}/ut-coverage-top30.txt"
+          {
+            echo '### Coverage UT timing'
           if [ "${{ steps.coverage_ut.outcome }}" = 'failure' ]; then
-            echo '- Partial result: the failed run did not complete every test.' >> "$GITHUB_STEP_SUMMARY"
+              echo '- Partial result: the failed run did not complete every test.'
           fi
           if [ ! -s "${report}" ]; then
-            echo '- No Go JSON report was produced.' >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+              echo '- No Go JSON report was produced.'
+              exit 0
           fi
-          echo '' >> "$GITHUB_STEP_SUMMARY"
-          echo '#### Top 30 slowest completed tests' >> "$GITHUB_STEP_SUMMARY"
-          echo '' >> "$GITHUB_STEP_SUMMARY"
-          echo '```text' >> "$GITHUB_STEP_SUMMARY"
-          jq -r 'select(.Action == "pass" and (.Test | type == "string") and .Elapsed != null) | [(.Elapsed | tonumber), .Package, .Test] | @tsv' "${report}" \
-            | sort -nr -k1,1 | head -n 30 >> "$GITHUB_STEP_SUMMARY" || true
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          if ! jq -r 'select(.Action == "pass" and (.Test | type == "string") and .Elapsed != null) | [(.Elapsed | tonumber), .Package, .Test] | @tsv' "${report}" \
+            | sort -nr -k1,1 | awk 'NR <= 30 { print }' > "${timing}"; then
+              echo '::warning::failed to generate the UT timing summary'
+              exit 0
+          fi
+          echo ''
+          echo '#### Top 30 slowest completed tests'
+          echo ''
+          echo '```text'
+          cat "${timing}"
+          echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Print failed coverage UT packages and tests
         if: ${{ always() && !cancelled() && steps.coverage_secrets.outputs.ready == 'true' && steps.coverage_ut.outcome == 'failure' }}
         run: |
