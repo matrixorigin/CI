@@ -84,8 +84,10 @@ jobs:
         with:
           setup-java: true
           go-version-file: "${{ github.workspace }}/go.mod"
-      - name: Run coverage unit tests
+      - id: coverage_ut
+        name: Run coverage unit tests
         if: ${{ steps.coverage_secrets.outputs.ready == 'true' }}
+        continue-on-error: true
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
@@ -106,15 +108,44 @@ jobs:
           cgo_cflags="-I${GITHUB_WORKSPACE}/cgo -I${thirdparties_install_dir}/include"
           cgo_ldflags="-L${GITHUB_WORKSPACE}/cgo -lmo -L${thirdparties_install_dir}/lib -lusearch_c -Wl,-rpath,${thirdparties_install_dir}/lib -lm"
           coverage_profile="${RUNNER_TEMP}/ut-coverage.out"
+          coverage_report="${RUNNER_TEMP}/ut-coverage-report.json"
 
+          # Keep the same all-package coverage scope and external storage
+          # coverage as main. Save the verbose JSON report as an artifact
+          # rather than flooding the Actions console; the next step prints a
+          # concise parsed failure summary when this command fails.
+          set +e
           CGO_CFLAGS="${cgo_cflags}" CGO_LDFLAGS="${cgo_ldflags}" \
             go test -mod=readonly -json -short -v -tags matrixone_test -p 6 \
             -covermode=set -coverprofile="${coverage_profile}" -coverpkg="${cover_pkgs}" \
-            ${test_scope} | tee "${RUNNER_TEMP}/ut-coverage-report.json"
+            ${test_scope} \
+            > "${coverage_report}" 2>&1
+          test_status=$?
+          set -e
+          echo "test_status=${test_status}" >> "$GITHUB_OUTPUT"
+          if (( test_status != 0 )); then
+            exit "${test_status}"
+          fi
           test -s "${coverage_profile}"
           grep -Ev 'pkg/pb|pkg/sql/parsers/goyacc|yaccpar' "${coverage_profile}" > "${coverage_profile}.filtered" || true
           test -s "${coverage_profile}.filtered"
           mv "${coverage_profile}.filtered" "${coverage_profile}"
+      - name: Print failed coverage UT packages and tests
+        if: ${{ always() && !cancelled() && steps.coverage_secrets.outputs.ready == 'true' && steps.coverage_ut.outcome == 'failure' }}
+        run: |
+          set -euo pipefail
+          report="${RUNNER_TEMP}/ut-coverage-report.json"
+          echo '::group::Failed coverage UT packages'
+          if [ -s "${report}" ]; then
+            jq -r 'select(.Action == "fail" and .Package != null) | "FAIL \(.Package) (\(.Elapsed // 0)s)"' "${report}" | sort -u || true
+            echo '::endgroup::'
+            echo '::group::Failure details'
+            jq -r 'select(.Action == "output" and (.Output | test("panic: test timed out|--- FAIL:|^FAIL\\t"))) | "\(.Package // "unknown") / \(.Test // "package"): \(.Output | gsub("\\n$"; ""))"' "${report}" \
+              | tail -n 100 | cut -c 1-1000 || true
+          else
+            echo 'No JSON test report was produced; inspect the failed test step.'
+          fi
+          echo '::endgroup::'
       - name: Upload UT coverage
         if: ${{ always() && !cancelled() && steps.coverage_secrets.outputs.ready == 'true' }}
         uses: actions/upload-artifact@v7
@@ -125,3 +156,6 @@ jobs:
             ${{ runner.temp }}/ut-coverage-report.json
           if-no-files-found: warn
           retention-days: 7
+      - name: Fail on coverage UT failure
+        if: ${{ always() && !cancelled() && steps.coverage_secrets.outputs.ready == 'true' && steps.coverage_ut.outcome == 'failure' }}
+        run: exit 1
