@@ -16,6 +16,12 @@ on:
       TOKEN_ACTION:
         description: "Token for checkout (e.g. pull from fork/private)"
         required: false
+      TEST_S3FS_ALIYUN:
+        description: "Object storage configuration for UT coverage"
+        required: true
+      TEST_S3FS_QCLOUD:
+        description: "Object storage configuration for UT coverage"
+        required: true
       S3ENDPOINT:
         description: "S3ENDPOINT For Test"
         required: true
@@ -131,20 +137,8 @@ jobs:
       - name: Unit Testing
         id: ut
         run: |
-          set -euo pipefail
-          coverage_dir="${RUNNER_TEMP}/race-ut-coverage"
-          rm -rf "${coverage_dir}"
-          mkdir -p "${coverage_dir}"
           cd $GITHUB_WORKSPACE && make clean && make config
-          make ut UT_PARALLEL=${{ vars.UT_PARALLEL || 6 }} UT_TIMEOUT=${{ vars.UT_TIMEOUT || 40 }} UT_COVERAGE_DIR="${coverage_dir}"
-      - name: Upload race UT coverage
-        if: ${{ success() }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: race-ut-coverage
-          path: ${{ runner.temp }}/race-ut-coverage/ut-race-*.out
-          if-no-files-found: error
-          retention-days: 7
+          make ut UT_PARALLEL=${{ vars.UT_PARALLEL || 6 }} UT_TIMEOUT=${{ vars.UT_TIMEOUT || 40 }}
       - name: Print Result(Old)
         if: ${{ always() }}
         continue-on-error: true
@@ -192,6 +186,62 @@ jobs:
         continue-on-error: true
         run: |
           find ./ut-report -name top.txt -exec cat {} \;
+
+  ut-coverage-linux-x86:
+    environment: ci
+    runs-on: ${{ vars.COVERAGE_UT_RUNNER_LABEL || 'amd64-mo-guangzhou-2xlarge16' }}
+    name: UT Coverage on Linux/x86
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          token: ${{ secrets.TOKEN_ACTION }}
+          fetch-depth: "3"
+          repository: ${{ inputs.repository || github.event.pull_request.head.repo.full_name }}
+          ref: ${{ inputs.ref || github.event.pull_request.head.ref }}
+      - name: Set up Go
+        uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          setup-java: true
+          go-version-file: "${{ github.workspace }}/go.mod"
+      - name: Run coverage unit tests
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          export endpoint='${{ secrets.S3ENDPOINT }}'
+          export region='${{ secrets.S3REGION }}'
+          export apikey='${{ secrets.S3APIKEY }}'
+          export apisecret='${{ secrets.S3APISECRET }}'
+          export bucket='${{ secrets.S3BUCKET }}'
+          export TEST_S3FS_ALIYUN='${{ secrets.TEST_S3FS_ALIYUN }}'
+          export TEST_S3FS_QCLOUD='${{ secrets.TEST_S3FS_QCLOUD }}'
+
+          test_scope=$(go list -mod=readonly ./... | grep -v 'driver\|engine/aoe\|engine/memEngine\|pkg/catalog')
+          cover_pkgs=$(printf '%s\n' "${test_scope}" | paste -sd, -)
+          test -n "${cover_pkgs}"
+
+          make clean && make config && make cgo && make thirdparties
+          thirdparties_dir="$GITHUB_WORKSPACE/thirdparties"
+          thirdparties_install_dir="${thirdparties_dir}/install"
+          cgo_cflags="-I${GITHUB_WORKSPACE}/cgo -I${thirdparties_install_dir}/include"
+          cgo_ldflags="-L${GITHUB_WORKSPACE}/cgo -lmo -L${thirdparties_install_dir}/lib -lusearch_c -Wl,-rpath,${thirdparties_install_dir}/lib -lm"
+          coverage_profile="${RUNNER_TEMP}/ut-coverage.out"
+
+          CGO_CFLAGS="${cgo_cflags}" CGO_LDFLAGS="${cgo_ldflags}" \
+            go test -mod=readonly -json -short -v -tags matrixone_test -p 6 \
+            -covermode=set -coverprofile="${coverage_profile}" -coverpkg="${cover_pkgs}" \
+            ${test_scope} | tee "${RUNNER_TEMP}/ut-coverage-report.json"
+          test -s "${coverage_profile}"
+      - name: Upload UT coverage
+        if: ${{ always() && !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ut-coverage
+          path: |
+            ${{ runner.temp }}/ut-coverage.out
+            ${{ runner.temp }}/ut-coverage-report.json
+          if-no-files-found: warn
+          retention-days: 7
 
   ut-mac-x86:
     #if: ${{ !github.event.pull_request.draft }}

@@ -536,14 +536,14 @@ jobs:
           processed_dir="$GITHUB_WORKSPACE/coverage-processed"
           mkdir -p "${processed_dir}"
 
-          mapfile -t ut_profiles < <(find "${artifact_dir}" -type f -name 'ut-race-*.out' | sort)
+          mapfile -t ut_profiles < <(find "${artifact_dir}" -type f -name 'ut-coverage.out' | sort)
           mapfile -t bvt_profiles < <(find "${artifact_dir}" -type f -name 'bvt-*.out' | sort)
           if [ "${#ut_profiles[@]}" -eq 0 ]; then
-            echo "::error::race UT coverage artifact is missing"
+            echo "::error::UT coverage artifact is missing"
             exit 1
           fi
           if [ "${#bvt_profiles[@]}" -lt 3 ]; then
-            echo "::error::expected coverage from proxy, pessimistic, and compose BVT; found ${#bvt_profiles[@]} profile(s)"
+            echo "::error::expected coverage from two Compose Proxy jobs and one native pessimistic BVT job; found ${#bvt_profiles[@]} profile(s)"
             find "${artifact_dir}" -type f -print || true
             exit 1
           fi

@@ -154,6 +154,10 @@ jobs:
           retention-days: 7
 
   multi-cn-proxy-bvt-linux-x86:
+    # Compose now supplies the proxy deployment used by the PR BVT matrix.
+    # Keep this legacy launcher disabled until it is assigned to a separate
+    # scheduled compatibility workflow.
+    if: false
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
     name: Multi-CN e2e BVT Test on Linux/x64(LAUNCH, PROXY)
     timeout-minutes: 75
@@ -340,12 +344,17 @@ jobs:
         run: |
           export LC_ALL="C.UTF-8"
           locale
-          cd $GITHUB_WORKSPACE/mo-tester
-          sed -i 's/  port: [0-9]*/  port: 12345/g' mo.yml
-          cat mo.yml
+          sed -i 's/  port: [0-9]*/  port: 12345/g' "$GITHUB_WORKSPACE/mo-tester/mo.yml"
+          cat "$GITHUB_WORKSPACE/mo-tester/mo.yml"
           echo "============================="
-
-          ./run.sh -n -g -o -p $GITHUB_WORKSPACE/head/test/distributed/cases -s  $GITHUB_WORKSPACE/head/test/distributed/resources -e optimistic 2>&1
+          pr_number="${{ github.event.pull_request.number }}"
+          bvt_group=$(( (pr_number + 1) % 3 ))
+          echo "Pessimistic BVT: PR ${pr_number}, group ${bvt_group}"
+          cd $GITHUB_WORKSPACE/head
+          bash ./optools/run_bvt_group.sh \
+            "$GITHUB_WORKSPACE/mo-tester" \
+            "$GITHUB_WORKSPACE/head/test/distributed/cases" \
+            "${bvt_group}" 2>&1
 
       - name: Dump mo-service goroutines
         if: ${{ always() && !cancelled() }}
@@ -364,6 +373,7 @@ jobs:
         run: |
           set -uo pipefail
           coverage_dir="${RUNNER_TEMP}/bvt-coverage-pessimistic"
+          coverage_profile="${RUNNER_TEMP}/bvt-pessimistic.out"
           pids=$(pgrep -f 'mo-service' || true)
           if [ -n "${pids}" ]; then
             kill -TERM ${pids} || true
@@ -376,8 +386,8 @@ jobs:
           if [ -n "${pids}" ]; then
             kill -KILL ${pids} || true
           fi
-          if go tool covdata textfmt -i="${coverage_dir}" -o "${coverage_dir}/bvt-pessimistic.out"; then
-            test -s "${coverage_dir}/bvt-pessimistic.out"
+          if go tool covdata textfmt -i="${coverage_dir}" -o "${coverage_profile}"; then
+            test -s "${coverage_profile}"
           elif [ "${{ steps.bvt_on_pr_version.conclusion }}" = "success" ]; then
             echo "::error::failed to generate pessimistic BVT coverage after a successful BVT"
             exit 1
@@ -389,7 +399,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: bvt-coverage-pessimistic
-          path: ${{ runner.temp }}/bvt-coverage-pessimistic/bvt-pessimistic.out
+          path: ${{ runner.temp }}/bvt-pessimistic.out
           if-no-files-found: warn
           retention-days: 7
 

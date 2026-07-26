@@ -193,8 +193,14 @@ jobs:
     if: ${{ inputs.repository != '' || !github.event.pull_request.draft }}
     environment: ci
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
-    name: multi cn e2e bvt test docker compose(PESSIMISTIC)
+    name: multi cn e2e bvt test docker compose(PROXY, group ${{ matrix.group_offset }})
     timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        # Together with the native launch job's (PR + 1) group, these two
+        # slots execute every non-optimistic BVT case exactly once per PR.
+        group_offset: [0, 2]
     steps:
       - name: Pre Clean Some Unneeded Images
         run: |
@@ -234,9 +240,9 @@ jobs:
         timeout-minutes: 10
         run: |
           set -euo pipefail
-          export GOCOVERDIR="${GITHUB_WORKSPACE}/coverage"
-          rm -rf "${GOCOVERDIR}"
-          mkdir -p "${GOCOVERDIR}"
+          coverage_dir="${GITHUB_WORKSPACE}/coverage"
+          rm -rf "${coverage_dir}"
+          mkdir -p "${coverage_dir}"
           cat ./etc/launch-tae-compose/config/cn-0.toml
           cat ./etc/launch-tae-compose/config/cn-1.toml
           cat ./etc/launch-tae-compose/config/tn.toml
@@ -305,7 +311,14 @@ jobs:
           cat mo.yml
           echo "============================="
 
-          ./run.sh -n -g -o -p $GITHUB_WORKSPACE/test/distributed/cases -e optimistic 2>&1
+          pr_number="${{ github.event.pull_request.number }}"
+          bvt_group=$(( (pr_number + ${{ matrix.group_offset }}) % 3 ))
+          echo "Compose Proxy BVT: PR ${pr_number}, group ${bvt_group}"
+          cd "$GITHUB_WORKSPACE"
+          bash ./optools/run_bvt_group.sh \
+            "$GITHUB_WORKSPACE/mo-tester" \
+            "$GITHUB_WORKSPACE/test/distributed/cases" \
+            "${bvt_group}" 2>&1
 
       - name: Print Docker Info Before Container Shutdown
         if: ${{ always() }}
@@ -350,9 +363,10 @@ jobs:
         run: |
           set -uo pipefail
           coverage_dir="${GITHUB_WORKSPACE}/coverage"
+          coverage_profile="${RUNNER_TEMP}/bvt-compose-${{ matrix.group_offset }}.out"
           sudo chown -R "$(id -u):$(id -g)" "${coverage_dir}" || true
-          if go tool covdata textfmt -i="${coverage_dir}" -o "${coverage_dir}/bvt-compose.out"; then
-            test -s "${coverage_dir}/bvt-compose.out"
+          if go tool covdata textfmt -i="${coverage_dir}" -o "${coverage_profile}"; then
+            test -s "${coverage_profile}"
           elif [ "${{ steps.bvt_on_pr_version.conclusion }}" = "success" ]; then
             echo "::error::failed to generate compose BVT coverage after a successful BVT"
             exit 1
@@ -364,8 +378,8 @@ jobs:
         if: ${{ always() && !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
-          name: bvt-coverage-compose
-          path: ${{ github.workspace }}/coverage/bvt-compose.out
+          name: bvt-coverage-compose-${{ matrix.group_offset }}
+          path: ${{ runner.temp }}/bvt-compose-${{ matrix.group_offset }}.out
           if-no-files-found: warn
           retention-days: 7
 
@@ -373,7 +387,7 @@ jobs:
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
-          name: Compose-multi-cn-e2e-bvt-test-docker-log(PESSIMISTIC)
+          name: Compose-multi-cn-e2e-bvt-test-docker-log(PROXY,group-${{ matrix.group_offset }})
           path: |
             ${{ github.workspace }}/docker-compose-log
           retention-days: 7
