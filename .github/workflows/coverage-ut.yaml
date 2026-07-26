@@ -36,9 +36,10 @@ jobs:
   ut-coverage-linux-x86:
     name: UT Coverage on Ubuntu/x86
     environment: ci
-    # Match main's legacy coverage job. The external Aliyun/QCloud integration
-    # tests depend on its Guangzhou network path as well as their credentials.
-    runs-on: amd64-mo-guangzhou-2xlarge16
+    # Keep the Guangzhou network path used by main's external Aliyun/QCloud
+    # tests. Unlike the legacy serial job, this job runs UT only (no BVT), so
+    # use the smaller runner already used by cloud-resource CI tasks.
+    runs-on: amd64-mo-guangzhou-medium8
     timeout-minutes: 60
     outputs:
       coverage_ready: ${{ steps.coverage_secrets.outputs.ready }}
