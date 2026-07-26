@@ -17,6 +17,31 @@ on:
         required: false
 
 jobs:
+  build-compose-proxy-image:
+    if: ${{ inputs.repository != '' || !github.event.pull_request.draft }}
+    environment: ci
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
+    name: build Compose Proxy image
+    timeout-minutes: 30
+    steps:
+      - name: checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          token: ${{ secrets.TOKEN_ACTION }}
+          fetch-depth: "3"
+          repository: ${{ inputs.repository || github.event.pull_request.head.repo.full_name }}
+          ref: ${{ inputs.ref || github.event.pull_request.head.ref }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build and export Compose Proxy image cache
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./optools/images/Dockerfile
+          build-args: GOBUILD_OPT=-cover
+          cache-from: type=gha,scope=matrixone-compose-proxy-${{ github.event.pull_request.number || github.run_id }}
+          cache-to: type=gha,scope=matrixone-compose-proxy-${{ github.event.pull_request.number || github.run_id }},mode=max
+
   bvt-docker-compose-push:
     if: false
     environment: ci
@@ -191,6 +216,7 @@ jobs:
 
   multi-CN-bvt-docker-compose-pessimistic:
     if: ${{ inputs.repository != '' || !github.event.pull_request.draft }}
+    needs: build-compose-proxy-image
     environment: ci
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
     name: multi cn e2e bvt test docker compose(PROXY, group ${{ matrix.group_offset }})
@@ -226,6 +252,19 @@ jobs:
       - name: Print run attempt
         run: echo "run attempt is ${{ github.run_attempt }}"
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Load Compose Proxy image from shared build cache
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./optools/images/Dockerfile
+          tags: matrixorigin/matrixone:latest
+          load: true
+          build-args: GOBUILD_OPT=-cover
+          cache-from: type=gha,scope=matrixone-compose-proxy-${{ github.event.pull_request.number || github.run_id }}
+
       - name: Print Disk Usage Before Container Start
         if: ${{ always() }}
         run: |
@@ -251,9 +290,6 @@ jobs:
           # Replace container mount point from /test to $GITHUB_WORKSPACE/test
           # Handle various docker-compose volume formats: /test, /test:options, /test followed by space
           sed -i 's|:/test\b|:'"$GITHUB_WORKSPACE"'/test|g' ./etc/launch-tae-compose/compose.yaml
-
-          # build matrixone docker image first
-          docker build --build-arg GOBUILD_OPT=-cover -t matrixorigin/matrixone:latest . -f ./optools/images/Dockerfile
 
           mkdir -p ${{ github.workspace }}/docker-compose-log
           docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn up -d
