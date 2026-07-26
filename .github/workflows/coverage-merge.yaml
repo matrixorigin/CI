@@ -104,7 +104,9 @@ jobs:
       - name: Download test coverage artifacts
         uses: actions/download-artifact@v7
         with:
-          pattern: '*-coverage'
+          # The producers use ut-coverage and bvt-coverage-<deployment>.
+          # '*-coverage' only matches the former; retain all three inputs.
+          pattern: '*coverage*'
           merge-multiple: true
           path: ${{ github.workspace }}/coverage-artifacts
       - name: Merge UT and BVT coverage
