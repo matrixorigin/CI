@@ -314,10 +314,39 @@ jobs:
             echo "- Group: ${bvt_group}"
           } >> "$GITHUB_STEP_SUMMARY"
           cd "$GITHUB_WORKSPACE/head"
+          set -o pipefail
           bash ./optools/run_bvt_group.sh \
             "$GITHUB_WORKSPACE/mo-tester" \
             "$GITHUB_WORKSPACE/head/test/distributed/cases" \
-            "${bvt_group}" 2>&1
+            "${bvt_group}" 2>&1 | tee "${RUNNER_TEMP}/bvt-pessimistic.log"
+
+      - name: Summarize Launch + Pessimistic BVT result
+        if: ${{ always() && !cancelled() }}
+        run: |
+          set -euo pipefail
+          report="${RUNNER_TEMP}/bvt-pessimistic.log"
+          echo '### Launch + Pessimistic BVT result' >> "$GITHUB_STEP_SUMMARY"
+          if [ ! -s "${report}" ]; then
+            echo '- No BVT execution log was produced.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          grep '^Run BVT group' "${report}" | sed 's/^/- /' >> "$GITHUB_STEP_SUMMARY" || true
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo '#### Top 10 slow BVT scripts' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          sed -nE 's#.*script file\[(.*)\] has been executed, and cost: ([0-9.]+)s.*#\2s\t\1#p' "${report}" \
+            | sort -nr -k1,1 | head -n 10 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Launch + Pessimistic BVT execution log
+        if: ${{ always() && !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: bvt-execution-pessimistic
+          path: ${{ runner.temp }}/bvt-pessimistic.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Dump mo-service goroutines
         if: ${{ always() && !cancelled() }}

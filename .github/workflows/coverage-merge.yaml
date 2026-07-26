@@ -110,6 +110,7 @@ jobs:
           merge-multiple: true
           path: ${{ github.workspace }}/coverage-artifacts
       - name: Merge UT and BVT coverage
+        id: merge_coverage
         run: |
           set -euo pipefail
           artifact_dir="$GITHUB_WORKSPACE/coverage-artifacts"
@@ -141,6 +142,24 @@ jobs:
             -coverage_files "${coverage_files[@]}" \
             -diff_path "$GITHUB_WORKSPACE/matrixone/diff.patch"
           go tool cover -o "$GITHUB_WORKSPACE/matrixone/pr_coverage.html" -html=merged_coverage.out
+      - name: Summarize coverage merge result
+        if: ${{ always() && !cancelled() }}
+        run: |
+          set -euo pipefail
+          echo '### Coverage merge result' >> "$GITHUB_STEP_SUMMARY"
+          echo "- Merge step: \`${{ steps.merge_coverage.outcome }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo '- Expected inputs: one UT profile and two BVT profiles.' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo '#### Downloaded profiles' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          find "$GITHUB_WORKSPACE/coverage-artifacts" -type f -name '*.out' -printf '%f\n' 2>/dev/null | sort >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.merge_coverage.outcome }}" = 'success' ]; then
+            echo '- Result: `final-result-files` contains the merged profile and HTML report.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '- Diagnostics: download `coverage-merge-debug` for profiles, processed inputs, and the PR diff.' >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Upload coverage result
         if: ${{ always() && !cancelled() }}
         uses: actions/upload-artifact@v7

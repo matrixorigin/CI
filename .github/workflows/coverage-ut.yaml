@@ -116,6 +116,26 @@ jobs:
           grep -Ev 'pkg/pb|pkg/sql/parsers/goyacc|yaccpar' "${coverage_profile}" > "${coverage_profile}.filtered" || true
           test -s "${coverage_profile}.filtered"
           mv "${coverage_profile}.filtered" "${coverage_profile}"
+      - name: Summarize 30 slowest coverage UT tests
+        if: ${{ always() && !cancelled() && steps.coverage_secrets.outputs.ready == 'true' }}
+        run: |
+          set -euo pipefail
+          report="${RUNNER_TEMP}/ut-coverage-report.json"
+          echo '### Coverage UT timing' >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.coverage_ut.outcome }}" = 'failure' ]; then
+            echo '- Partial result: the failed run did not complete every test.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ ! -s "${report}" ]; then
+            echo '- No Go JSON report was produced.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo '#### Top 30 slowest completed tests' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          jq -r 'select(.Action == "pass" and (.Test | type == "string") and .Elapsed != null) | [(.Elapsed | tonumber), .Package, .Test] | @tsv' "${report}" \
+            | sort -nr -k1,1 | head -n 30 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
       - name: Print failed coverage UT packages and tests
         if: ${{ always() && !cancelled() && steps.coverage_secrets.outputs.ready == 'true' && steps.coverage_ut.outcome == 'failure' }}
         run: |
@@ -132,14 +152,55 @@ jobs:
             echo 'No JSON test report was produced; inspect the failed test step.'
           fi
           echo '::endgroup::'
-      - name: Upload UT coverage
+      # Match the legacy coverage job's actionable failure report while keeping
+      # the large JSON stream out of successful coverage artifacts.
+      - name: Checkout CI repository for UT failure summary
+        if: ${{ always() && !cancelled() && steps.coverage_secrets.outputs.ready == 'true' && steps.coverage_ut.outcome == 'failure' }}
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.TOKEN_ACTION }}
+          repository: matrixorigin/CI
+          fetch-depth: "1"
+          path: CI
+      - name: Analyze and summarize failed coverage UT
+        if: ${{ always() && !cancelled() && steps.coverage_secrets.outputs.ready == 'true' && steps.coverage_ut.outcome == 'failure' }}
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          report="${RUNNER_TEMP}/ut-coverage-report.json"
+          summary="${RUNNER_TEMP}/ut-failure-summary.md"
+          : > "${summary}"
+          if [ ! -s "${report}" ]; then
+            echo 'UT JSON report was not produced; inspect the failed test step.' | tee -a "${summary}"
+          else
+            go install github.com/matrixorigin/go-ut-analysis@latest || true
+            if command -v go-ut-analysis >/dev/null 2>&1; then
+              go-ut-analysis test -f "${report}" --first 10 --report-path "${RUNNER_TEMP}/ut-report" --stdout=false || true
+            else
+              echo 'go-ut-analysis is unavailable; the raw JSON report is attached.' | tee -a "${summary}"
+            fi
+            python "$GITHUB_WORKSPACE/CI/scripts/summarize_ut_report.py" "${report}" | tee -a "${summary}" || true
+          fi
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            cat "${summary}" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload UT coverage profile
         if: ${{ always() && !cancelled() && steps.coverage_secrets.outputs.ready == 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: ut-coverage
+          path: ${{ runner.temp }}/ut-coverage.out
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Upload failed UT diagnostics
+        if: ${{ always() && !cancelled() && steps.coverage_secrets.outputs.ready == 'true' && steps.coverage_ut.outcome == 'failure' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ut-coverage-diagnostics
           path: |
-            ${{ runner.temp }}/ut-coverage.out
             ${{ runner.temp }}/ut-coverage-report.json
+            ${{ runner.temp }}/ut-failure-summary.md
+            ${{ runner.temp }}/ut-report
           if-no-files-found: warn
           retention-days: 7
       - name: Fail on coverage UT failure
