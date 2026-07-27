@@ -107,8 +107,22 @@ jobs:
 
           mapfile -t ut_profiles < <(find "${artifact_dir}" -type f -name 'ut-coverage.out' | sort)
           mapfile -t bvt_profiles < <(find "${artifact_dir}" -type f -name 'bvt-*.out' | sort)
-          if [ "${#ut_profiles[@]}" -ne 1 ] || [ "${#bvt_profiles[@]}" -ne 2 ]; then
-            echo '::error::expected one UT profile and two BVT profiles'
+          if [ "${#ut_profiles[@]}" -ne 1 ]; then
+            echo '::error::expected exactly one UT profile'
+            find "${artifact_dir}" -type f -print || true
+            exit 1
+          fi
+          if [ '${{ github.base_ref }}' = 'main' ]; then
+            if [ "${#bvt_profiles[@]}" -ne 2 ]; then
+              echo '::error::expected two BVT profiles on main'
+              find "${artifact_dir}" -type f -print || true
+              exit 1
+            fi
+          elif [ "${#bvt_profiles[@]}" -eq 1 ] \
+            && [ "$(basename "${bvt_profiles[0]}")" = 'bvt-standalone.out' ]; then
+            echo '::warning::merging coverage without the unsupported legacy Compose profile'
+          elif [ "${#bvt_profiles[@]}" -ne 2 ]; then
+            echo '::error::expected two BVT profiles, or the standalone profile alone on a legacy branch'
             find "${artifact_dir}" -type f -print || true
             exit 1
           fi
