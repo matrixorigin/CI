@@ -216,7 +216,10 @@ jobs:
 
   sca:
     environment: ci
-    runs-on: ${{ vars.SCA_RUNNER_LABEL || 'arm64-mo-shanghai-8c16g' }}
+    # SCA is CPU-bound but does not run the database or BVT; validate it on
+    # the smaller standard ARM runner. A repository variable remains an
+    # explicit escape hatch for a larger runner.
+    runs-on: ${{ vars.SCA_RUNNER_LABEL || 'arm64-mo-shanghai-4c8g' }}
     name: SCA Test on Linux/arm64
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3

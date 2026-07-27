@@ -1,0 +1,359 @@
+name: MatrixOne UT Coverage
+
+on:
+  workflow_call:
+    inputs:
+      bvt_generation:
+        description: "Shared CI generation used to select this run's coverage artifacts"
+        required: false
+        type: string
+        default: ""
+    outputs:
+      coverage_ready:
+        description: "Whether the UT coverage profile was eligible to run"
+        value: ${{ jobs.check_coverage_eligibility.outputs.allowed }}
+    secrets:
+      TOKEN_ACTION:
+        description: "Token for checkout (e.g. pull from fork/private)"
+        required: false
+      TEST_S3FS_ALIYUN:
+        description: "Object storage configuration for UT coverage"
+        required: false
+      TEST_S3FS_QCLOUD:
+        description: "Object storage configuration for UT coverage"
+        required: false
+      S3ENDPOINT:
+        description: "S3ENDPOINT For Test"
+        required: false
+      S3REGION:
+        description: "S3REGION For Test"
+        required: false
+      S3APIKEY:
+        description: "S3APIKEY For Test"
+        required: false
+      S3APISECRET:
+        description: "S3APISECRET For Test"
+        required: false
+      S3BUCKET:
+        description: "S3BUCKET For Test"
+        required: false
+
+jobs:
+  check_coverage_eligibility:
+    name: Check coverage eligibility
+    environment: ci
+    runs-on: ubuntu-latest
+    outputs:
+      allowed: ${{ steps.eligibility.outputs.allowed }}
+    steps:
+      - id: check_in_org
+        name: Check organization membership
+        env:
+          GH_TOKEN: ${{ secrets.TOKEN_ACTION }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -euo pipefail
+          page=1
+          user_in_org=0
+          while :; do
+            users=$(curl -fsSL \
+              -H 'Accept: application/vnd.github+json' \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/orgs/matrixorigin/members?page=${page}&per_page=100")
+            if jq -e --arg user "${PR_AUTHOR}" '.[] | select(.login == $user)' <<<"${users}" >/dev/null; then
+              user_in_org=1
+              break
+            fi
+            [ "$(jq length <<<"${users}")" -eq 100 ] || break
+            page=$((page + 1))
+          done
+          echo "in_org=${user_in_org}" >> "$GITHUB_OUTPUT"
+      - id: check_safe_label
+        name: Check pull request label
+        env:
+          GH_TOKEN: ${{ secrets.TOKEN_ACTION }}
+          PR_URL: ${{ github.event.pull_request.url }}
+        run: |
+          set -euo pipefail
+          labels=$(curl -fsSL \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "${PR_URL}" | jq -r '.labels[].name')
+          if grep -Fxq 'safe-to-test' <<<"${labels}"; then
+            echo 'safe_label=1' >> "$GITHUB_OUTPUT"
+          else
+            echo 'safe_label=0' >> "$GITHUB_OUTPUT"
+          fi
+      - id: check_coverage_secrets
+        name: Check coverage secrets
+        env:
+          TEST_S3FS_ALIYUN: ${{ secrets.TEST_S3FS_ALIYUN }}
+          TEST_S3FS_QCLOUD: ${{ secrets.TEST_S3FS_QCLOUD }}
+          S3ENDPOINT: ${{ secrets.S3ENDPOINT }}
+          S3REGION: ${{ secrets.S3REGION }}
+          S3APIKEY: ${{ secrets.S3APIKEY }}
+          S3APISECRET: ${{ secrets.S3APISECRET }}
+          S3BUCKET: ${{ secrets.S3BUCKET }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD S3ENDPOINT S3REGION S3APIKEY S3APISECRET S3BUCKET; do
+            if [ -z "${!name:-}" ]; then
+              missing+=("${name}")
+            fi
+          done
+          if [ "${#missing[@]}" -eq 0 ]; then
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+            echo "::notice::UT coverage skipped because required secrets are unavailable: ${missing[*]}"
+          fi
+      - id: eligibility
+        name: Decide coverage eligibility
+        env:
+          IN_ORG: ${{ steps.check_in_org.outputs.in_org }}
+          SAFE_LABEL: ${{ steps.check_safe_label.outputs.safe_label }}
+          SECRETS_READY: ${{ steps.check_coverage_secrets.outputs.ready }}
+        run: |
+          set -euo pipefail
+          if { [ "${IN_ORG}" = '1' ] || [ "${SAFE_LABEL}" = '1' ]; } && [ "${SECRETS_READY}" = 'true' ]; then
+            echo 'allowed=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'allowed=false' >> "$GITHUB_OUTPUT"
+            if [ "${IN_ORG}" != '1' ] && [ "${SAFE_LABEL}" != '1' ]; then
+              echo '::notice::UT coverage skipped for an untrusted pull request'
+            fi
+          fi
+
+  ut-coverage-linux-x86:
+    name: UT Coverage on Ubuntu/x86
+    needs: [check_coverage_eligibility]
+    if: ${{ needs.check_coverage_eligibility.outputs.allowed == 'true' }}
+    environment: ci
+    # Preserve the Guangzhou network path and capacity used by main's
+    # external Aliyun/QCloud coverage UT. This is intentionally larger than
+    # the UT-only minimum while we validate the external-storage timeout fix.
+    runs-on: amd64-mo-guangzhou-2xlarge16
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          token: ${{ secrets.TOKEN_ACTION }}
+          fetch-depth: "3"
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Set up Go
+        uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          setup-java: true
+          go-version-file: "${{ github.workspace }}/go.mod"
+      - id: coverage_ut
+        name: Run coverage unit tests
+        timeout-minutes: 45
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          export endpoint='${{ secrets.S3ENDPOINT }}'
+          export region='${{ secrets.S3REGION }}'
+          export apikey='${{ secrets.S3APIKEY }}'
+          export apisecret='${{ secrets.S3APISECRET }}'
+          export bucket='${{ secrets.S3BUCKET }}'
+          export TEST_S3FS_ALIYUN='${{ secrets.TEST_S3FS_ALIYUN }}'
+          export TEST_S3FS_QCLOUD='${{ secrets.TEST_S3FS_QCLOUD }}'
+
+          test_scope=$(go list -mod=readonly ./... | grep -v 'driver\|engine/aoe\|engine/memEngine\|pkg/catalog')
+          cover_pkgs=$(printf '%s\n' "${test_scope}" | paste -sd, -)
+          test -n "${cover_pkgs}"
+
+          make clean && make config && make cgo && make thirdparties
+          thirdparties_install_dir="$GITHUB_WORKSPACE/thirdparties/install"
+          cgo_cflags="-I${GITHUB_WORKSPACE}/cgo -I${thirdparties_install_dir}/include"
+          cgo_ldflags="-L${GITHUB_WORKSPACE}/cgo -lmo -L${thirdparties_install_dir}/lib -lusearch_c -Wl,-rpath,${thirdparties_install_dir}/lib -lm"
+          coverage_profile="${RUNNER_TEMP}/ut-coverage.out"
+          coverage_report="${RUNNER_TEMP}/ut-coverage-report.json"
+
+          # Keep the same all-package coverage scope and external storage
+          # coverage as main. Save the verbose JSON report as an artifact
+          # rather than flooding the Actions console; the next step prints a
+          # concise parsed failure summary when this command fails.
+          set +e
+          CGO_CFLAGS="${cgo_cflags}" CGO_LDFLAGS="${cgo_ldflags}" \
+            go test -mod=readonly -json -short -v -tags matrixone_test -p 6 \
+            -covermode=set -coverprofile="${coverage_profile}" -coverpkg="${cover_pkgs}" \
+            ${test_scope} \
+            > "${coverage_report}" 2>&1
+          test_status=$?
+          set -e
+          echo "test_status=${test_status}" >> "$GITHUB_OUTPUT"
+          if (( test_status != 0 )); then
+            exit "${test_status}"
+          fi
+          test -s "${coverage_profile}"
+          raw_coverage_bytes=$(wc -c < "${coverage_profile}")
+          # -coverpkg emits the same instrumented block once per tested
+          # package. Collapse those duplicate records before crossing the
+          # artifact boundary; the coverage gate only needs hit/not-hit
+          # semantics and parse_coverage.py applies the same max(hit) merge.
+          LC_ALL=C awk '
+            NR == 1 { next }
+            $1 ~ /pkg\/pb|pkg\/sql\/parsers\/goyacc|yaccpar/ { next }
+            NF >= 3 {
+              key = $1 " " $2
+              hit = ($3 + 0 > 0) ? 1 : 0
+              if (!(key in coverage) || hit > coverage[key]) {
+                coverage[key] = hit
+              }
+            }
+            END {
+              print "mode: set"
+              for (key in coverage) {
+                print key, coverage[key]
+              }
+            }
+          ' "${coverage_profile}" > "${coverage_profile}.compacted"
+          test "$(wc -l < "${coverage_profile}.compacted")" -gt 1
+          mv "${coverage_profile}.compacted" "${coverage_profile}"
+          compacted_coverage_bytes=$(wc -c < "${coverage_profile}")
+          echo "UT coverage profile compacted from ${raw_coverage_bytes} to ${compacted_coverage_bytes} bytes"
+      - name: Summarize 30 slowest coverage UT tests
+        if: ${{ always() && !cancelled() }}
+        run: |
+          set -euo pipefail
+          report="${RUNNER_TEMP}/ut-coverage-report.json"
+          timing="${RUNNER_TEMP}/ut-coverage-top30.txt"
+          {
+            echo '### Coverage UT timing'
+          if [ "${{ steps.coverage_ut.outcome }}" = 'failure' ]; then
+              echo '- Partial result: the failed run did not complete every test.'
+          fi
+          if [ ! -s "${report}" ]; then
+              echo '- No Go JSON report was produced.'
+              exit 0
+          fi
+          if ! jq -r 'select(.Action == "pass" and (.Test | type == "string") and .Elapsed != null) | [(.Elapsed | tonumber), .Package, .Test] | @tsv' "${report}" \
+            | sort -nr -k1,1 | awk 'NR <= 30 { print }' > "${timing}"; then
+              echo '::warning::failed to generate the UT timing summary'
+              exit 0
+          fi
+          echo ''
+          echo '#### Top 30 slowest completed tests'
+          echo ''
+          echo '```text'
+          cat "${timing}"
+          echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Print failed coverage UT packages and tests
+        if: ${{ always() && !cancelled() && steps.coverage_ut.outcome == 'failure' }}
+        run: |
+          set -euo pipefail
+          report="${RUNNER_TEMP}/ut-coverage-report.json"
+          echo '::group::Failed coverage UT packages'
+          if [ -s "${report}" ]; then
+            jq -r 'select(.Action == "fail" and .Package != null) | "FAIL \(.Package) (\(.Elapsed // 0)s)"' "${report}" | sort -u || true
+            echo '::endgroup::'
+            echo '::group::Failure details'
+            jq -r 'select(.Action == "output" and (.Output | test("panic: test timed out|--- FAIL:|^FAIL\\t"))) | "\(.Package // "unknown") / \(.Test // "package"): \(.Output | gsub("\\n$"; ""))"' "${report}" \
+              | tail -n 100 | cut -c 1-1000 || true
+          else
+            echo 'No JSON test report was produced; inspect the failed test step.'
+          fi
+          echo '::endgroup::'
+      # Match the legacy coverage job's actionable failure report while keeping
+      # the large JSON stream out of successful coverage artifacts.
+      - name: Checkout CI repository for UT failure summary
+        if: ${{ always() && !cancelled() && steps.coverage_ut.outcome == 'failure' }}
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.TOKEN_ACTION }}
+          repository: matrixorigin/CI
+          fetch-depth: "1"
+          path: CI
+      - name: Analyze and summarize failed coverage UT
+        if: ${{ always() && !cancelled() && steps.coverage_ut.outcome == 'failure' }}
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          report="${RUNNER_TEMP}/ut-coverage-report.json"
+          summary="${RUNNER_TEMP}/ut-failure-summary.md"
+          : > "${summary}"
+          if [ ! -s "${report}" ]; then
+            echo 'UT JSON report was not produced; inspect the failed test step.' | tee -a "${summary}"
+          else
+            go install github.com/matrixorigin/go-ut-analysis@latest || true
+            if command -v go-ut-analysis >/dev/null 2>&1; then
+              go-ut-analysis test -f "${report}" --first 10 --report-path "${RUNNER_TEMP}/ut-report" --stdout=false || true
+            else
+              echo 'go-ut-analysis is unavailable; the raw JSON report is attached.' | tee -a "${summary}"
+            fi
+            python "$GITHUB_WORKSPACE/CI/scripts/summarize_ut_report.py" "${report}" | tee -a "${summary}" || true
+          fi
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            cat "${summary}" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Collect coverage UT runner diagnostics
+        if: ${{ always() && !cancelled() && steps.coverage_ut.outcome == 'failure' }}
+        continue-on-error: true
+        run: |
+          set +e
+          diagnostics="${RUNNER_TEMP}/ut-runner-diagnostics.txt"
+          {
+            echo '## Memory'
+            free -h
+            echo
+            echo '## Disk'
+            df -h
+            echo
+            echo '## Limits'
+            ulimit -a
+            echo
+            echo '## Largest processes by RSS'
+            ps -eo pid,ppid,rss,vsz,stat,etime,cmd --sort=-rss | head -n 50
+            echo
+            echo '## Cgroup memory'
+            for file in /sys/fs/cgroup/memory.current /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory.events; do
+              echo "### ${file}"
+              if [ -r "${file}" ]; then
+                cat "${file}"
+              else
+                echo unavailable
+              fi
+            done
+            echo
+            echo '## Recent kernel messages'
+            sudo dmesg -T 2>&1 | tail -n 1000
+          } | tee "${diagnostics}"
+          {
+            echo '### Coverage UT runner diagnostics'
+            echo "- Full diagnostics: \`ut-coverage-diagnostics-attempt-${{ github.run_attempt }}/ut-runner-diagnostics.txt\`"
+            if grep -Eqi 'out of memory|oom-kill|killed process' "${diagnostics}"; then
+              echo '- OOM signal: detected in runner diagnostics.'
+            else
+              echo '- OOM signal: not detected in available runner diagnostics.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload UT coverage profile
+        if: ${{ always() && !cancelled() && steps.coverage_ut.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ut-coverage-generation-${{ inputs.bvt_generation || format('{0}-{1}', github.run_id, github.run_attempt) }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ut-coverage.out
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Upload failed UT diagnostics
+        if: ${{ always() && !cancelled() && steps.coverage_ut.outcome == 'failure' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ut-coverage-diagnostics-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/ut-coverage-report.json
+            ${{ runner.temp }}/ut-failure-summary.md
+            ${{ runner.temp }}/ut-report
+            ${{ runner.temp }}/ut-runner-diagnostics.txt
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Fail on coverage UT failure
+        if: ${{ always() && !cancelled() && steps.coverage_ut.outcome == 'failure' }}
+        run: exit 1

@@ -4,6 +4,7 @@ import sys
 import logging
 import argparse
 import fnmatch
+import json
 
 # 设置日志配置
 logging.basicConfig(
@@ -56,7 +57,7 @@ def merge_coverage_files(output_path, *coverage_files):
 
     # 计算覆盖率
     coverage_percentage = (covered_blocks / total_blocks) if total_blocks > 0 else 0
-    logging.info(f"Total code blocks: {total_blocks}, Covered blocks: {covered_blocks}, Coverage: {coverage_percentage}%")
+    logging.info(f"Total code blocks: {total_blocks}, Covered blocks: {covered_blocks}, Coverage: {coverage_percentage:.2%}")
 
     # 将合并后的结果写入输出文件
     try:
@@ -278,7 +279,7 @@ def diff_coverage(diff_path, coverage_path, output_path='pr_coverage.out', ignor
 
     except Exception as e:
         logging.error(f"An error occurred during the process: {e}")
-        return 0,0,0
+        raise
 
 def is_valid_code_segment(segment):
     """判断一个代码片段是否包含有效的代码（忽略结构符号、关键字和空白）"""
@@ -452,6 +453,39 @@ def _line_matches_block(line_num, mincol, maxcol, block):
     return False
 
 
+def write_coverage_summary(
+    output_path,
+    total_blocks,
+    covered_blocks,
+    overall_coverage,
+    total_modified_lines,
+    covered_modified_lines,
+    pr_coverage,
+    minimal_coverage,
+    has_go_changes=None,
+):
+    """Write the coverage gate result before the caller enforces the threshold."""
+    if has_go_changes is None:
+        has_go_changes = total_modified_lines > 0
+    summary = {
+        "schema_version": 1,
+        "total_blocks": total_blocks,
+        "covered_blocks": covered_blocks,
+        "overall_coverage": overall_coverage,
+        "total_modified_lines": total_modified_lines,
+        "covered_modified_lines": covered_modified_lines,
+        "pr_coverage": pr_coverage,
+        "minimal_coverage": minimal_coverage,
+        "has_go_changes": has_go_changes,
+        "has_pr_coverage": total_modified_lines > 0,
+        "approved": pr_coverage > minimal_coverage,
+    }
+    with open(output_path, "w") as summary_file:
+        json.dump(summary, summary_file, indent=2, sort_keys=True)
+        summary_file.write("\n")
+    return summary
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Merge coverage files and calculate coverage based on diff.")
 
@@ -483,20 +517,39 @@ if __name__ == "__main__":
         help='Count coverage by line instead of block. Default is False (count by block).'
     )
 
+    parser.add_argument(
+        '-summary_path',
+        type=str,
+        default='coverage_summary.json',
+        help='Path for the machine-readable coverage summary.'
+    )
+
     args = parser.parse_args()
 
-    total_blocks, covered_blocks, coverage_percentage = merge_coverage_files('merged_coverage.out', *args.coverage_files)
-    logging.info(f"Total modified blocks: {total_blocks}, Covered blocks: {covered_blocks}, Coverage: {coverage_percentage:.2f}%")
+    total_blocks, covered_blocks, overall_coverage = merge_coverage_files('merged_coverage.out', *args.coverage_files)
+    logging.info(f"Total code blocks: {total_blocks}, Covered blocks: {covered_blocks}, Coverage: {overall_coverage:.2%}")
 
     # 调用主函数
     diff_path = args.diff_path  # 可以根据实际情况修改路径
     coverage_path = 'merged_coverage.out'  # 可以根据实际情况修改路径
-    total_modified_lines, covered_modified_lines, coverage_percentage = diff_coverage(diff_path, coverage_path, count_by_line=args.count_by_line)
-    logging.info(f"total_modified_lines: {total_modified_lines}, covered_modified_lines: {covered_modified_lines}, coverage_percentage:{coverage_percentage}")
+    total_modified_lines, covered_modified_lines, pr_coverage = diff_coverage(diff_path, coverage_path, count_by_line=args.count_by_line)
+    logging.info(f"total_modified_lines: {total_modified_lines}, covered_modified_lines: {covered_modified_lines}, coverage_percentage:{pr_coverage:.2%}")
 
-    if coverage_percentage <= args.minimal_coverage:
+    summary = write_coverage_summary(
+        args.summary_path,
+        total_blocks,
+        covered_blocks,
+        overall_coverage,
+        total_modified_lines,
+        covered_modified_lines,
+        pr_coverage,
+        args.minimal_coverage,
+        has_go_changes=os.path.exists("pr_coverage.out"),
+    )
+
+    if not summary["approved"]:
         parse_file_coverage(args.minimal_coverage)
-        logging.warning(f"The code coverage:{coverage_percentage} is below or equal {args.minimal_coverage}, not approved.")
+        logging.warning(f"The code coverage:{pr_coverage:.2%} is below or equal {args.minimal_coverage:.2%}, not approved.")
         sys.exit(1)
 
-    logging.info(f"The code coverage:{coverage_percentage} is above {args.minimal_coverage}, pass.")
+    logging.info(f"The code coverage:{pr_coverage:.2%} is above {args.minimal_coverage:.2%}, pass.")

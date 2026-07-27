@@ -1,11 +1,15 @@
 import pytest
 import os
+import json
+import subprocess
+import sys
 from parse_coverage import (
     parse_diff,
     parse_coverage_and_generate_report,
     merge_coverage_files,
     diff_coverage,
     normalize_path,
+    write_coverage_summary,
 )
 
 
@@ -231,7 +235,6 @@ github.com/matrixorigin/matrixone/pkg/sql/parser.go:10.1,20.2 5 1
         assert total == 3
         assert covered == 3
         assert pct == 1.0
-
     def test_multiple_lines_partial_coverage(self, tmp_path):
         """按块计数(默认): 2块，1covered → 50%"""
         coverage_content = """\
@@ -307,6 +310,93 @@ github.com/matrixorigin/matrixone/pkg/sql/parser.go:10.1,15.2 3 0
         assert total == 1
         assert covered == 0
         assert pct == 0.0
+
+
+class TestCoverageSummary:
+    def test_writes_rates_counts_and_gate_result(self, tmp_path):
+        summary_path = tmp_path / "coverage-summary.json"
+
+        summary = write_coverage_summary(
+            str(summary_path),
+            total_blocks=200,
+            covered_blocks=120,
+            overall_coverage=0.6,
+            total_modified_lines=4,
+            covered_modified_lines=3,
+            pr_coverage=0.75,
+            minimal_coverage=0.75,
+        )
+
+        assert summary["schema_version"] == 1
+        assert summary["has_go_changes"] is True
+        assert summary["has_pr_coverage"] is True
+        assert summary["approved"] is False
+        assert '"overall_coverage": 0.6' in summary_path.read_text()
+
+    def test_no_go_changes_is_explicit_and_passes(self, tmp_path):
+        summary = write_coverage_summary(
+            str(tmp_path / "coverage-summary.json"),
+            total_blocks=10,
+            covered_blocks=5,
+            overall_coverage=0.5,
+            total_modified_lines=0,
+            covered_modified_lines=0,
+            pr_coverage=1.0,
+            minimal_coverage=0.75,
+        )
+
+        assert summary["has_go_changes"] is False
+        assert summary["has_pr_coverage"] is False
+        assert summary["approved"] is True
+
+    def test_diff_coverage_propagates_parser_errors(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            diff_coverage(
+                str(tmp_path / "missing.diff"),
+                str(tmp_path / "missing-coverage.out"),
+                ignore_path=str(tmp_path / "missing.ignore"),
+            )
+
+    def test_cli_keeps_summary_and_pr_profile_when_gate_fails(self, tmp_path):
+        coverage_path = tmp_path / "coverage.out"
+        coverage_path.write_text(
+            "mode: set\n"
+            "github.com/matrixorigin/matrixone/pkg/example.go:1.1,2.2 1 0\n"
+        )
+        diff_path = tmp_path / "diff.patch"
+        diff_path.write_text(
+            "diff --git a/pkg/example.go b/pkg/example.go\n"
+            "--- a/pkg/example.go\n"
+            "+++ b/pkg/example.go\n"
+            "@@ -1,1 +1,1 @@\n"
+            "-old\n"
+            "+new\n"
+        )
+        (tmp_path / ".ignore").write_text("!*.go\n")
+        script_path = os.path.join(os.path.dirname(__file__), "parse_coverage.py")
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                script_path,
+                "-coverage_files",
+                str(coverage_path),
+                "-diff_path",
+                str(diff_path),
+                "-summary_path",
+                "coverage-summary.json",
+            ],
+            cwd=tmp_path,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 1
+        summary = json.loads((tmp_path / "coverage-summary.json").read_text())
+        assert summary["has_go_changes"] is True
+        assert summary["approved"] is False
+        assert (tmp_path / "pr_coverage.out").read_text().startswith("mode: set\n")
 
 
 class TestPathNormalization:
