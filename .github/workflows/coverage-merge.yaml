@@ -119,7 +119,7 @@ jobs:
               exit 1
             fi
           elif [ "${#bvt_profiles[@]}" -eq 1 ] \
-            && [ "$(basename "${bvt_profiles[0]}")" = 'bvt-standalone.out' ]; then
+            && [ "$(basename "${bvt_profiles[0]}")" = 'bvt-pessimistic.out' ]; then
             echo '::warning::merging coverage without the unsupported legacy Compose profile'
           elif [ "${#bvt_profiles[@]}" -ne 2 ]; then
             echo '::error::expected two BVT profiles, or the standalone profile alone on a legacy branch'
