@@ -430,6 +430,12 @@ jobs:
           set -uo pipefail
           coverage_dir="$GITHUB_WORKSPACE/coverage"
           coverage_profile="$RUNNER_TEMP/bvt-compose.out"
+          compose_file="$GITHUB_WORKSPACE/etc/launch-tae-compose/compose.yaml"
+          if ! grep -Eq 'GOCOVERDIR=/coverage' "${compose_file}" \
+            || ! grep -Eq 'coverage:/coverage' "${compose_file}"; then
+            echo '::warning::Compose BVT coverage is unsupported by this legacy branch; keeping the successful BVT result'
+            exit 0
+          fi
           if go tool covdata textfmt -i="${coverage_dir}" -o "${coverage_profile}"; then
             test -s "${coverage_profile}"
           elif [ "${{ steps.bvt_on_pr_version.conclusion }}" = "success" ]; then
