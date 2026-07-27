@@ -334,7 +334,14 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           cd "$GITHUB_WORKSPACE"
           set -o pipefail
-          bash ./optools/run_bvt_group.sh \
+          bvt_runner="$GITHUB_WORKSPACE/optools/run_bvt_group.sh"
+          if [ ! -f "${bvt_runner}" ]; then
+            bvt_runner="${RUNNER_TEMP}/run_bvt_group.sh"
+            curl --fail --silent --show-error --location \
+              "https://raw.githubusercontent.com/matrixorigin/matrixone/7cb78aa5f88e3b98163f6b3bffb5f71586c0cbbf/optools/run_bvt_group.sh" \
+              --output "${bvt_runner}"
+          fi
+          bash "${bvt_runner}" \
             "$GITHUB_WORKSPACE/mo-tester" \
             "$GITHUB_WORKSPACE/test/distributed/cases" \
             "${bvt_group}" 2>&1 | tee "${RUNNER_TEMP}/bvt-compose.log"
