@@ -732,6 +732,9 @@ jobs:
         if: ${{ always() && !cancelled() }}
         timeout-minutes: 20
         id: load_tpcc_data
+        env:
+          SYNC_USER: dump
+          SYNC_PASS: "111"
         run: |
           set -uo pipefail
           export LC_ALL="C.UTF-8"
