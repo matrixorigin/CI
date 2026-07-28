@@ -20,7 +20,7 @@ The CI repository baseline for this design is commit:
 1. Reduce BVT wall-clock time without adding one runner per tenant.
 2. Preserve the current union/disjoint guarantees of BVT groups 0 and 1.
 3. Keep global-state and cross-account tests serial.
-4. Produce an explainable per-script classification and a merged report.
+4. Produce an explainable per-directory classification and a merged report.
 5. Make the new path opt-in until shadow validation proves it stable.
 6. Leave the existing serial invocation available as an immediate fallback.
 
@@ -54,39 +54,29 @@ The baseline scan is anchored to MatrixOne commit:
 
 `d17b5a1f8e83cee4999181b9509af6126517985c`
 
-The full `test/distributed/cases` tree contains 1,155 `.sql` and `.test` scripts. The current PR coverage selection excludes paths containing `optimistic`, leaving 1,133 scripts.
+The full `test/distributed/cases` tree contains 1,155 `.sql` and `.test` scripts in 73 top-level directories. The current PR coverage selection excludes the `optimistic` directory, leaving 1,133 scripts in 72 top-level directories.
 
 The conservative initial classification is:
 
-| Phase | Scripts | Meaning |
-|---|---:|---|
-| `serial-before` | 29 | Ordered observability producers and verifiers that must run before tenant-generated traffic |
-| `parallel-candidate` | 749 | No known global-state rule matched; requires shadow validation |
-| `serial-after` | 355 | Cross-account, cluster-global, explicit-user, recovery, or other high-risk behavior |
+| Phase | Directories | Scripts | Meaning |
+|---|---:|---:|---|
+| `serial-before` | 5 | 29 | Ordered observability producers and verifiers that must run before tenant-generated traffic |
+| `parallel-candidate` | 29 | 215 | Every script in the directory passed the conservative scan; requires shadow validation |
+| `serial-after` | 38 | 889 | At least one script in the directory has cross-account, cluster-global, explicit-user, recovery, or other high-risk behavior |
 
-The 355 serial-after scripts are selected by exclusive first-match reason:
+The directory is the smallest scheduling and policy unit. The planner never divides scripts from the same top-level directory between phases or workers.
 
-| Reason | Scripts |
-|---|---:|
-| Serial suite override | 256 |
-| `mo_ctl` use | 41 |
-| Account DDL | 37 |
-| Explicit session user/password | 11 |
-| `SET GLOBAL` | 6 |
-| Sys account ID assumption | 1 |
-| `mo_catalog.mo_account` access | 1 |
-| Account restore | 1 |
-| `system_metrics` access | 1 |
-
-These numbers describe static candidates, not a claim that all 749 scripts are already safe. Shadow runs can only move scripts from parallel to serial unless a reviewed policy change explicitly relaxes a rule.
+This changes the expected optimization ceiling: only 215 of 1,133 scripts are initially parallel candidates. The simpler commands and safer maintenance are preferred over file-level parallel coverage; the actual wall-clock benefit must be established by shadow runs.
 
 ## Classification policy
 
-The policy is stored as data in `scripts/bvt_tenant_policy.json`. The planner emits `plan.json` and `inventory.tsv`, including the selected phase and every matching reason for every script.
+The policy is stored as data in `scripts/bvt_tenant_policy.json`. It lists each top-level directory, its phase, and its reason. The planner emits `plan.json` and `inventory.tsv` with one record per directory.
 
-### Serial-before suites
+The policy is explicit rather than reclassifying individual files at runtime. A newly added directory defaults to `serial-after` and is reported as unreviewed, so it is exercised but cannot enter a tenant worker without a policy review.
 
-The following suites run in their existing lexical order as sys before test tenants are created:
+### Serial-before directories
+
+The following directories run in their existing lexical order as sys before test tenants are created:
 
 - `log`
 - `result_count`
@@ -96,29 +86,90 @@ The following suites run in their existing lexical order as sys before test tena
 
 They inspect statement, log, and result metadata. Running them after tenant workers would expose them to parallel test traffic.
 
-### Serial-after suite overrides
+### Parallel directories
 
-The following suites are serial even when an individual file does not match a content rule:
+The following directories are the initial parallel candidates:
 
+- `analyze`
+- `auto_increment`
+- `benchmark`
+- `charset_collation`
+- `comment`
+- `cte`
+- `dataXtest`
+- `distinct`
+- `dtype`
+- `expression`
+- `fake_pk`
+- `fulltext`
+- `geo`
+- `keyword`
+- `operator`
+- `pg_cast`
+- `plan_cache`
+- `plugin`
+- `procedure`
+- `qexec`
+- `recursive_cte`
+- `replace_statement`
+- `sample`
+- `sequence`
+- `time_window`
+- `udf`
+- `union`
+- `view`
+- `window`
+
+Each directory is assigned to exactly one tenant worker. `benchmark` remains one unit, which preserves the lexical DDL, load, query, and cleanup order below `benchmark/tpch`.
+
+### Serial-after directories
+
+The following directories run as sys after tenant workers:
+
+- `array`
+- `database`
+- `ddl`
+- `disttae`
+- `dml`
 - `feature_limit`
+- `foreign_key`
+- `function`
 - `git4data`
+- `hint`
+- `iceberg`
+- `join`
+- `load_data`
+- `metadata`
 - `mo_cloud`
+- `optimizer`
+- `pessimistic_transaction`
 - `pitr`
+- `prepare`
 - `publication_subscription`
+- `query_result`
+- `save_query_result`
+- `security`
+- `set`
 - `snapshot`
 - `sql_inject`
+- `stage`
+- `subquery`
 - `system`
 - `system_variable`
+- `table`
 - `task`
+- `temporary`
 - `tenant`
 - `tenxcloud_xx`
+- `util`
+- `vector`
 - `zz_accesscontrol`
 
-These suites exercise cross-account state, account recovery, global feature configuration, background tasks, failpoints, or external environments.
+These directories exercise cross-account state, account recovery, global feature configuration, background tasks, failpoints, external environments, or contain at least one script matching a global-state rule.
 
 ### Serial content rules
 
-A script is serial-after when it contains any of:
+A directory is classified as serial-after during policy review when any script below it contains:
 
 - `CREATE ACCOUNT`, `DROP ACCOUNT`, or `ALTER ACCOUNT`
 - `RESTORE ACCOUNT`
@@ -134,44 +185,26 @@ A script is serial-after when it contains any of:
 - `mo_catalog.mo_account`
 - `KILL CONNECTION` or `KILL QUERY`
 
-Matching ignores case. Comment matches are intentionally conservative in the first rollout.
-
-### Explicit overrides
-
-The policy supports exact-path overrides with a mandatory reason. Precedence is:
-
-1. non-overridable hard blockers;
-2. exact serial overrides;
-3. reviewed exact parallel overrides;
-4. suite and remaining content rules.
-
-- `serial-before` and `serial-after` overrides handle hidden ordering or isolation dependencies found in shadow runs.
-- A `parallel` override requires review.
-- Account DDL, account restore, explicit credentials, and system commands are hard blockers and cannot be overridden to parallel.
-
-### Affinity groups
-
-Most parallel scripts are independent scheduling units. Multi-file workloads that depend on lexical execution order are assigned as one unit. The initial affinity rule keeps `benchmark/tpch/**` on one worker and preserves path order.
-
-Additional affinity groups are added only with an identified producer/consumer dependency.
+Matching ignores case. Comment matches are intentionally conservative in the first rollout. The scan explains why a directory is serial; it does not split safe-looking files out of that directory.
 
 ## Selection and planning
 
 MatrixOne's `optools/run_bvt_group.sh` remains the source of truth for complementary groups 0 and 1.
 
-The orchestrator captures its `-i` selection by invoking it with a temporary no-op `mo-tester/run.sh`. The captured paths are passed to the planner. This avoids copying the group mapping into the CI repository.
+The orchestrator captures its `-i` selection by invoking it with a temporary no-op `mo-tester/run.sh`. The captured paths are reduced to their top-level directories and passed to the planner. This avoids copying the group mapping into the CI repository.
 
 The planner then:
 
-1. validates every selected path exists below the case root;
-2. classifies every path;
-3. verifies the three phases are disjoint and their union equals the selected group;
-4. creates affinity units;
-5. assigns parallel units to workers using longest-first balancing;
-6. uses an optional `--timings <tsv>` input when available and file size as the deterministic fallback weight;
-7. writes per-phase and per-worker include lists.
+1. validates every selected directory exists immediately below the case root;
+2. verifies that every selected script maps to exactly one selected top-level directory;
+3. looks up each directory in the explicit policy;
+4. defaults an unknown directory to `serial-after` and reports it as unreviewed;
+5. verifies the three phases are disjoint and their directory union equals the selected group;
+6. assigns whole parallel directories to workers using longest-first balancing;
+7. uses an optional `--timings <tsv>` input when available and aggregate directory file size as the deterministic fallback weight;
+8. writes per-phase and per-worker directory include lists.
 
-Unknown newly added suites are classified by content rules. They are never omitted. The plan records that they used the fallback policy.
+Every `mo-tester -i` argument is therefore a comma-separated list of directories, not hundreds of individual scripts.
 
 ## Runtime architecture
 
@@ -205,7 +238,7 @@ The worker's default JDBC user is `<account>:admin`. The sys credentials remain 
 1. Capture the outer BVT group and build the plan.
 2. Run serial-before as sys.
 3. Create test tenants.
-4. Run all tenant workers and wait for every worker.
+4. Run all tenant workers, each with a directory include list, and wait for every worker.
 5. Collect reports and statuses.
 6. Drop all test tenants.
 7. Run serial-after as sys if MatrixOne is reachable.
@@ -251,7 +284,7 @@ Rollout gates:
 4. selected-script union and result coverage match the serial baseline;
 5. no worker account or resource output leaks;
 6. no new MatrixOne crash, OOM, or restart;
-7. median BVT wall-clock time improves by at least 30%.
+7. the measured wall-clock improvement justifies enabling the feature; the previous 30% target is no longer assumed because directory-level classification leaves only 215 scripts parallel.
 
 After the gates pass, callers enable tenant parallelism. The disabled path remains available for immediate fallback.
 
@@ -259,12 +292,12 @@ After the gates pass, callers enable tenant parallelism. The disabled path remai
 
 `scripts/test_bvt_tenant_plan.py` covers:
 
-- phase classification and reason reporting;
-- exact override precedence;
-- union/disjoint validation;
-- unknown-suite handling;
-- affinity preservation;
-- deterministic worker balancing;
+- directory phase lookup and reason reporting;
+- rejection of file-level policy entries;
+- directory union/disjoint validation;
+- unknown-directory serial fallback;
+- preservation of all scripts below each selected directory;
+- deterministic whole-directory worker balancing;
 - malformed policy and path rejection.
 
 Shell integration tests use fake `mysql` and `mo-tester` commands to verify phase order, all-worker wait behavior, exit aggregation, artifacts, and cleanup.
