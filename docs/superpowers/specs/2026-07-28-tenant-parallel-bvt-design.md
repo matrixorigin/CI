@@ -1,335 +1,137 @@
-# Tenant-Parallel BVT Design
+# Direct Tenant-Parallel BVT Design
 
-## Status
+## Decision
 
-Approved direction: run one MatrixOne deployment on one GitHub Actions runner, then run multiple `mo-tester` processes against different MatrixOne tenants on that deployment.
+Keep one GitHub Actions runner and one MatrixOne deployment per existing BVT
+group. Inside that runner, invoke `mo-tester/run.sh` directly:
 
-This design targets the active PR coverage workflows:
+1. run ordering-sensitive directories as `sys`;
+2. create two ordinary accounts;
+3. run two isolated `mo-tester` processes concurrently, one account per process;
+4. wait for both processes and drop both accounts;
+5. run the remaining directories as `sys`.
 
-- `.github/workflows/e2e-compose-parallel.yaml`
-- `.github/workflows/e2e-standalone-parallel.yaml`
+This replaces the Python planner and JSON policy. Directory lists are explicit
+Bash arrays, and each `mo-tester -i` argument contains directory paths rather
+than individual test files.
 
-The first rollout keeps the existing complementary BVT group assignment across the two workflows. Each workflow parallelizes only its assigned group inside its own runner. Checkin Regression adoption is a later rollout after the PR workflow is stable.
+The new path remains opt-in through `tenant_parallel_enabled: false`. When it
+is disabled, each workflow runs its existing `run_bvt_group.sh` command
+unchanged.
 
-The CI repository baseline for this design is commit:
+## Why CI-level processes
 
-`940ee29eea1ee59eed5d3bec69cae7586b9a1162`
+`mo-tester` accepts one case root through `-p` and comma-separated include
+substrings through `-i`. An include ending in `/` safely selects a whole
+directory. Its dormant in-process parallel code is not suitable because it is
+disabled, fixed to two threads, and uses a hard-coded account. Separate
+processes also require separate `mo-tester` and resource directories because
+each invocation cleans databases and writes fixed report paths.
 
-## Goals
+## Directory rule
 
-1. Reduce BVT wall-clock time without adding one runner per tenant.
-2. Preserve the current union/disjoint guarantees of BVT groups 0 and 1.
-3. Keep global-state and cross-account tests serial.
-4. Produce an explainable per-directory classification and a merged report.
-5. Make the new path opt-in until shadow validation proves it stable.
-6. Leave the existing serial invocation available as an immediate fallback.
+The immediate child directory of `test/distributed/cases` is the scheduling
+unit. If any case in a directory needs account-management privileges,
+cross-account state, cluster-global state, snapshots/PITR, publication state,
+explicit credentials, system tables, failpoints, tasks, or external shared
+state, the whole directory runs serially as `sys`.
 
-## Non-goals
+Unknown future directories are assigned to the same complementary BVT group as
+`run_bvt_group.sh` and run in `sys-after`. `optimistic` remains excluded,
+matching the current group runner.
 
-- Enabling the dormant in-process parallel mode in `mo-tester`.
-- Running one MatrixOne deployment per tenant.
-- Moving or renaming MatrixOne BVT case directories.
-- Converting every serial test into a parallel test in the first rollout.
-- Changing Checkin Regression in the first rollout.
+The classification was rescanned against MatrixOne main
+`f6dab28046d70412cec132f0068840896852101c`:
 
-## Considered approaches
+| Phase | Directories | Scripts |
+|---|---:|---:|
+| sys-before | 5 | 29 |
+| ordinary-tenant parallel | 27 | 175 |
+| sys-after | 40 | 935 |
+| excluded `optimistic` | 1 | 22 |
 
-### CI-managed processes on one runner — selected
+Runtime improvement must be measured in the opt-in trial because only about
+15% of selected scripts are initially safe enough for ordinary tenants.
 
-The CI workflow starts one MatrixOne deployment and creates two test tenants. It launches one `mo-tester` process per tenant, using isolated working and resource directories.
+## Fixed classification
 
-This keeps the implementation in `matrixorigin/CI`, does not depend on the disabled `mo-tester` parallel switch, and matches the requested same-cluster tenant isolation model.
-
-### In-process scheduling inside `mo-tester`
-
-This would provide tighter report integration but requires coordinated changes in `matrixorigin/mo-tester`. Its existing implementation is fixed to one extra tenant, lacks before/after barriers, and is disabled. It is not selected for the first rollout.
-
-### One GitHub Actions runner per group
-
-This is the current complementary-group model. It isolates failures well, but it creates separate MatrixOne deployments rather than using tenants on one deployment. It remains the outer deployment model but is not used for per-tenant parallelism.
-
-## Current inventory
-
-The baseline scan is anchored to MatrixOne commit:
-
-`d17b5a1f8e83cee4999181b9509af6126517985c`
-
-The full `test/distributed/cases` tree contains 1,155 `.sql` and `.test` scripts in 73 top-level directories. The current PR coverage selection excludes the `optimistic` directory, leaving 1,133 scripts in 72 top-level directories.
-
-The conservative initial classification is:
-
-| Phase | Directories | Scripts | Meaning |
-|---|---:|---:|---|
-| `serial-before` | 5 | 29 | Ordered observability producers and verifiers that must run before tenant-generated traffic |
-| `parallel-candidate` | 29 | 215 | Every script in the directory passed the conservative scan; requires shadow validation |
-| `serial-after` | 38 | 889 | At least one script in the directory has cross-account, cluster-global, explicit-user, recovery, or other high-risk behavior |
-
-The directory is the smallest scheduling and policy unit. The planner never divides scripts from the same top-level directory between phases or workers.
-
-This changes the expected optimization ceiling: only 215 of 1,133 scripts are initially parallel candidates. The simpler commands and safer maintenance are preferred over file-level parallel coverage; the actual wall-clock benefit must be established by shadow runs.
-
-An implementation-time rescan at MatrixOne commit
-`129bd689b5c415fbb448eb7b413ee84b245fb938` found four newly added
-scripts without any new top-level directory. The current total is 1,137:
-29 serial-before, 216 parallel-candidate, and 892 serial-after scripts.
-The directory counts and policy remain 5, 29, and 38 respectively. Runtime
-planning derives script counts from the checked-out MatrixOne revision.
-
-## Classification policy
-
-The policy is stored as data in `scripts/bvt_tenant_policy.json`. It lists each top-level directory, its phase, and its reason. The planner emits `plan.json` and `inventory.tsv` with one record per directory.
-
-The policy is explicit and never assigns individual files. A newly added directory
-defaults to `serial-after` and is reported as unreviewed. Before assigning an
-allowlisted parallel directory, the planner rescans every script below it using the
-serial content rules. A match downgrades the entire directory to `serial-after`, so a
-new or modified case cannot silently inherit parallel status after introducing known
-global or cross-account behavior.
-
-### Serial-before directories
-
-The following directories run in their existing lexical order as sys before test tenants are created:
-
-- `log`
-- `result_count`
-- `sql_source_type`
-- `statement_query_type`
-- `zz_statement_query_type`
-
-They inspect statement, log, and result metadata. Running them after tenant workers would expose them to parallel test traffic.
-
-### Parallel directories
-
-The following directories are the initial parallel candidates:
-
-- `analyze`
-- `auto_increment`
-- `benchmark`
-- `charset_collation`
-- `comment`
-- `cte`
-- `dataXtest`
-- `distinct`
-- `dtype`
-- `expression`
-- `fake_pk`
-- `fulltext`
-- `geo`
-- `keyword`
-- `operator`
-- `pg_cast`
-- `plan_cache`
-- `plugin`
-- `procedure`
-- `qexec`
-- `recursive_cte`
-- `replace_statement`
-- `sample`
-- `sequence`
-- `time_window`
-- `udf`
-- `union`
-- `view`
-- `window`
-
-Each directory is assigned to exactly one tenant worker. `benchmark` remains one unit, which preserves the lexical DDL, load, query, and cleanup order below `benchmark/tpch`.
-
-### Serial-after directories
-
-The following directories run as sys after tenant workers:
-
-- `array`
-- `database`
-- `ddl`
-- `disttae`
-- `dml`
-- `feature_limit`
-- `foreign_key`
-- `function`
-- `git4data`
-- `hint`
-- `iceberg`
-- `join`
-- `load_data`
-- `metadata`
-- `mo_cloud`
-- `optimizer`
-- `pessimistic_transaction`
-- `pitr`
-- `prepare`
-- `publication_subscription`
-- `query_result`
-- `save_query_result`
-- `security`
-- `set`
-- `snapshot`
-- `sql_inject`
-- `stage`
-- `subquery`
-- `system`
-- `system_variable`
-- `table`
-- `task`
-- `temporary`
-- `tenant`
-- `tenxcloud_xx`
-- `util`
-- `vector`
-- `zz_accesscontrol`
-
-These directories exercise cross-account state, account recovery, global feature configuration, background tasks, failpoints, external environments, or contain at least one script matching a global-state rule.
-
-### Serial content rules
-
-A directory is classified as serial-after during policy review when any script below it contains:
-
-- `CREATE ACCOUNT`, `DROP ACCOUNT`, or `ALTER ACCOUNT`
-- `RESTORE ACCOUNT`
-- `SHOW ACCOUNTS`
-- an `@session` directive with an explicit user or password
-- `mo_ctl(...)`
-- `mo_feature_registry_*`
-- `SET GLOBAL`
-- an `@system` command
-- `system_metrics` or `mo_debug`
-- an explicit `account_id = 0` assumption
-- `current_account_id()` or `current_account_name()`
-- `mo_catalog.mo_account`
-- `KILL CONNECTION` or `KILL QUERY`
-
-Matching ignores case. Comment matches are intentionally conservative in the first rollout. The scan explains why a directory is serial; it does not split safe-looking files out of that directory.
-
-## Selection and planning
-
-MatrixOne's `optools/run_bvt_group.sh` remains the source of truth for complementary groups 0 and 1.
-
-The orchestrator captures its `-i` selection by invoking it with a temporary no-op `mo-tester/run.sh`. The captured paths are reduced to their top-level directories and passed to the planner. This avoids copying the group mapping into the CI repository.
-
-The planner then:
-
-1. validates every selected directory exists immediately below the case root;
-2. verifies that every selected script maps to exactly one selected top-level directory;
-3. looks up each directory in the explicit policy;
-4. defaults an unknown directory to `serial-after` and reports it as unreviewed;
-5. verifies the three phases are disjoint and their directory union equals the selected group;
-6. assigns whole parallel directories to workers using longest-first balancing;
-7. uses an optional `--timings <tsv>` input when available and aggregate directory file size as the deterministic fallback weight;
-8. writes per-phase and per-worker directory include lists.
-
-Every `mo-tester -i` argument is therefore a comma-separated list of directories, not hundreds of individual scripts.
-
-## Runtime architecture
-
-Each workflow job continues to consume one runner and start one MatrixOne deployment.
+### Sys-before
 
 ```text
-runner
-├── MatrixOne deployment
-├── serial-before mo-tester (sys)
-├── tenant worker 0 mo-tester
-├── tenant worker 1 mo-tester
-└── serial-after mo-tester (sys)
+log
+result_count
+sql_source_type
+statement_query_type
+zz_statement_query_type
 ```
 
-The default worker count is two and is configurable from one to four.
+These directories inspect statement and log metadata, so they run before
+parallel test traffic.
 
-### Worker isolation
+### Tenant-parallel
 
-Each worker receives:
+Group 0:
 
-- a unique MatrixOne account, `bvtw_<index>`;
-- a unique `mo-tester` working directory;
-- a copied 12 MiB MatrixOne resource directory;
-- its own `mo.yml`, logs, reports, and pprof directory;
-- the shared case tree as read-only input.
+```text
+worker 0: view
+worker 1: auto_increment sequence procedure keyword sample pg_cast plugin
+          time_window union fake_pk dataXtest
+```
 
-The worker's default JDBC user is `<account>:admin`. The sys credentials remain available to `mo-tester` for its internal sync-commit connection, but classification prevents test scripts with explicit credentials or known global SQL from entering a tenant worker.
+Group 1:
 
-### Phase order
+```text
+worker 0: dtype expression comment recursive_cte qexec replace_statement
+worker 1: window fulltext operator geo charset_collation distinct udf cte
+          plan_cache
+```
 
-1. Capture the outer BVT group and build the plan.
-2. Run serial-before as sys.
-3. Create test tenants.
-4. Run all tenant workers, each with a directory include list, and wait for every worker.
-5. Collect reports and statuses.
-6. Drop all test tenants.
-7. Run serial-after as sys if MatrixOne is reachable.
-8. Merge reports and return failure when any phase failed or was unexpectedly skipped.
+The split is fixed and balances current directory sizes without runtime
+planning. Every directory stays on exactly one worker.
 
-Test tenants are removed before serial-after so account enumeration and recovery tests see the same account state as the serial baseline.
+### Sys-after
 
-## Failure handling
+```text
+analyze array benchmark database ddl disttae dml feature_limit foreign_key
+function git4data hint iceberg join load_data metadata mo_cloud optimizer
+pessimistic_transaction pitr prepare publication_subscription query_result
+save_query_result security set snapshot sql_inject stage subquery system
+system_variable table task temporary tenant tenxcloud_xx util vector
+zz_accesscontrol
+```
 
-- A serial-before failure prevents tenant workers from starting.
-- Parallel worker assertion failures do not terminate sibling workers; all available reports are collected.
-- If MatrixOne remains reachable, serial-after still runs after worker failures to maximize diagnostic coverage.
-- If MatrixOne is unreachable, serial-after is recorded as skipped and the job fails.
-- A shell trap attempts tenant cleanup on success, failure, timeout, and cancellation.
-- Cleanup targets only the exact `bvtw_<index>` accounts created by the current process.
-- The final cleanup check queries `mo_catalog.mo_account`; any leaked worker account fails the job.
+`analyze` contains snapshot DDL and `benchmark` contains account/cluster
+snapshot DDL, so both require `sys`.
 
-Artifacts include:
+## Runtime contract
 
-- `plan.json`
-- `inventory.tsv`
-- per-phase and per-worker logs
-- original `mo-tester` reports
-- merged summary and timing table
-- cleanup status
+- The orchestrator accepts a case root, tester directory, group number,
+  directory configuration, output directory, and optional resource directory.
+- It derives the selected group from the explicit directory arrays and applies
+  the same `cksum % 2` fallback as `run_bvt_group.sh` for unknown directories.
+- Every include value is an absolute directory path ending in `/`.
+- Each phase gets an isolated tester copy, report directory, log directory,
+  `mo.yml`, and optional resource copy.
+- Worker users are `bvtw_g<group>_w<index>:admin`; account names are unique to
+  the group and worker. Account creation and deletion use the sys connection.
+- Both workers are always waited for. A worker assertion failure does not skip
+  sibling completion, account cleanup, or reachable sys-after execution.
+- On a signal, worker process groups are terminated and waited for before
+  account deletion.
+- Generated `mo.yml` artifacts redact both `password` and `syspass`.
+- The final exit status is nonzero when any required phase, worker, cleanup, or
+  leak check fails.
 
-## Workflow integration and rollout
+## Trial and rollback
 
-The reusable workflows gain:
+The first trial invokes the reusable workflows from a branch while setting:
 
-- `tenant_parallel_enabled`, default `false`
-- `tenant_parallel_workers`, default `2`
+```yaml
+tenant_parallel_enabled: true
+ci_ref: codex/tenant-parallel-bvt
+```
 
-When disabled, the existing `run_bvt_group.sh` invocation is unchanged. When enabled, the workflow calls `scripts/run_bvt_tenant_parallel.sh`.
-
-Validation uses a MatrixOne workflow pinned to the CI branch commit SHA. The serial baseline and tenant-parallel candidate run in separate jobs and separate MatrixOne deployments.
-
-Rollout gates:
-
-1. planner and shell tests pass;
-2. a curated integration subset proves phase barriers, tenant isolation, failure reporting, and cleanup;
-3. full shadow runs complete at least ten times with no new concurrency-caused failure;
-4. selected-script union and result coverage match the serial baseline;
-5. no worker account or resource output leaks;
-6. no new MatrixOne crash, OOM, or restart;
-7. the measured wall-clock improvement justifies enabling the feature; the previous 30% target is no longer assumed because directory-level classification leaves only 215 scripts parallel.
-
-After the gates pass, callers enable tenant parallelism. The disabled path remains available for immediate fallback.
-
-## Test strategy
-
-`scripts/test_bvt_tenant_plan.py` covers:
-
-- directory phase lookup and reason reporting;
-- rejection of file-level policy entries;
-- directory union/disjoint validation;
-- unknown-directory serial fallback;
-- runtime whole-directory downgrade when a parallel candidate matches a serial rule;
-- preservation of all scripts below each selected directory;
-- deterministic whole-directory worker balancing;
-- malformed policy and path rejection.
-
-Shell integration tests use fake `mysql` and `mo-tester` commands to verify phase
-order, all-worker wait behavior, signal cancellation, exit aggregation, redacted
-artifacts, and cleanup.
-
-Repository validation runs:
-
-- Python unit tests
-- `shellcheck`
-- `actionlint`
-- planner `--dry-run` against a MatrixOne checkout
-
-The cross-repository validation workflow then runs the curated subset and full shadow comparison.
-
-## Security and trust
-
-The workflows already execute the checked-out MatrixOne `optools/run_bvt_group.sh`. Capturing its selection does not broaden that trust boundary.
-
-Secrets are not written to `plan.json`, inventory, or logs. Generated `mo.yml` files are included in failure artifacts only after password fields are redacted.
-
-Account and filesystem cleanup use explicit generated paths and account names; no recursive cleanup accepts an empty or unresolved root.
+The job still uses one runner. Its artifacts contain phase logs, reports,
+directory includes, and `summary.tsv`. Compare wall-clock time, failures, and
+case coverage with an unchanged run from the same MatrixOne commit. Turning the
+boolean off immediately restores the original test path.
