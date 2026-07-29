@@ -13,6 +13,8 @@
 - The smallest scheduling unit is one immediate child directory of `test/distributed/cases`; no file-level policy or worker assignment is allowed.
 - The selected directories are exactly the current MatrixOne group intersected with the policy; no selected script may be omitted or assigned twice.
 - Unknown top-level directories run in `serial-after` and are reported as unreviewed.
+- A runtime serial-rule match downgrades the entire allowlisted parallel directory to
+  `serial-after`; the planner never splits a directory by file.
 - The default worker count is `2`; accepted values are `1` through `4`.
 - Each workflow job continues to use one runner and one MatrixOne deployment.
 - Worker accounts are removed before `serial-after`.

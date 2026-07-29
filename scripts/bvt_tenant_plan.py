@@ -3,11 +3,56 @@
 import argparse
 import csv
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 
 VALID_PHASES = {"serial-before", "parallel", "serial-after"}
+SERIAL_CONTENT_RULES = (
+    ("CREATE ACCOUNT", re.compile(r"\bCREATE\s+ACCOUNT\b", re.IGNORECASE)),
+    ("DROP ACCOUNT", re.compile(r"\bDROP\s+ACCOUNT\b", re.IGNORECASE)),
+    ("ALTER ACCOUNT", re.compile(r"\bALTER\s+ACCOUNT\b", re.IGNORECASE)),
+    ("RESTORE ACCOUNT", re.compile(r"\bRESTORE\s+ACCOUNT\b", re.IGNORECASE)),
+    ("SHOW ACCOUNTS", re.compile(r"\bSHOW\s+ACCOUNTS\b", re.IGNORECASE)),
+    (
+        "@session explicit credentials",
+        re.compile(
+            r"^\s*--\s*@session:[^\n]*(?:&user=|&password=)",
+            re.IGNORECASE | re.MULTILINE,
+        ),
+    ),
+    ("mo_ctl", re.compile(r"\bmo_ctl\s*\(", re.IGNORECASE)),
+    (
+        "mo_feature_registry",
+        re.compile(r"\bmo_feature_registry_[A-Za-z0-9_]*", re.IGNORECASE),
+    ),
+    ("SET GLOBAL", re.compile(r"\bSET\s+GLOBAL\b", re.IGNORECASE)),
+    (
+        "@system command",
+        re.compile(r"^\s*--\s*@system\b", re.IGNORECASE | re.MULTILINE),
+    ),
+    (
+        "system metrics or debug",
+        re.compile(r"\b(?:system_metrics|mo_debug)\b", re.IGNORECASE),
+    ),
+    (
+        "account_id = 0",
+        re.compile(r"\baccount_id\s*=\s*0\b", re.IGNORECASE),
+    ),
+    (
+        "current account identity",
+        re.compile(r"\bcurrent_account_(?:id|name)\s*\(", re.IGNORECASE),
+    ),
+    (
+        "mo_catalog.mo_account",
+        re.compile(r"\bmo_catalog\s*\.\s*mo_account\b", re.IGNORECASE),
+    ),
+    (
+        "KILL CONNECTION or QUERY",
+        re.compile(r"\bKILL\s+(?:CONNECTION|QUERY)\b", re.IGNORECASE),
+    ),
+)
 
 
 @dataclass(frozen=True)
@@ -56,6 +101,16 @@ def _scripts_below(directory: Path) -> set[Path]:
         for path in directory.rglob("*")
         if path.is_file() and path.suffix in {".sql", ".test"}
     }
+
+
+def _serial_content_match(directory: Path, scripts: set[Path]) -> str | None:
+    for path in sorted(scripts):
+        content = path.read_text(errors="replace")
+        for label, pattern in SERIAL_CONTENT_RULES:
+            if pattern.search(content):
+                relative = path.relative_to(directory).as_posix()
+                return f"{label} in {relative}"
+    return None
 
 
 def _selected_by_directory(case_root: Path, selected_file: Path) -> dict[str, set[Path]]:
@@ -113,6 +168,16 @@ def build_plan(
                 phase="serial-after",
                 reason="unreviewed directory defaults to serial-after",
             )
+        elif entry.phase == "parallel":
+            serial_match = _serial_content_match(directory, discovered)
+            if serial_match is not None:
+                entry = PolicyEntry(
+                    phase="serial-after",
+                    reason=(
+                        f"runtime content scan matched {serial_match}; "
+                        "downgraded from parallel"
+                    ),
+                )
         units.append(
             {
                 "name": name,

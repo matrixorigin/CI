@@ -79,7 +79,12 @@ planning derives script counts from the checked-out MatrixOne revision.
 
 The policy is stored as data in `scripts/bvt_tenant_policy.json`. It lists each top-level directory, its phase, and its reason. The planner emits `plan.json` and `inventory.tsv` with one record per directory.
 
-The policy is explicit rather than reclassifying individual files at runtime. A newly added directory defaults to `serial-after` and is reported as unreviewed, so it is exercised but cannot enter a tenant worker without a policy review.
+The policy is explicit and never assigns individual files. A newly added directory
+defaults to `serial-after` and is reported as unreviewed. Before assigning an
+allowlisted parallel directory, the planner rescans every script below it using the
+serial content rules. A match downgrades the entire directory to `serial-after`, so a
+new or modified case cannot silently inherit parallel status after introducing known
+global or cross-account behavior.
 
 ### Serial-before directories
 
@@ -303,11 +308,14 @@ After the gates pass, callers enable tenant parallelism. The disabled path remai
 - rejection of file-level policy entries;
 - directory union/disjoint validation;
 - unknown-directory serial fallback;
+- runtime whole-directory downgrade when a parallel candidate matches a serial rule;
 - preservation of all scripts below each selected directory;
 - deterministic whole-directory worker balancing;
 - malformed policy and path rejection.
 
-Shell integration tests use fake `mysql` and `mo-tester` commands to verify phase order, all-worker wait behavior, exit aggregation, artifacts, and cleanup.
+Shell integration tests use fake `mysql` and `mo-tester` commands to verify phase
+order, all-worker wait behavior, signal cancellation, exit aggregation, redacted
+artifacts, and cleanup.
 
 Repository validation runs:
 

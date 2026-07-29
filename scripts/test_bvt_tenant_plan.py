@@ -103,6 +103,32 @@ class TestBuildPlan(PlannerFixture):
             ],
         )
 
+    def test_parallel_directory_with_serial_content_is_downgraded_whole(self):
+        self.case("alpha/safe.sql", "select 1;")
+        self.case("alpha/global.sql", "-- new case\nCrEaTe AcCoUnT risky ADMIN_NAME 'a';")
+        selected = self.selected("alpha/safe.sql", "alpha/global.sql")
+
+        plan = build_plan(
+            self.case_root,
+            selected,
+            {"alpha": PolicyEntry("parallel", "previously reviewed")},
+            workers=2,
+        )
+
+        self.assertEqual(plan["workers"][0]["directories"], [])
+        self.assertEqual(plan["workers"][1]["directories"], [])
+        self.assertEqual(
+            plan["serial_after"],
+            [str((self.case_root / "alpha").resolve())],
+        )
+        self.assertEqual(plan["directories"][0]["phase"], "serial-after")
+        self.assertEqual(
+            plan["directories"][0]["reason"],
+            "runtime content scan matched CREATE ACCOUNT in global.sql; "
+            "downgraded from parallel",
+        )
+        self.assertTrue(plan["directories"][0]["reviewed"])
+
     def test_worker_count_must_be_between_one_and_four(self):
         self.case("alpha/a.sql")
         selected = self.selected("alpha/a.sql")

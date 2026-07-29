@@ -162,6 +162,8 @@ mysql_exec() {
 }
 
 declare -a created_accounts=()
+declare -a worker_pids=()
+worker_pid_count=0
 
 cleanup_accounts() {
   (( ${#created_accounts[@]} > 0 )) || return 0
@@ -198,12 +200,58 @@ cleanup_accounts() {
   created_accounts=()
 }
 
+# Invoked through the EXIT trap's cleanup call graph.
+# shellcheck disable=SC2329
+redact_phase_configs() {
+  python3 - "${output_dir}" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+output_dir = Path(sys.argv[1])
+secret_field = re.compile(r"^(\s*(?:password|syspass)\s*:\s*).*$", re.IGNORECASE)
+for path in output_dir.glob("phases/*/tester/mo.yml"):
+    lines = path.read_text().splitlines()
+    redacted = [
+        secret_field.sub(r'\1"***"', line)
+        for line in lines
+    ]
+    path.write_text("\n".join(redacted) + "\n")
+PY
+}
+
+# shellcheck disable=SC2329
+stop_worker_processes() {
+  local index pid
+  index=0
+  while (( index < worker_pid_count )); do
+    pid=${worker_pids[index]}
+    if kill -0 "${pid}" 2>/dev/null; then
+      kill -TERM -- "-${pid}" 2>/dev/null ||
+        kill -TERM "${pid}" 2>/dev/null ||
+        true
+    fi
+    ((index+=1))
+  done
+  index=0
+  while (( index < worker_pid_count )); do
+    pid=${worker_pids[index]}
+    wait "${pid}" 2>/dev/null || true
+    ((index+=1))
+  done
+  worker_pids=()
+  worker_pid_count=0
+}
+
+# shellcheck disable=SC2329
 cleanup_on_exit() {
   local status=$?
-  trap - EXIT
+  trap - EXIT INT TERM
+  stop_worker_processes
   if (( ${#created_accounts[@]} > 0 )); then
     cleanup_accounts || status=1
   fi
+  redact_phase_configs || status=1
   exit "${status}"
 }
 
@@ -325,7 +373,7 @@ run_phase() {
   fi
   (
     set -o pipefail
-    cd "${prepared_tester}"
+    cd "${prepared_tester}" || exit 1
     ./run.sh "${tester_args[@]}" 2>&1 | tee "${prepared_log}"
   )
 }
@@ -379,8 +427,10 @@ if (( account_setup_failed != 0 )); then
   exit 1
 fi
 
-declare -a worker_pids=()
 declare -a launched_workers=()
+if (( ${#active_workers[@]} > 0 )); then
+  set -m
+fi
 for worker_index in "${active_workers[@]}"; do
   account="bvtw_g${group}_w${worker_index}:admin"
   run_phase \
@@ -388,12 +438,14 @@ for worker_index in "${active_workers[@]}"; do
     "${output_dir}/worker-${worker_index}.include" \
     "${account}" &
   worker_pids+=("$!")
+  ((worker_pid_count+=1))
   launched_workers+=("${worker_index}")
 done
+set +m
 
 final_status=0
 pid_index=0
-while (( pid_index < ${#worker_pids[@]} )); do
+while (( pid_index < worker_pid_count )); do
   worker_index=${launched_workers[pid_index]}
   worker_include="${output_dir}/worker-${worker_index}.include"
   worker_log="${output_dir}/phases/worker-${worker_index}/worker-${worker_index}.log"
@@ -407,6 +459,8 @@ while (( pid_index < ${#worker_pids[@]} )); do
   fi
   ((pid_index+=1))
 done
+worker_pids=()
+worker_pid_count=0
 
 cleanup_ok=1
 if (( ${#created_accounts[@]} > 0 )); then

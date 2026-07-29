@@ -50,6 +50,20 @@ assert_order() {
   done
 }
 
+wait_for_event() {
+  local path=$1
+  local expected=$2
+  local attempt=0
+  while (( attempt < 100 )); do
+    if grep -F -- "${expected}" "${path}" >/dev/null; then
+      return 0
+    fi
+    sleep 0.05
+    ((attempt+=1))
+  done
+  return 1
+}
+
 setup_fixture() {
   fixture_root=$(mktemp -d)
   case_root="${fixture_root}/cases"
@@ -58,6 +72,7 @@ setup_fixture() {
   fake_bin="${fixture_root}/bin"
   event_log="${fixture_root}/events.log"
   mysql_log="${fixture_root}/mysql.log"
+  worker_pid_file="${fixture_root}/worker.pid"
   output_dir="${fixture_root}/output"
   policy="${fixture_root}/policy.json"
   group_runner="${fixture_root}/run_bvt_group.sh"
@@ -113,6 +128,14 @@ printf '%s\n' "${phase}" > report/report.txt
 if [[ "${FAKE_FAIL_PHASE:-}" == "${phase}" ]]; then
   exit 7
 fi
+if [[ "${FAKE_BLOCK_PHASE:-}" == "${phase}" ]]; then
+  printf '%s\n' "${BASHPID}" > "${FAKE_WORKER_PID_FILE}"
+  printf '%s\n' "${phase}-blocked" >> "${FAKE_EVENT_LOG}"
+  trap 'printf "%s\n" "${phase}-stopped" >> "${FAKE_EVENT_LOG}"; exit 143' INT TERM
+  while true; do
+    sleep 1
+  done
+fi
 TESTER
   chmod +x "${tester_dir}/run.sh"
 
@@ -135,6 +158,10 @@ lower=$(printf '%s' "${sql}" | tr '[:upper:]' '[:lower:]')
 if [[ "${lower}" == *"create account"* ]]; then
   printf '%s\n' "create-account" >> "${FAKE_EVENT_LOG}"
 elif [[ "${lower}" == *"drop account"* ]]; then
+  if [[ -s "${FAKE_WORKER_PID_FILE}" ]] &&
+     kill -0 "$(<"${FAKE_WORKER_PID_FILE}")" 2>/dev/null; then
+    printf '%s\n' "drop-while-worker-alive" >> "${FAKE_EVENT_LOG}"
+  fi
   printf '%s\n' "drop-account" >> "${FAKE_EVENT_LOG}"
 elif [[ "${lower}" == *"select 1"* ]]; then
   printf '%s\n' "mysql-ready" >> "${FAKE_EVENT_LOG}"
@@ -162,21 +189,32 @@ JSON
 }
 
 run_fixture() {
-  PATH="${fake_bin}:${PATH}" \
-  FAKE_EVENT_LOG="${event_log}" \
-  FAKE_MYSQL_LOG="${mysql_log}" \
-  FAKE_FAIL_PHASE="${FAKE_FAIL_PHASE:-}" \
-  FAKE_LEAK_COUNT="${FAKE_LEAK_COUNT:-0}" \
-    bash "${orchestrator}" \
-      --tester-dir "${tester_dir}" \
-      --case-root "${case_root}" \
-      --group-runner "${group_runner}" \
-      --group 0 \
-      --policy "${policy}" \
-      --planner "${planner}" \
-      --output-dir "${output_dir}" \
-      --workers 2 \
-      --resource-dir "${resource_dir}"
+  local -a command=(
+    env
+    "PATH=${fake_bin}:${PATH}"
+    "FAKE_EVENT_LOG=${event_log}"
+    "FAKE_MYSQL_LOG=${mysql_log}"
+    "FAKE_FAIL_PHASE=${FAKE_FAIL_PHASE:-}"
+    "FAKE_BLOCK_PHASE=${FAKE_BLOCK_PHASE:-}"
+    "FAKE_WORKER_PID_FILE=${worker_pid_file}"
+    "FAKE_LEAK_COUNT=${FAKE_LEAK_COUNT:-0}"
+    "FAKE_MYSQL_FAIL_MATCH=${FAKE_MYSQL_FAIL_MATCH:-}"
+    bash "${orchestrator}"
+    --tester-dir "${tester_dir}"
+    --case-root "${case_root}"
+    --group-runner "${group_runner}"
+    --group 0
+    --policy "${policy}"
+    --planner "${planner}"
+    --output-dir "${output_dir}"
+    --workers 2
+    --tenant-password "tenant-secret"
+    --resource-dir "${resource_dir}"
+  )
+  if [[ "${RUN_FIXTURE_IN_PLACE:-0}" == "1" ]]; then
+    exec "${command[@]}"
+  fi
+  "${command[@]}"
 }
 
 test_successful_phase_order_and_isolation() {
@@ -194,6 +232,12 @@ test_successful_phase_order_and_isolation() {
     'name: "bvtw_g0_w0:admin"'
   assert_contains "${output_dir}/phases/worker-1/tester/mo.yml" \
     'name: "bvtw_g0_w1:admin"'
+  assert_not_contains "${output_dir}/phases/worker-0/tester/mo.yml" \
+    'password: "111"'
+  assert_not_contains "${output_dir}/phases/worker-0/tester/mo.yml" \
+    'password: "tenant-secret"'
+  assert_contains "${output_dir}/phases/worker-0/tester/mo.yml" \
+    'password: "***"'
   assert_not_contains "${output_dir}/worker-0.include" ".sql"
   assert_not_contains "${output_dir}/worker-1.include" ".test"
   assert_order "${event_log}" \
@@ -273,6 +317,70 @@ test_leaked_account_fails_before_serial_after() {
   unset FAKE_LEAK_COUNT
 }
 
+test_signal_stops_workers_before_cleanup() {
+  setup_fixture
+  export FAKE_BLOCK_PHASE=worker-0
+
+  RUN_FIXTURE_IN_PLACE=1 run_fixture &
+  local orchestrator_pid=$!
+  if ! wait_for_event "${event_log}" "worker-0-blocked"; then
+    kill -TERM "${orchestrator_pid}" 2>/dev/null || true
+    wait "${orchestrator_pid}" 2>/dev/null || true
+    fail "worker did not enter blocking phase"
+  fi
+
+  kill -TERM "${orchestrator_pid}"
+  local status=0
+  wait "${orchestrator_pid}" || status=$?
+
+  local worker_pid
+  worker_pid=$(<"${worker_pid_file}")
+  local worker_was_alive=0
+  if kill -0 "${worker_pid}" 2>/dev/null; then
+    worker_was_alive=1
+    kill -TERM "${worker_pid}" 2>/dev/null || true
+  fi
+
+  unset FAKE_BLOCK_PHASE
+  (( status == 130 )) || fail "expected signal exit 130, got ${status}"
+  (( worker_was_alive == 0 )) || fail "worker remained alive after orchestrator exit"
+  assert_not_contains "${event_log}" "drop-while-worker-alive"
+  assert_order "${event_log}" \
+    "worker-0-blocked" \
+    "drop-account"
+}
+
+test_account_creation_failure_prevents_workers() {
+  setup_fixture
+  export FAKE_MYSQL_FAIL_MATCH="create account"
+
+  if run_fixture; then
+    fail "account creation failure should fail the orchestrator"
+  fi
+
+  unset FAKE_MYSQL_FAIL_MATCH
+  assert_contains "${output_dir}/summary.tsv" \
+    $'parallel\taccount-setup\tfailed'
+  assert_not_contains "${event_log}" "worker-0:"
+  assert_not_contains "${event_log}" "worker-1:"
+  assert_not_contains "${event_log}" "serial-after:dump:"
+}
+
+test_unreachable_matrixone_skips_serial_after() {
+  setup_fixture
+  export FAKE_MYSQL_FAIL_MATCH="select 1;"
+
+  if run_fixture; then
+    fail "MatrixOne readiness failure should fail the orchestrator"
+  fi
+
+  unset FAKE_MYSQL_FAIL_MATCH
+  assert_contains "${event_log}" "drop-account"
+  assert_not_contains "${event_log}" "serial-after:dump:"
+  assert_contains "${output_dir}/summary.tsv" \
+    $'serial\tserial-after\tskipped'
+}
+
 test_successful_phase_order_and_isolation
 echo "ok - successful phase order and isolation"
 test_worker_failure_waits_for_sibling_and_runs_cleanup_and_after
@@ -283,3 +391,9 @@ test_empty_parallel_phase_skips_accounts
 echo "ok - empty parallel phase"
 test_leaked_account_fails_before_serial_after
 echo "ok - leaked account detection"
+test_signal_stops_workers_before_cleanup
+echo "ok - signal stops workers before cleanup"
+test_account_creation_failure_prevents_workers
+echo "ok - account creation failure barrier"
+test_unreachable_matrixone_skips_serial_after
+echo "ok - unreachable MatrixOne skips serial-after"
