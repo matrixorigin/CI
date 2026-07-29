@@ -13,6 +13,21 @@ on:
         required: false
         type: string
         default: ""
+      tenant_parallel_enabled:
+        description: "Run directory-safe BVT cases in tenant workers"
+        required: false
+        type: boolean
+        default: false
+      tenant_parallel_workers:
+        description: "Tenant worker count (1-4)"
+        required: false
+        type: number
+        default: 2
+      ci_ref:
+        description: "matrixorigin/CI ref containing tenant BVT scripts"
+        required: false
+        type: string
+        default: "main"
     secrets:
       TOKEN_ACTION:
         description: "Token for checkout (e.g. pull from fork/private)"
@@ -289,6 +304,14 @@ jobs:
           path: ./mo-tester
           ref: main
 
+      - name: Checkout tenant-parallel BVT scripts
+        if: ${{ inputs.tenant_parallel_enabled }}
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: matrixorigin/CI
+          ref: ${{ inputs.ci_ref }}
+          path: .ci/tenant-parallel
+
       - name: Update BVT SQL Timeout
         run: |
           cd $GITHUB_WORKSPACE/mo-tester
@@ -341,10 +364,22 @@ jobs:
               "https://raw.githubusercontent.com/matrixorigin/matrixone/7cb78aa5f88e3b98163f6b3bffb5f71586c0cbbf/optools/run_bvt_group.sh" \
               --output "${bvt_runner}"
           fi
-          bash "${bvt_runner}" \
-            "$GITHUB_WORKSPACE/mo-tester" \
-            "$GITHUB_WORKSPACE/test/distributed/cases" \
-            "${bvt_group}" 2>&1 | tee "${RUNNER_TEMP}/bvt-compose.log"
+          if [ '${{ inputs.tenant_parallel_enabled }}' = 'true' ]; then
+            bash "$GITHUB_WORKSPACE/.ci/tenant-parallel/scripts/run_bvt_tenant_parallel.sh" \
+              --tester-dir "$GITHUB_WORKSPACE/mo-tester" \
+              --case-root "$GITHUB_WORKSPACE/test/distributed/cases" \
+              --group-runner "${bvt_runner}" \
+              --group "${bvt_group}" \
+              --workers '${{ inputs.tenant_parallel_workers }}' \
+              --policy "$GITHUB_WORKSPACE/.ci/tenant-parallel/scripts/bvt_tenant_policy.json" \
+              --planner "$GITHUB_WORKSPACE/.ci/tenant-parallel/scripts/bvt_tenant_plan.py" \
+              --output-dir "${RUNNER_TEMP}/bvt-tenant-compose"
+          else
+            bash "${bvt_runner}" \
+              "$GITHUB_WORKSPACE/mo-tester" \
+              "$GITHUB_WORKSPACE/test/distributed/cases" \
+              "${bvt_group}"
+          fi 2>&1 | tee "${RUNNER_TEMP}/bvt-compose.log"
 
       - name: Summarize Compose BVT result
         if: ${{ always() && !cancelled() }}
@@ -359,11 +394,23 @@ jobs:
           fi
           {
             echo '### Compose + Proxy BVT result'
-            grep '^Run BVT group' "${report}" | sed 's/^/- /' || true
+            grep -E '^(Run BVT group|BVT directory plan:)' "${report}" | sed 's/^/- /' || true
             echo
             echo '#### Top 10 slow BVT scripts'
             echo
           } | tee -a "$GITHUB_STEP_SUMMARY"
+
+          tenant_summary="${RUNNER_TEMP}/bvt-tenant-compose/summary.tsv"
+          if [ -s "${tenant_summary}" ]; then
+            {
+              echo '#### Tenant BVT phase results'
+              echo
+              echo '```text'
+              cat "${tenant_summary}"
+              echo '```'
+              echo
+            } | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
 
           sed -nE 's#.*script file\[(.*)\] has been executed, and cost: ([0-9.]+)s.*#\2s\t\1#p' "${report}" \
             | sort -nr -k1,1 | awk 'NR <= 10 { print }' > "${timing}"
@@ -382,7 +429,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: bvt-execution-compose
-          path: ${{ runner.temp }}/bvt-compose.log
+          path: |
+            ${{ runner.temp }}/bvt-compose.log
+            ${{ runner.temp }}/bvt-tenant-compose
           if-no-files-found: warn
           retention-days: 7
 
