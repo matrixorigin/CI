@@ -68,6 +68,13 @@ The directory is the smallest scheduling and policy unit. The planner never divi
 
 This changes the expected optimization ceiling: only 215 of 1,133 scripts are initially parallel candidates. The simpler commands and safer maintenance are preferred over file-level parallel coverage; the actual wall-clock benefit must be established by shadow runs.
 
+An implementation-time rescan at MatrixOne commit
+`129bd689b5c415fbb448eb7b413ee84b245fb938` found four newly added
+scripts without any new top-level directory. The current total is 1,137:
+29 serial-before, 216 parallel-candidate, and 892 serial-after scripts.
+The directory counts and policy remain 5, 29, and 38 respectively. Runtime
+planning derives script counts from the checked-out MatrixOne revision.
+
 ## Classification policy
 
 The policy is stored as data in `scripts/bvt_tenant_policy.json`. It lists each top-level directory, its phase, and its reason. The planner emits `plan.json` and `inventory.tsv` with one record per directory.

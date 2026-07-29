@@ -160,16 +160,16 @@ class TestBuildPlan(PlannerFixture):
 
         self.assertEqual(
             (output_dir / "serial-before.include").read_text().strip(),
-            str((self.case_root / "before").resolve()),
+            f"{(self.case_root / 'before').resolve()}/",
         )
         self.assertEqual(
             (output_dir / "worker-0.include").read_text().strip(),
-            str((self.case_root / "alpha").resolve()),
+            f"{(self.case_root / 'alpha').resolve()}/",
         )
         self.assertEqual((output_dir / "worker-1.include").read_text(), "")
         self.assertEqual(
             (output_dir / "serial-after.include").read_text().strip(),
-            str((self.case_root / "after").resolve()),
+            f"{(self.case_root / 'after').resolve()}/",
         )
         for include_file in output_dir.glob("*.include"):
             content = include_file.read_text()

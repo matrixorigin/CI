@@ -200,14 +200,14 @@ Expected: all tests pass.
 
 - [ ] **Step 6: Dry-run the planner against MatrixOne main**
 
-Capture both group selections with a fake `mo-tester/run.sh`, plan both groups, and verify the union contains 72 directories and 1,133 scripts.
+Capture both group selections with a fake `mo-tester/run.sh`, plan both groups, and verify the union contains 72 directories. At the implementation-time MatrixOne main commit `129bd689b5c415fbb448eb7b413ee84b245fb938`, the union contains 1,137 scripts.
 
 Expected aggregate:
 
 ```text
 serial-before: 5 directories, 29 scripts
-parallel: 29 directories, 215 scripts
-serial-after: 38 directories, 889 scripts
+parallel: 29 directories, 216 scripts
+serial-after: 38 directories, 892 scripts
 ```
 
 - [ ] **Step 7: Commit the planner**
@@ -481,7 +481,7 @@ Use `origin/main:optools/run_bvt_group.sh` from `/Users/ariznawl/weilu/matrixone
 
 ```text
 72 selected directories
-1133 selected scripts
+1137 selected scripts at MatrixOne 129bd689b5c415fbb448eb7b413ee84b245fb938
 5 serial-before directories
 29 parallel directories
 38 serial-after directories

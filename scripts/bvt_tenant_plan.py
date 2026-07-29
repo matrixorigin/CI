@@ -160,7 +160,10 @@ def build_plan(
 
 
 def _write_include(path: Path, directories: list[str]) -> None:
-    path.write_text(",".join(directories) + ("\n" if directories else ""))
+    bounded_directories = [f"{directory.rstrip('/')}/" for directory in directories]
+    path.write_text(
+        ",".join(bounded_directories) + ("\n" if bounded_directories else "")
+    )
 
 
 def write_plan(plan: dict, output_dir: Path) -> None:
