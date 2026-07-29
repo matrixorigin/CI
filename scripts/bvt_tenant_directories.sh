@@ -26,11 +26,9 @@ bvt_group_1_directories=(
 )
 
 bvt_serial_before_all=(
-  log
   result_count
   sql_source_type
   statement_query_type
-  zz_statement_query_type
 )
 
 bvt_parallel_group_0_worker_0=(
@@ -73,6 +71,7 @@ bvt_parallel_group_1_worker_1=(
 )
 
 bvt_serial_after_all=(
+  log
   analyze
   array
   benchmark
@@ -113,6 +112,7 @@ bvt_serial_after_all=(
   util
   vector
   zz_accesscontrol
+  zz_statement_query_type
 )
 
 bvt_excluded=(

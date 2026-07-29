@@ -400,8 +400,7 @@ prepare_phase() {
 
   prepared_resource=""
   if [[ -n "${resource_dir}" ]]; then
-    cp -a "${resource_dir}" "${phase_root}/resources"
-    prepared_resource="${phase_root}/resources"
+    prepared_resource="${resource_dir}"
   fi
 
   if [[ -n "${account_user}" ]]; then
