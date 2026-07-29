@@ -264,7 +264,7 @@ selected_directory_count=$(
 (( selected_directory_count > 0 )) ||
   die "BVT group ${group} has no test directories"
 
-echo "BVT group ${group}: ${selected_directory_count} directories; fixed 2 tenant workers"
+echo "BVT directory plan: group ${group}: ${selected_directory_count} directories; fixed 2 tenant workers"
 
 summary_file="${output_dir}/summary.tsv"
 printf 'phase\tname\tstatus\tinclude_file\tlog_file\n' > "${summary_file}"

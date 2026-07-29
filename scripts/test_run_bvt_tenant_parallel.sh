@@ -131,6 +131,8 @@ setup_fixture() {
   mysql_log="${fixture_root}/mysql.log"
   worker_pid_file="${fixture_root}/worker.pid"
   output_dir="${fixture_root}/output"
+  run_log="${fixture_root}/orchestrator.log"
+  fixture_group=1
 
   unknown_directory="unknown_bvt_case"
   local unknown_group
@@ -292,7 +294,7 @@ run_fixture() {
     bash "${orchestrator}"
     --tester-dir "${tester_dir}"
     --case-root "${case_root}"
-    --group 1
+    --group "${fixture_group}"
     --directories "${directory_config}"
     --output-dir "${output_dir}"
     --tenant-password "tenant-secret"
@@ -308,8 +310,9 @@ test_successful_direct_commands_and_isolation() {
   setup_fixture
   export FAKE_REQUIRE_CONCURRENCY=1
 
-  run_fixture
+  run_fixture > "${run_log}"
 
+  assert_contains "${run_log}" "BVT directory plan: group 1:"
   assert_file "${output_dir}/summary.tsv"
   assert_file "${output_dir}/serial-before.include"
   assert_file "${output_dir}/worker-0.include"
@@ -352,6 +355,37 @@ test_successful_direct_commands_and_isolation() {
   assert_contains "${output_dir}/summary.tsv" $'parallel\tworker-0\tpassed'
   assert_contains "${output_dir}/summary.tsv" $'parallel\tworker-1\tpassed'
   unset FAKE_REQUIRE_CONCURRENCY
+}
+
+test_group_0_direct_commands_skip_empty_serial_before() {
+  setup_fixture
+  fixture_group=0
+  mkdir -p \
+    "${case_root}/view" \
+    "${case_root}/auto_increment" \
+    "${case_root}/benchmark"
+  printf 'select 7;\n' > "${case_root}/view/a.sql"
+  printf 'select 8;\n' > "${case_root}/auto_increment/a.sql"
+  printf 'select 9;\n' > "${case_root}/benchmark/a.sql"
+
+  run_fixture > "${run_log}"
+
+  assert_contains "${run_log}" "BVT directory plan: group 0:"
+  assert_contains "${output_dir}/summary.tsv" \
+    $'serial\tserial-before\tskipped'
+  assert_contains "${output_dir}/worker-0.include" "${case_root}/view/"
+  assert_contains "${output_dir}/worker-1.include" \
+    "${case_root}/auto_increment/"
+  assert_contains "${output_dir}/serial-after.include" \
+    "${case_root}/benchmark/"
+  assert_contains "${event_log}" "worker-0:start:bvtw_g0_w0:admin:"
+  assert_contains "${event_log}" "worker-1:start:bvtw_g0_w1:admin:"
+  assert_not_contains "${event_log}" "serial-before:start:"
+  assert_order "${event_log}" \
+    "create-account" \
+    "worker-" \
+    "drop-account" \
+    "serial-after:start:dump:"
 }
 
 test_worker_failure_waits_for_sibling_and_runs_cleanup_and_after() {
@@ -469,6 +503,7 @@ run_test() {
 
 run_test "static directory contract" test_directory_contract
 run_test "direct commands and isolation" test_successful_direct_commands_and_isolation
+run_test "group 0 direct commands" test_group_0_direct_commands_skip_empty_serial_before
 run_test "worker failure aggregation" test_worker_failure_waits_for_sibling_and_runs_cleanup_and_after
 run_test "serial-before barrier" test_serial_before_failure_prevents_accounts_and_workers
 run_test "leaked account detection" test_leaked_account_fails_before_serial_after
