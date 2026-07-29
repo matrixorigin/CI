@@ -5,6 +5,7 @@ set -euo pipefail
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 orchestrator="${script_dir}/run_bvt_tenant_parallel.sh"
 planner="${script_dir}/bvt_tenant_plan.py"
+directory_config="${script_dir}/bvt_tenant_directories.sh"
 
 fail() {
   echo "not ok - $*" >&2
@@ -62,6 +63,61 @@ wait_for_event() {
     ((attempt+=1))
   done
   return 1
+}
+
+array_contains() {
+  local expected=$1
+  shift
+  local value
+  for value in "$@"; do
+    [[ "${value}" == "${expected}" ]] && return 0
+  done
+  return 1
+}
+
+test_directory_contract() {
+  [[ -f "${directory_config}" ]] ||
+    fail "expected directory contract: ${directory_config}"
+
+  local bvt_group=0
+  # shellcheck source=/dev/null
+  source "${directory_config}"
+  array_contains view "${bvt_worker_0[@]}" ||
+    fail "group 0 worker 0 must contain view"
+  array_contains auto_increment "${bvt_worker_1[@]}" ||
+    fail "group 0 worker 1 must contain auto_increment"
+  array_contains benchmark "${bvt_serial_after[@]}" ||
+    fail "group 0 sys-after must contain benchmark"
+  ! array_contains analyze "${bvt_worker_0[@]}" ||
+    fail "analyze must not run in an ordinary tenant"
+  ! array_contains benchmark "${bvt_worker_1[@]}" ||
+    fail "benchmark must not run in an ordinary tenant"
+
+  local -a all_selected=(
+    "${bvt_serial_before[@]}"
+    "${bvt_worker_0[@]}"
+    "${bvt_worker_1[@]}"
+    "${bvt_serial_after[@]}"
+  )
+  local duplicate
+  duplicate=$(
+    printf '%s\n' "${all_selected[@]}" |
+      sort |
+      uniq -d |
+      head -n 1
+  )
+  [[ -z "${duplicate}" ]] ||
+    fail "directory appears in more than one phase: ${duplicate}"
+
+  bvt_group=1
+  # shellcheck source=/dev/null
+  source "${directory_config}"
+  array_contains analyze "${bvt_serial_after[@]}" ||
+    fail "group 1 sys-after must contain analyze"
+  ! array_contains analyze "${bvt_worker_0[@]}" ||
+    fail "analyze must not run in an ordinary tenant"
+  ! array_contains analyze "${bvt_worker_1[@]}" ||
+    fail "analyze must not run in an ordinary tenant"
 }
 
 setup_fixture() {
@@ -381,6 +437,8 @@ test_unreachable_matrixone_skips_serial_after() {
     $'serial\tserial-after\tskipped'
 }
 
+test_directory_contract
+echo "ok - static directory contract"
 test_successful_phase_order_and_isolation
 echo "ok - successful phase order and isolation"
 test_worker_failure_waits_for_sibling_and_runs_cleanup_and_after
