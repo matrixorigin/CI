@@ -47,12 +47,6 @@ class WorkflowContract:
                 "type": "boolean",
                 "default": False,
             },
-            "tenant_parallel_workers": {
-                "description": "Tenant worker count (1-4)",
-                "required": False,
-                "type": "number",
-                "default": 2,
-            },
             "ci_ref": {
                 "description": "matrixorigin/CI ref containing tenant BVT scripts",
                 "required": False,
@@ -63,6 +57,7 @@ class WorkflowContract:
         for name, value in expected.items():
             self.test_case.assertIn(name, self.inputs)
             self.test_case.assertEqual(self.inputs[name], value)
+        self.test_case.assertNotIn("tenant_parallel_workers", self.inputs)
 
     def assert_ci_checkout(self):
         step = self.step("Checkout tenant-parallel BVT scripts")
@@ -101,7 +96,15 @@ class TestComposeWorkflow(unittest.TestCase):
         )
         self.assertIn('--case-root "$GITHUB_WORKSPACE/test/distributed/cases"', run)
         self.assertNotIn("--resource-dir", run)
-        self.assertIn("--workers '${{ inputs.tenant_parallel_workers }}'", run)
+        self.assertIn(
+            '--directories "$GITHUB_WORKSPACE/.ci/tenant-parallel/scripts/'
+            'bvt_tenant_directories.sh"',
+            run,
+        )
+        self.assertNotIn("--workers", run)
+        self.assertNotIn("--planner", run)
+        self.assertNotIn("--policy", run)
+        self.assertNotIn("--group-runner", run)
         self.assertIn('else\n  bash "${bvt_runner}"', run)
 
     def test_artifact_contains_tenant_output(self):
@@ -139,7 +142,15 @@ class TestStandaloneWorkflow(unittest.TestCase):
             '--resource-dir "$GITHUB_WORKSPACE/head/test/distributed/resources"',
             run,
         )
-        self.assertIn("--workers '${{ inputs.tenant_parallel_workers }}'", run)
+        self.assertIn(
+            '--directories "$GITHUB_WORKSPACE/.ci/tenant-parallel/scripts/'
+            'bvt_tenant_directories.sh"',
+            run,
+        )
+        self.assertNotIn("--workers", run)
+        self.assertNotIn("--planner", run)
+        self.assertNotIn("--policy", run)
+        self.assertNotIn("--group-runner", run)
         self.assertIn('else\n  bash "${bvt_runner}"', run)
 
     def test_artifact_contains_tenant_output(self):

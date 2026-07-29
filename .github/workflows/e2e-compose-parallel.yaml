@@ -18,11 +18,6 @@ on:
         required: false
         type: boolean
         default: false
-      tenant_parallel_workers:
-        description: "Tenant worker count (1-4)"
-        required: false
-        type: number
-        default: 2
       ci_ref:
         description: "matrixorigin/CI ref containing tenant BVT scripts"
         required: false
@@ -368,11 +363,8 @@ jobs:
             bash "$GITHUB_WORKSPACE/.ci/tenant-parallel/scripts/run_bvt_tenant_parallel.sh" \
               --tester-dir "$GITHUB_WORKSPACE/mo-tester" \
               --case-root "$GITHUB_WORKSPACE/test/distributed/cases" \
-              --group-runner "${bvt_runner}" \
               --group "${bvt_group}" \
-              --workers '${{ inputs.tenant_parallel_workers }}' \
-              --policy "$GITHUB_WORKSPACE/.ci/tenant-parallel/scripts/bvt_tenant_policy.json" \
-              --planner "$GITHUB_WORKSPACE/.ci/tenant-parallel/scripts/bvt_tenant_plan.py" \
+              --directories "$GITHUB_WORKSPACE/.ci/tenant-parallel/scripts/bvt_tenant_directories.sh" \
               --output-dir "${RUNNER_TEMP}/bvt-tenant-compose"
           else
             bash "${bvt_runner}" \
