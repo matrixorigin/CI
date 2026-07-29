@@ -8,12 +8,9 @@ Usage:
   run_bvt_tenant_parallel.sh \
     --tester-dir PATH \
     --case-root PATH \
-    --group-runner PATH \
     --group 0|1 \
-    --policy PATH \
-    --planner PATH \
+    --directories PATH \
     --output-dir PATH \
-    --workers 1..4 \
     [--resource-dir PATH] \
     [--mysql-host HOST] \
     [--mysql-port PORT] \
@@ -42,12 +39,9 @@ absolute_file() {
 
 tester_dir=""
 case_root=""
-group_runner=""
 group=""
-policy=""
-planner=""
+directories=""
 output_dir=""
-workers=""
 resource_dir=""
 mysql_host="127.0.0.1"
 mysql_port="6001"
@@ -57,7 +51,7 @@ tenant_password="111"
 
 while (( $# > 0 )); do
   case "$1" in
-    --tester-dir|--case-root|--group-runner|--group|--policy|--planner|--output-dir|--workers|--resource-dir|--mysql-host|--mysql-port|--mysql-user|--mysql-password|--tenant-password)
+    --tester-dir|--case-root|--group|--directories|--output-dir|--resource-dir|--mysql-host|--mysql-port|--mysql-user|--mysql-password|--tenant-password)
       (( $# >= 2 )) || die "missing value for $1"
       option=$1
       value=$2
@@ -65,12 +59,9 @@ while (( $# > 0 )); do
       case "${option}" in
         --tester-dir) tester_dir=${value} ;;
         --case-root) case_root=${value} ;;
-        --group-runner) group_runner=${value} ;;
         --group) group=${value} ;;
-        --policy) policy=${value} ;;
-        --planner) planner=${value} ;;
+        --directories) directories=${value} ;;
         --output-dir) output_dir=${value} ;;
-        --workers) workers=${value} ;;
         --resource-dir) resource_dir=${value} ;;
         --mysql-host) mysql_host=${value} ;;
         --mysql-port) mysql_port=${value} ;;
@@ -91,14 +82,10 @@ done
 
 [[ -n "${tester_dir}" ]] || die "--tester-dir is required"
 [[ -n "${case_root}" ]] || die "--case-root is required"
-[[ -n "${group_runner}" ]] || die "--group-runner is required"
 [[ -n "${group}" ]] || die "--group is required"
-[[ -n "${policy}" ]] || die "--policy is required"
-[[ -n "${planner}" ]] || die "--planner is required"
+[[ -n "${directories}" ]] || die "--directories is required"
 [[ -n "${output_dir}" ]] || die "--output-dir is required"
-[[ -n "${workers}" ]] || die "--workers is required"
 [[ "${group}" =~ ^[01]$ ]] || die "--group must be 0 or 1"
-[[ "${workers}" =~ ^[1-4]$ ]] || die "--workers must be between 1 and 4"
 [[ "${mysql_port}" =~ ^[0-9]+$ ]] || die "--mysql-port must be numeric"
 [[ "${tenant_password}" =~ ^[A-Za-z0-9._-]+$ ]] ||
   die "--tenant-password may contain only letters, digits, dot, underscore, and hyphen"
@@ -107,15 +94,10 @@ tester_dir=$(absolute_directory "${tester_dir}") ||
   die "tester directory does not exist"
 case_root=$(absolute_directory "${case_root}") ||
   die "case root does not exist"
-group_runner=$(absolute_file "${group_runner}") ||
-  die "group runner does not exist"
-policy=$(absolute_file "${policy}") ||
-  die "policy does not exist"
-planner=$(absolute_file "${planner}") ||
-  die "planner does not exist"
-[[ -f "${group_runner}" ]] || die "group runner does not exist: ${group_runner}"
-[[ -f "${policy}" ]] || die "policy does not exist: ${policy}"
-[[ -f "${planner}" ]] || die "planner does not exist: ${planner}"
+directories=$(absolute_file "${directories}") ||
+  die "directory configuration does not exist"
+[[ -f "${directories}" ]] ||
+  die "directory configuration does not exist: ${directories}"
 
 if [[ -z "${resource_dir}" && -d "$(dirname "${case_root}")/resources" ]]; then
   resource_dir="$(dirname "${case_root}")/resources"
@@ -135,6 +117,154 @@ else
 fi
 output_dir=$(absolute_directory "${output_dir}") ||
   die "cannot resolve output directory"
+
+bvt_group=${group}
+# shellcheck source=/dev/null
+source "${directories}" || die "failed to load directory configuration"
+
+validate_directory_name() {
+  local name=$1
+  [[ "${name}" =~ ^[A-Za-z0-9_]+$ ]] ||
+    die "invalid case directory name: ${name}"
+}
+
+has_test_scripts() {
+  local path=$1
+  find "${path}" -type f \( -name '*.sql' -o -name '*.test' \) -print -quit |
+    grep -q .
+}
+
+configured_directory() {
+  local name=$1
+  bvt_directory_in_array "${name}" \
+    "${bvt_serial_before_all[@]}" \
+    "${bvt_parallel_group_0_worker_0[@]}" \
+    "${bvt_parallel_group_0_worker_1[@]}" \
+    "${bvt_parallel_group_1_worker_0[@]}" \
+    "${bvt_parallel_group_1_worker_1[@]}" \
+    "${bvt_serial_after_all[@]}" \
+    "${bvt_excluded[@]}"
+}
+
+filter_existing_directories() {
+  local name
+  for name in "$@"; do
+    validate_directory_name "${name}"
+    if [[ -d "${case_root}/${name}" ]] &&
+       has_test_scripts "${case_root}/${name}"; then
+      printf '%s\n' "${name}"
+    fi
+  done
+}
+
+serial_before_names=()
+worker_0_names=()
+worker_1_names=()
+serial_after_names=()
+
+while IFS= read -r directory_name; do
+  [[ -n "${directory_name}" ]] &&
+    serial_before_names+=("${directory_name}")
+done < <(filter_existing_directories "${bvt_serial_before[@]}")
+
+while IFS= read -r directory_name; do
+  [[ -n "${directory_name}" ]] &&
+    worker_0_names+=("${directory_name}")
+done < <(filter_existing_directories "${bvt_worker_0[@]}")
+
+while IFS= read -r directory_name; do
+  [[ -n "${directory_name}" ]] &&
+    worker_1_names+=("${directory_name}")
+done < <(filter_existing_directories "${bvt_worker_1[@]}")
+
+while IFS= read -r directory_name; do
+  [[ -n "${directory_name}" ]] &&
+    serial_after_names+=("${directory_name}")
+done < <(filter_existing_directories "${bvt_serial_after[@]}")
+
+inventory_file="${output_dir}/inventory.tsv"
+printf 'directory\tgroup\tphase\treviewed\n' > "${inventory_file}"
+
+for directory_name in \
+  "${serial_before_names[@]}" \
+  "${worker_0_names[@]}" \
+  "${worker_1_names[@]}" \
+  "${serial_after_names[@]}"; do
+  case " ${serial_before_names[*]} " in
+    *" ${directory_name} "*) phase="serial-before" ;;
+    *)
+      case " ${worker_0_names[*]} " in
+        *" ${directory_name} "*) phase="worker-0" ;;
+        *)
+          case " ${worker_1_names[*]} " in
+            *" ${directory_name} "*) phase="worker-1" ;;
+            *) phase="serial-after" ;;
+          esac
+          ;;
+      esac
+      ;;
+  esac
+  printf '%s\t%s\t%s\ttrue\n' \
+    "${directory_name}" "${group}" "${phase}" >> "${inventory_file}"
+done
+
+while IFS= read -r discovered_path; do
+  directory_name=$(basename "${discovered_path}")
+  validate_directory_name "${directory_name}"
+  has_test_scripts "${discovered_path}" || continue
+  if configured_directory "${directory_name}"; then
+    continue
+  fi
+  if [[ "$(bvt_group_for_directory "${directory_name}")" == "${group}" ]]; then
+    serial_after_names+=("${directory_name}")
+    printf '%s\t%s\tserial-after\tfalse\n' \
+      "${directory_name}" "${group}" >> "${inventory_file}"
+    echo "Unreviewed BVT directory runs as sys-after: ${directory_name}"
+  fi
+done < <(
+  find "${case_root}" -mindepth 1 -maxdepth 1 -type d -print |
+    LC_ALL=C sort
+)
+
+write_include_file() {
+  local path=$1
+  shift
+  local include_value=""
+  local name
+  for name in "$@"; do
+    if [[ -n "${include_value}" ]]; then
+      include_value+=","
+    fi
+    include_value+="${case_root}/${name}/"
+  done
+  printf '%s\n' "${include_value}" > "${path}"
+}
+
+serial_before_include="${output_dir}/serial-before.include"
+worker_0_include="${output_dir}/worker-0.include"
+worker_1_include="${output_dir}/worker-1.include"
+serial_after_include="${output_dir}/serial-after.include"
+write_include_file "${serial_before_include}" "${serial_before_names[@]}"
+write_include_file "${worker_0_include}" "${worker_0_names[@]}"
+write_include_file "${worker_1_include}" "${worker_1_names[@]}"
+write_include_file "${serial_after_include}" "${serial_after_names[@]}"
+
+selected_directory_count=$(
+  (
+    printf '%s\n' \
+      "${serial_before_names[@]}" \
+      "${worker_0_names[@]}" \
+      "${worker_1_names[@]}" \
+      "${serial_after_names[@]}"
+  ) |
+    sed '/^$/d' |
+    wc -l |
+    tr -d '[:space:]'
+)
+(( selected_directory_count > 0 )) ||
+  die "BVT group ${group} has no test directories"
+
+echo "BVT group ${group}: ${selected_directory_count} directories; fixed 2 tenant workers"
 
 summary_file="${output_dir}/summary.tsv"
 printf 'phase\tname\tstatus\tinclude_file\tlog_file\n' > "${summary_file}"
@@ -161,8 +291,8 @@ mysql_exec() {
     --execute "${sql}"
 }
 
-declare -a created_accounts=()
-declare -a worker_pids=()
+created_accounts=()
+worker_pids=()
 worker_pid_count=0
 
 cleanup_accounts() {
@@ -179,9 +309,7 @@ cleanup_accounts() {
 
   local quoted=""
   for account in "${created_accounts[@]}"; do
-    if [[ -n "${quoted}" ]]; then
-      quoted+=","
-    fi
+    [[ -z "${quoted}" ]] || quoted+=","
     quoted+="'${account}'"
   done
   local leak_count
@@ -200,8 +328,6 @@ cleanup_accounts() {
   created_accounts=()
 }
 
-# Invoked through the EXIT trap's cleanup call graph.
-# shellcheck disable=SC2329
 redact_phase_configs() {
   python3 - "${output_dir}" <<'PY'
 import re
@@ -212,18 +338,14 @@ output_dir = Path(sys.argv[1])
 secret_field = re.compile(r"^(\s*(?:password|syspass)\s*:\s*).*$", re.IGNORECASE)
 for path in output_dir.glob("phases/*/tester/mo.yml"):
     lines = path.read_text().splitlines()
-    redacted = [
-        secret_field.sub(r'\1"***"', line)
-        for line in lines
-    ]
+    redacted = [secret_field.sub(r'\1"***"', line) for line in lines]
     path.write_text("\n".join(redacted) + "\n")
 PY
 }
 
-# shellcheck disable=SC2329
 stop_worker_processes() {
-  local index pid
-  index=0
+  local index=0
+  local pid
   while (( index < worker_pid_count )); do
     pid=${worker_pids[index]}
     if kill -0 "${pid}" 2>/dev/null; then
@@ -235,15 +357,13 @@ stop_worker_processes() {
   done
   index=0
   while (( index < worker_pid_count )); do
-    pid=${worker_pids[index]}
-    wait "${pid}" 2>/dev/null || true
+    wait "${worker_pids[index]}" 2>/dev/null || true
     ((index+=1))
   done
   worker_pids=()
   worker_pid_count=0
 }
 
-# shellcheck disable=SC2329
 cleanup_on_exit() {
   local status=$?
   trap - EXIT INT TERM
@@ -257,49 +377,6 @@ cleanup_on_exit() {
 
 trap cleanup_on_exit EXIT
 trap 'exit 130' INT TERM
-
-capture_tester="${output_dir}/capture-tester"
-mkdir -p "${capture_tester}"
-cat > "${capture_tester}/run.sh" <<'CAPTURE'
-#!/usr/bin/env bash
-set -euo pipefail
-include=""
-while getopts ":p:m:t:r:i:e:s:ogfnch" opt; do
-  if [[ "${opt}" == "i" ]]; then
-    include=${OPTARG}
-  fi
-done
-[[ -n "${include}" ]]
-printf '%s\n' "${include}" | tr ',' '\n' > "${BVT_CAPTURE_FILE}"
-CAPTURE
-chmod +x "${capture_tester}/run.sh"
-
-selected_files="${output_dir}/selected-files.txt"
-capture_log="${output_dir}/group-capture.log"
-group_command=(
-  bash "${group_runner}"
-  "${capture_tester}"
-  "${case_root}"
-  "${group}"
-)
-if [[ -n "${resource_dir}" ]]; then
-  group_command+=("${resource_dir}")
-fi
-if ! BVT_CAPTURE_FILE="${selected_files}" \
-  "${group_command[@]}" > "${capture_log}" 2>&1; then
-  cat "${capture_log}" >&2
-  die "failed to capture BVT group ${group}"
-fi
-[[ -s "${selected_files}" ]] || die "captured BVT group is empty"
-
-if ! python3 "${planner}" \
-  --case-root "${case_root}" \
-  --selected-files "${selected_files}" \
-  --policy "${policy}" \
-  --workers "${workers}" \
-  --output-dir "${output_dir}"; then
-  die "failed to build BVT directory plan"
-fi
 
 prepare_phase() {
   local phase_name=$1
@@ -378,10 +455,8 @@ run_phase() {
   )
 }
 
-serial_before_include="${output_dir}/serial-before.include"
-serial_after_include="${output_dir}/serial-after.include"
-
-if [[ -s "${serial_before_include}" ]]; then
+if [[ -s "${serial_before_include}" ]] &&
+   [[ -n "$(<"${serial_before_include}")" ]]; then
   if run_phase "serial-before" "${serial_before_include}" ""; then
     record_summary \
       "serial" "serial-before" "passed" \
@@ -398,19 +473,17 @@ else
   record_summary "serial" "serial-before" "skipped" "${serial_before_include}" ""
 fi
 
-declare -a active_workers=()
-worker_index=0
-while (( worker_index < workers )); do
+active_workers=()
+for worker_index in 0 1; do
   worker_include="${output_dir}/worker-${worker_index}.include"
-  if [[ -s "${worker_include}" ]]; then
+  if [[ -n "$(<"${worker_include}")" ]]; then
     active_workers+=("${worker_index}")
   else
-    record_summary "parallel" "worker-${worker_index}" "skipped" "${worker_include}" ""
+    record_summary \
+      "parallel" "worker-${worker_index}" "skipped" "${worker_include}" ""
   fi
-  ((worker_index+=1))
 done
 
-account_setup_failed=0
 for worker_index in "${active_workers[@]}"; do
   account="bvtw_g${group}_w${worker_index}"
   if mysql_exec \
@@ -418,25 +491,20 @@ for worker_index in "${active_workers[@]}"; do
     created_accounts+=("${account}")
   else
     echo "failed to create worker account ${account}" >&2
-    account_setup_failed=1
-    break
+    record_summary "parallel" "account-setup" "failed" "" ""
+    exit 1
   fi
 done
-if (( account_setup_failed != 0 )); then
-  record_summary "parallel" "account-setup" "failed" "" ""
-  exit 1
-fi
 
-declare -a launched_workers=()
+launched_workers=()
 if (( ${#active_workers[@]} > 0 )); then
   set -m
 fi
 for worker_index in "${active_workers[@]}"; do
-  account="bvtw_g${group}_w${worker_index}:admin"
   run_phase \
     "worker-${worker_index}" \
     "${output_dir}/worker-${worker_index}.include" \
-    "${account}" &
+    "bvtw_g${group}_w${worker_index}:admin" &
   worker_pids+=("$!")
   ((worker_pid_count+=1))
   launched_workers+=("${worker_index}")
@@ -479,7 +547,7 @@ elif ! mysql_exec "SELECT 1;" >/dev/null; then
   echo "MatrixOne is unreachable; serial-after cannot run" >&2
   record_summary "serial" "serial-after" "skipped" "${serial_after_include}" ""
   final_status=1
-elif [[ -s "${serial_after_include}" ]]; then
+elif [[ -n "$(<"${serial_after_include}")" ]]; then
   if run_phase "serial-after" "${serial_after_include}" ""; then
     record_summary \
       "serial" "serial-after" "passed" \

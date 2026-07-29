@@ -4,7 +4,6 @@ set -euo pipefail
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 orchestrator="${script_dir}/run_bvt_tenant_parallel.sh"
-planner="${script_dir}/bvt_tenant_plan.py"
 directory_config="${script_dir}/bvt_tenant_directories.sh"
 
 fail() {
@@ -76,9 +75,6 @@ array_contains() {
 }
 
 test_directory_contract() {
-  [[ -f "${directory_config}" ]] ||
-    fail "expected directory contract: ${directory_config}"
-
   local bvt_group=0
   # shellcheck source=/dev/null
   source "${directory_config}"
@@ -88,26 +84,21 @@ test_directory_contract() {
     fail "group 0 worker 1 must contain auto_increment"
   array_contains benchmark "${bvt_serial_after[@]}" ||
     fail "group 0 sys-after must contain benchmark"
-  ! array_contains analyze "${bvt_worker_0[@]}" ||
-    fail "analyze must not run in an ordinary tenant"
+  ! array_contains benchmark "${bvt_worker_0[@]}" ||
+    fail "benchmark must not run in an ordinary tenant"
   ! array_contains benchmark "${bvt_worker_1[@]}" ||
     fail "benchmark must not run in an ordinary tenant"
 
-  local -a all_selected=(
+  local -a group_0_selected=(
     "${bvt_serial_before[@]}"
     "${bvt_worker_0[@]}"
     "${bvt_worker_1[@]}"
     "${bvt_serial_after[@]}"
   )
   local duplicate
-  duplicate=$(
-    printf '%s\n' "${all_selected[@]}" |
-      sort |
-      uniq -d |
-      head -n 1
-  )
+  duplicate=$(printf '%s\n' "${group_0_selected[@]}" | sort | uniq -d | head -n 1)
   [[ -z "${duplicate}" ]] ||
-    fail "directory appears in more than one phase: ${duplicate}"
+    fail "group 0 directory appears in more than one phase: ${duplicate}"
 
   bvt_group=1
   # shellcheck source=/dev/null
@@ -118,6 +109,16 @@ test_directory_contract() {
     fail "analyze must not run in an ordinary tenant"
   ! array_contains analyze "${bvt_worker_1[@]}" ||
     fail "analyze must not run in an ordinary tenant"
+
+  local -a group_1_selected=(
+    "${bvt_serial_before[@]}"
+    "${bvt_worker_0[@]}"
+    "${bvt_worker_1[@]}"
+    "${bvt_serial_after[@]}"
+  )
+  duplicate=$(printf '%s\n' "${group_1_selected[@]}" | sort | uniq -d | head -n 1)
+  [[ -z "${duplicate}" ]] ||
+    fail "group 1 directory appears in more than one phase: ${duplicate}"
 }
 
 setup_fixture() {
@@ -130,23 +131,43 @@ setup_fixture() {
   mysql_log="${fixture_root}/mysql.log"
   worker_pid_file="${fixture_root}/worker.pid"
   output_dir="${fixture_root}/output"
-  policy="${fixture_root}/policy.json"
-  group_runner="${fixture_root}/run_bvt_group.sh"
+
+  unknown_directory="unknown_bvt_case"
+  local unknown_group
+  unknown_group=$(
+    printf '%s' "${unknown_directory}" |
+      cksum |
+      awk '{ print $1 % 2 }'
+  )
+  if [[ "${unknown_group}" != "1" ]]; then
+    unknown_directory="unknown_bvt_suite"
+  fi
+  unknown_group=$(
+    printf '%s' "${unknown_directory}" |
+      cksum |
+      awk '{ print $1 % 2 }'
+  )
+  [[ "${unknown_group}" == "1" ]] ||
+    fail "test fixture needs an unknown directory assigned to group 1"
 
   mkdir -p \
-    "${case_root}/before" \
-    "${case_root}/alpha" \
-    "${case_root}/beta" \
-    "${case_root}/after" \
+    "${case_root}/log" \
+    "${case_root}/dtype" \
+    "${case_root}/window" \
+    "${case_root}/analyze" \
+    "${case_root}/${unknown_directory}" \
+    "${case_root}/optimistic" \
     "${tester_dir}/lib" \
     "${tester_dir}/log" \
     "${tester_dir}/report" \
     "${resource_dir}/nested" \
     "${fake_bin}"
-  printf 'select 1;\n' > "${case_root}/before/a.sql"
-  printf 'select 2;\n' > "${case_root}/alpha/a.sql"
-  printf 'select 3;\n' > "${case_root}/beta/a.sql"
-  printf 'select 4;\n' > "${case_root}/after/a.test"
+  printf 'select 1;\n' > "${case_root}/log/a.sql"
+  printf 'select 2;\n' > "${case_root}/dtype/a.sql"
+  printf 'select 3;\n' > "${case_root}/window/a.sql"
+  printf 'select 4;\n' > "${case_root}/analyze/a.test"
+  printf 'select 5;\n' > "${case_root}/${unknown_directory}/a.sql"
+  printf 'select 6;\n' > "${case_root}/optimistic/a.sql"
   printf 'resource\n' > "${resource_dir}/nested/payload.txt"
   : > "${tester_dir}/lib/fake.jar"
   : > "${event_log}"
@@ -172,13 +193,46 @@ setup_fixture() {
 set -euo pipefail
 phase=$(basename "$(dirname "$PWD")")
 include=""
-while getopts ":p:m:t:r:i:e:s:ogfnch" opt; do
-  if [[ "${opt}" == "i" ]]; then
-    include=${OPTARG}
-  fi
+case_path=""
+declare -a received=()
+while (( $# > 0 )); do
+  received+=("$1")
+  case "$1" in
+    -i)
+      received+=("$2")
+      include=$2
+      shift 2
+      ;;
+    -p)
+      received+=("$2")
+      case_path=$2
+      shift 2
+      ;;
+    -s)
+      received+=("$2")
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
 done
 user=$(sed -n 's/^  name: *"\([^"]*\)".*/\1/p' mo.yml)
-printf '%s\n' "${phase}:${user}:${include}" >> "${FAKE_EVENT_LOG}"
+printf '%s\n' "${phase}:start:${user}:${case_path}:${include}" >> "${FAKE_EVENT_LOG}"
+printf '%s\n' "${received[*]}" > received-arguments.txt
+
+if [[ "${FAKE_REQUIRE_CONCURRENCY:-0}" == "1" && "${phase}" == "worker-0" ]]; then
+  attempt=0
+  while (( attempt < 100 )); do
+    if grep -F "worker-1:start:" "${FAKE_EVENT_LOG}" >/dev/null; then
+      break
+    fi
+    sleep 0.02
+    ((attempt+=1))
+  done
+  (( attempt < 100 )) || exit 19
+fi
+
 mkdir -p report
 printf '%s\n' "${phase}" > report/report.txt
 if [[ "${FAKE_FAIL_PHASE:-}" == "${phase}" ]]; then
@@ -186,24 +240,15 @@ if [[ "${FAKE_FAIL_PHASE:-}" == "${phase}" ]]; then
 fi
 if [[ "${FAKE_BLOCK_PHASE:-}" == "${phase}" ]]; then
   printf '%s\n' "${BASHPID}" > "${FAKE_WORKER_PID_FILE}"
-  printf '%s\n' "${phase}-blocked" >> "${FAKE_EVENT_LOG}"
-  trap 'printf "%s\n" "${phase}-stopped" >> "${FAKE_EVENT_LOG}"; exit 143' INT TERM
+  printf '%s\n' "${phase}:blocked" >> "${FAKE_EVENT_LOG}"
+  trap 'printf "%s\n" "${phase}:stopped" >> "${FAKE_EVENT_LOG}"; exit 143' INT TERM
   while true; do
     sleep 1
   done
 fi
+printf '%s\n' "${phase}:done" >> "${FAKE_EVENT_LOG}"
 TESTER
   chmod +x "${tester_dir}/run.sh"
-
-  cat > "${group_runner}" <<'GROUP'
-#!/usr/bin/env bash
-set -euo pipefail
-tester_dir=$1
-case_root=$2
-"${tester_dir}/run.sh" -n -g -o -p "${case_root}" -i \
-  "${case_root}/before/a.sql,${case_root}/alpha/a.sql,${case_root}/beta/a.sql,${case_root}/after/a.test"
-GROUP
-  chmod +x "${group_runner}"
 
   cat > "${fake_bin}/mysql" <<'MYSQL'
 #!/usr/bin/env bash
@@ -230,18 +275,6 @@ if [[ -n "${FAKE_MYSQL_FAIL_MATCH:-}" && "${lower}" == *"${FAKE_MYSQL_FAIL_MATCH
 fi
 MYSQL
   chmod +x "${fake_bin}/mysql"
-
-  cat > "${policy}" <<'JSON'
-{
-  "schema_version": 1,
-  "directories": {
-    "before": {"phase": "serial-before", "reason": "ordered"},
-    "alpha": {"phase": "parallel", "reason": "safe"},
-    "beta": {"phase": "parallel", "reason": "safe"},
-    "after": {"phase": "serial-after", "reason": "global"}
-  }
-}
-JSON
 }
 
 run_fixture() {
@@ -252,18 +285,16 @@ run_fixture() {
     "FAKE_MYSQL_LOG=${mysql_log}"
     "FAKE_FAIL_PHASE=${FAKE_FAIL_PHASE:-}"
     "FAKE_BLOCK_PHASE=${FAKE_BLOCK_PHASE:-}"
+    "FAKE_REQUIRE_CONCURRENCY=${FAKE_REQUIRE_CONCURRENCY:-0}"
     "FAKE_WORKER_PID_FILE=${worker_pid_file}"
     "FAKE_LEAK_COUNT=${FAKE_LEAK_COUNT:-0}"
     "FAKE_MYSQL_FAIL_MATCH=${FAKE_MYSQL_FAIL_MATCH:-}"
     bash "${orchestrator}"
     --tester-dir "${tester_dir}"
     --case-root "${case_root}"
-    --group-runner "${group_runner}"
-    --group 0
-    --policy "${policy}"
-    --planner "${planner}"
+    --group 1
+    --directories "${directory_config}"
     --output-dir "${output_dir}"
-    --workers 2
     --tenant-password "tenant-secret"
     --resource-dir "${resource_dir}"
   )
@@ -273,37 +304,54 @@ run_fixture() {
   "${command[@]}"
 }
 
-test_successful_phase_order_and_isolation() {
+test_successful_direct_commands_and_isolation() {
   setup_fixture
+  export FAKE_REQUIRE_CONCURRENCY=1
 
   run_fixture
 
-  assert_file "${output_dir}/plan.json"
-  assert_file "${output_dir}/inventory.tsv"
   assert_file "${output_dir}/summary.tsv"
+  assert_file "${output_dir}/serial-before.include"
+  assert_file "${output_dir}/worker-0.include"
+  assert_file "${output_dir}/worker-1.include"
+  assert_file "${output_dir}/serial-after.include"
   assert_file "${output_dir}/phases/worker-0/tester/report/report.txt"
   assert_file "${output_dir}/phases/worker-1/tester/report/report.txt"
   assert_file "${output_dir}/phases/worker-0/resources/nested/payload.txt"
-  assert_contains "${output_dir}/phases/worker-0/tester/mo.yml" \
-    'name: "bvtw_g0_w0:admin"'
-  assert_contains "${output_dir}/phases/worker-1/tester/mo.yml" \
-    'name: "bvtw_g0_w1:admin"'
-  assert_not_contains "${output_dir}/phases/worker-0/tester/mo.yml" \
-    'password: "111"'
-  assert_not_contains "${output_dir}/phases/worker-0/tester/mo.yml" \
-    'password: "tenant-secret"'
-  assert_contains "${output_dir}/phases/worker-0/tester/mo.yml" \
-    'password: "***"'
+  assert_contains "${output_dir}/worker-0.include" "${case_root}/dtype/"
+  assert_contains "${output_dir}/worker-1.include" "${case_root}/window/"
+  assert_contains "${output_dir}/serial-after.include" "${case_root}/analyze/"
+  assert_contains "${output_dir}/serial-after.include" \
+    "${case_root}/${unknown_directory}/"
+  assert_not_contains "${output_dir}/serial-after.include" "/optimistic/"
   assert_not_contains "${output_dir}/worker-0.include" ".sql"
   assert_not_contains "${output_dir}/worker-1.include" ".test"
+  local resolved_case_root
+  resolved_case_root=$(cd "${case_root}" && pwd -P)
+  assert_contains \
+    "${output_dir}/phases/worker-0/tester/received-arguments.txt" \
+    "-n -g -o -p ${resolved_case_root} -i ${resolved_case_root}/dtype/"
+  assert_contains "${output_dir}/phases/worker-0/tester/mo.yml" \
+    'name: "bvtw_g1_w0:admin"'
+  assert_contains "${output_dir}/phases/worker-1/tester/mo.yml" \
+    'name: "bvtw_g1_w1:admin"'
+  assert_not_contains "${output_dir}/phases/worker-0/tester/mo.yml" \
+    "tenant-secret"
+  assert_not_contains "${output_dir}/phases/worker-0/tester/mo.yml" \
+    'syspass: "111"'
+  assert_contains "${output_dir}/phases/worker-0/tester/mo.yml" \
+    'password: "***"'
+  assert_contains "${output_dir}/phases/worker-0/tester/mo.yml" \
+    'syspass: "***"'
   assert_order "${event_log}" \
-    "serial-before:dump:" \
+    "serial-before:start:dump:" \
     "create-account" \
     "worker-" \
     "drop-account" \
-    "serial-after:dump:"
+    "serial-after:start:dump:"
   assert_contains "${output_dir}/summary.tsv" $'parallel\tworker-0\tpassed'
   assert_contains "${output_dir}/summary.tsv" $'parallel\tworker-1\tpassed'
+  unset FAKE_REQUIRE_CONCURRENCY
 }
 
 test_worker_failure_waits_for_sibling_and_runs_cleanup_and_after() {
@@ -314,16 +362,16 @@ test_worker_failure_waits_for_sibling_and_runs_cleanup_and_after() {
     fail "worker failure should fail the orchestrator"
   fi
 
-  assert_contains "${event_log}" "worker-0:bvtw_g0_w0:admin:"
-  assert_contains "${event_log}" "worker-1:bvtw_g0_w1:admin:"
+  assert_contains "${event_log}" "worker-0:start:bvtw_g1_w0:admin:"
+  assert_contains "${event_log}" "worker-1:done"
   assert_contains "${event_log}" "drop-account"
-  assert_contains "${event_log}" "serial-after:dump:"
+  assert_contains "${event_log}" "serial-after:start:dump:"
   assert_contains "${output_dir}/summary.tsv" $'parallel\tworker-0\tfailed'
   assert_contains "${output_dir}/summary.tsv" $'parallel\tworker-1\tpassed'
   unset FAKE_FAIL_PHASE
 }
 
-test_serial_before_failure_prevents_tenant_workers() {
+test_serial_before_failure_prevents_accounts_and_workers() {
   setup_fixture
   export FAKE_FAIL_PHASE=serial-before
 
@@ -331,33 +379,11 @@ test_serial_before_failure_prevents_tenant_workers() {
     fail "serial-before failure should fail the orchestrator"
   fi
 
-  assert_contains "${event_log}" "serial-before:dump:"
+  assert_contains "${event_log}" "serial-before:start:dump:"
   assert_not_contains "${event_log}" "create-account"
-  assert_not_contains "${event_log}" "worker-0:"
-  assert_not_contains "${event_log}" "worker-1:"
+  assert_not_contains "${event_log}" "worker-0:start:"
+  assert_not_contains "${event_log}" "worker-1:start:"
   unset FAKE_FAIL_PHASE
-}
-
-test_empty_parallel_phase_skips_accounts() {
-  setup_fixture
-  cat > "${policy}" <<'JSON'
-{
-  "schema_version": 1,
-  "directories": {
-    "before": {"phase": "serial-before", "reason": "ordered"},
-    "alpha": {"phase": "serial-after", "reason": "global"},
-    "beta": {"phase": "serial-after", "reason": "global"},
-    "after": {"phase": "serial-after", "reason": "global"}
-  }
-}
-JSON
-
-  run_fixture
-
-  assert_not_contains "${event_log}" "create-account"
-  assert_not_contains "${event_log}" "worker-0:"
-  assert_not_contains "${event_log}" "worker-1:"
-  assert_contains "${event_log}" "serial-after:dump:"
 }
 
 test_leaked_account_fails_before_serial_after() {
@@ -369,7 +395,7 @@ test_leaked_account_fails_before_serial_after() {
   fi
 
   assert_contains "${event_log}" "drop-account"
-  assert_not_contains "${event_log}" "serial-after:dump:"
+  assert_not_contains "${event_log}" "serial-after:start:"
   unset FAKE_LEAK_COUNT
 }
 
@@ -379,7 +405,7 @@ test_signal_stops_workers_before_cleanup() {
 
   RUN_FIXTURE_IN_PLACE=1 run_fixture &
   local orchestrator_pid=$!
-  if ! wait_for_event "${event_log}" "worker-0-blocked"; then
+  if ! wait_for_event "${event_log}" "worker-0:blocked"; then
     kill -TERM "${orchestrator_pid}" 2>/dev/null || true
     wait "${orchestrator_pid}" 2>/dev/null || true
     fail "worker did not enter blocking phase"
@@ -399,11 +425,9 @@ test_signal_stops_workers_before_cleanup() {
 
   unset FAKE_BLOCK_PHASE
   (( status == 130 )) || fail "expected signal exit 130, got ${status}"
-  (( worker_was_alive == 0 )) || fail "worker remained alive after orchestrator exit"
+  (( worker_was_alive == 0 )) || fail "worker remained alive after exit"
   assert_not_contains "${event_log}" "drop-while-worker-alive"
-  assert_order "${event_log}" \
-    "worker-0-blocked" \
-    "drop-account"
+  assert_order "${event_log}" "worker-0:blocked" "drop-account"
 }
 
 test_account_creation_failure_prevents_workers() {
@@ -417,9 +441,9 @@ test_account_creation_failure_prevents_workers() {
   unset FAKE_MYSQL_FAIL_MATCH
   assert_contains "${output_dir}/summary.tsv" \
     $'parallel\taccount-setup\tfailed'
-  assert_not_contains "${event_log}" "worker-0:"
-  assert_not_contains "${event_log}" "worker-1:"
-  assert_not_contains "${event_log}" "serial-after:dump:"
+  assert_not_contains "${event_log}" "worker-0:start:"
+  assert_not_contains "${event_log}" "worker-1:start:"
+  assert_not_contains "${event_log}" "serial-after:start:"
 }
 
 test_unreachable_matrixone_skips_serial_after() {
@@ -432,26 +456,22 @@ test_unreachable_matrixone_skips_serial_after() {
 
   unset FAKE_MYSQL_FAIL_MATCH
   assert_contains "${event_log}" "drop-account"
-  assert_not_contains "${event_log}" "serial-after:dump:"
+  assert_not_contains "${event_log}" "serial-after:start:"
   assert_contains "${output_dir}/summary.tsv" \
     $'serial\tserial-after\tskipped'
 }
 
-test_directory_contract
-echo "ok - static directory contract"
-test_successful_phase_order_and_isolation
-echo "ok - successful phase order and isolation"
-test_worker_failure_waits_for_sibling_and_runs_cleanup_and_after
-echo "ok - worker failure aggregation and cleanup"
-test_serial_before_failure_prevents_tenant_workers
-echo "ok - serial-before failure barrier"
-test_empty_parallel_phase_skips_accounts
-echo "ok - empty parallel phase"
-test_leaked_account_fails_before_serial_after
-echo "ok - leaked account detection"
-test_signal_stops_workers_before_cleanup
-echo "ok - signal stops workers before cleanup"
-test_account_creation_failure_prevents_workers
-echo "ok - account creation failure barrier"
-test_unreachable_matrixone_skips_serial_after
-echo "ok - unreachable MatrixOne skips serial-after"
+run_test() {
+  local name=$1
+  "$2"
+  echo "ok - ${name}"
+}
+
+run_test "static directory contract" test_directory_contract
+run_test "direct commands and isolation" test_successful_direct_commands_and_isolation
+run_test "worker failure aggregation" test_worker_failure_waits_for_sibling_and_runs_cleanup_and_after
+run_test "serial-before barrier" test_serial_before_failure_prevents_accounts_and_workers
+run_test "leaked account detection" test_leaked_account_fails_before_serial_after
+run_test "signal cleanup ordering" test_signal_stops_workers_before_cleanup
+run_test "account creation barrier" test_account_creation_failure_prevents_workers
+run_test "unreachable MatrixOne handling" test_unreachable_matrixone_skips_serial_after
