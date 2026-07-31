@@ -78,7 +78,7 @@ jobs:
     steps:
       - name: Reopen Issue
         # Skip whitelist closers and bots (avoids loop when block-qa-reopen auto-closes).
-        if: github.event.issue.user.login != github.event.sender.login && github.event.action == 'closed' && github.event.sender.type != 'Bot' && github.event.sender.login != 'matrix-meow' && github.event.sender.login != 'sukki37' && github.event.sender.login != 'Ariznawlll' && github.event.sender.login != 'fengttt' && github.event.sender.login != 'heni02'
+        if: github.event.issue.user.login != github.event.sender.login && github.event.action == 'closed' && github.event.sender.type != 'Bot' && github.event.sender.login != 'matrix-meow' && github.event.sender.login != 'XuPeng-SH' && github.event.sender.login != 'Ariznawlll' && github.event.sender.login != 'fengttt' && github.event.sender.login != 'heni02'
         uses: actions-cool/issues-helper@v3
         with:
           actions: "open-issue"
