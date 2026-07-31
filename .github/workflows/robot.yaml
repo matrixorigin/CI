@@ -77,12 +77,38 @@ jobs:
     if: github.event_name == 'issues' && github.event.action == 'closed'
     steps:
       - name: Reopen Issue
-        if: github.event.issue.user.login != github.event.sender.login && github.event.action == 'closed' && github.event.sender.login != 'sukki37' && github.event.sender.login != 'Ariznawlll' && github.event.sender.login != 'fengttt' && github.event.sender.login != 'heni02'
+        # Skip whitelist closers and bots (avoids loop when block-qa-reopen auto-closes).
+        if: github.event.issue.user.login != github.event.sender.login && github.event.action == 'closed' && github.event.sender.type != 'Bot' && github.event.sender.login != 'matrix-meow' && github.event.sender.login != 'sukki37' && github.event.sender.login != 'Ariznawlll' && github.event.sender.login != 'fengttt' && github.event.sender.login != 'heni02'
         uses: actions-cool/issues-helper@v3
         with:
           actions: "open-issue"
           token: ${{ secrets.TOKEN_ACTION }}
           issue-number: ${{ github.event.issue.number }}
+
+  # Soft policy: heni02 / Ariznawlll may close issues, but if they reopen a closed
+  # issue the bot closes it again. Caller must include issues types: [reopened].
+  block-qa-reopen:
+    environment: ci
+    runs-on: arm64-mo-shanghai-4c8g
+    if: github.event_name == 'issues' && github.event.action == 'reopened'
+    steps:
+      - name: Close Issue Reopened by QA
+        if: github.event.sender.login == 'heni02' || github.event.sender.login == 'Ariznawlll'
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: "close-issue"
+          token: ${{ secrets.TOKEN_ACTION }}
+          issue-number: ${{ github.event.issue.number }}
+
+      - name: create-comment
+        if: github.event.sender.login == 'heni02' || github.event.sender.login == 'Ariznawlll'
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: "create-comment"
+          token: ${{ secrets.TOKEN_ACTION }}
+          issue-number: ${{ github.event.issue.number }}
+          body: |
+            @${{ github.event.sender.login }} is not allowed to reopen closed issues; the issue has been closed again automatically.
 
   issue_close_check:
     environment: ci
