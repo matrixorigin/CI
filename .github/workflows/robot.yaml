@@ -338,19 +338,19 @@ jobs:
   reopen-without-PR:
     environment: ci
     runs-on: ubuntu-22.04
-    if: ${{ github.event_name == 'issues' && github.event.action == 'closed' && github.actor != 'sukki37' && github.actor != 'Ariznawlll' }}
+    if: ${{ github.event_name == 'issues' && github.event.action == 'closed' && github.actor != 'XuPeng-SH' && github.actor != 'Ariznawlll' }}
     steps:
       - name: Reopen Issue Without PR
         id: step1
         with:
-          whitelist: "sukki37,fengttt,heni02" # 白名单成员 可以无条件删除带有特殊标签的issue
+          whitelist: "XuPeng-SH,fengttt,heni02" # 白名单成员 可以无条件删除带有特殊标签的issue
           issue_owner: ${{ github.event.issue.user.login }} # issue的打开者 当满足存在关联pr时允许关闭
           close_user: ${{ github.event.sender.login }} # 当前关闭issue的操作者
           github_token: ${{ secrets.TOKEN_ACTION }} # 获取github action token操作权限
           base_url: ${{ github.api_url }}
           repository: ${{ github.repository }} # 获取执行该作业的仓库名 形如: matrixorigin/CI
           issue_number: ${{ github.event.issue.number }} # 获取当前操作的issue number
-          assignees: "sukki37" #issue指定分配对象
+          assignees: "XuPeng-SH" #issue指定分配对象
           LABELS: "no-pr-linked" #相关自定义label配置 形如 label1,label2
           LABELS_NEED: "kind/bug,Bug fix,bug_fix,bug/ut" # 指定需要排查的标签 label1,label2,...
         uses: matrixorigin/CI/actions/reopen-without-PR@main
