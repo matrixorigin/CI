@@ -2,6 +2,17 @@ name: MatrixOne Object Storage Integration
 
 on:
   workflow_call:
+    inputs:
+      checkout_repository:
+        description: "Repository containing the MatrixOne revision to test"
+        required: false
+        type: string
+        default: ""
+      checkout_ref:
+        description: "MatrixOne commit or ref to test"
+        required: false
+        type: string
+        default: ""
     secrets:
       TOKEN_ACTION:
         description: "Token for checkout (e.g. pull from fork/private)"
@@ -28,6 +39,8 @@ jobs:
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "1"
+          repository: ${{ inputs.checkout_repository || github.repository }}
+          ref: ${{ inputs.checkout_ref || github.sha }}
       - name: Set up Go
         uses: matrixorigin/CI/actions/setup-env@main
         with:
