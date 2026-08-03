@@ -1,0 +1,60 @@
+name: MatrixOne Object Storage Integration
+
+on:
+  workflow_call:
+    secrets:
+      TOKEN_ACTION:
+        description: "Token for checkout (e.g. pull from fork/private)"
+        required: false
+      TEST_S3FS_ALIYUN:
+        description: "Aliyun OSS integration test configuration"
+        required: true
+      TEST_S3FS_QCLOUD:
+        description: "Tencent COS integration test configuration"
+        required: true
+
+jobs:
+  object-storage-integration:
+    name: ${{ matrix.provider }} object storage integration
+    environment: ci
+    runs-on: amd64-mo-guangzhou-2xlarge16
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [aliyun, qcloud]
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          token: ${{ secrets.TOKEN_ACTION }}
+          fetch-depth: "1"
+      - name: Set up Go
+        uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          go-version-file: "${{ github.workspace }}/go.mod"
+      - name: Run ${{ matrix.provider }} integration tests
+        env:
+          PROVIDER: ${{ matrix.provider }}
+          ALIYUN_TEST_SPEC: ${{ secrets.TEST_S3FS_ALIYUN }}
+          QCLOUD_TEST_SPEC: ${{ secrets.TEST_S3FS_QCLOUD }}
+          GOPROXY: http://goproxy.goproxy.svc.cluster.local,https://goproxy.cn,https://proxy.golang.org
+        run: |
+          set -euo pipefail
+          case "${PROVIDER}" in
+            aliyun)
+              test -n "${ALIYUN_TEST_SPEC}"
+              export TEST_S3FS_ALIYUN="${ALIYUN_TEST_SPEC}"
+              ;;
+            qcloud)
+              test -n "${QCLOUD_TEST_SPEC}"
+              export TEST_S3FS_QCLOUD="${QCLOUD_TEST_SPEC}"
+              ;;
+            *)
+              echo "unknown object storage provider: ${PROVIDER}" >&2
+              exit 1
+              ;;
+          esac
+          MO_RUN_EXTERNAL_OBJECT_STORAGE_TESTS=1 \
+            go test -mod=readonly -json -v ./pkg/fileservice \
+            -run '^Test(ObjectStoragesExternal|S3FSFromExternalSpecs)$' \
+            -count=1 -timeout=15m

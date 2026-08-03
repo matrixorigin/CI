@@ -16,27 +16,6 @@ on:
       TOKEN_ACTION:
         description: "Token for checkout (e.g. pull from fork/private)"
         required: false
-      TEST_S3FS_ALIYUN:
-        description: "Object storage configuration for UT coverage"
-        required: false
-      TEST_S3FS_QCLOUD:
-        description: "Object storage configuration for UT coverage"
-        required: false
-      S3ENDPOINT:
-        description: "S3ENDPOINT For Test"
-        required: false
-      S3REGION:
-        description: "S3REGION For Test"
-        required: false
-      S3APIKEY:
-        description: "S3APIKEY For Test"
-        required: false
-      S3APISECRET:
-        description: "S3APISECRET For Test"
-        required: false
-      S3BUCKET:
-        description: "S3BUCKET For Test"
-        required: false
 
 jobs:
   check_coverage_eligibility:
@@ -86,39 +65,14 @@ jobs:
           else
             echo 'safe_label=0' >> "$GITHUB_OUTPUT"
           fi
-      - id: check_coverage_secrets
-        name: Check coverage secrets
-        env:
-          TEST_S3FS_ALIYUN: ${{ secrets.TEST_S3FS_ALIYUN }}
-          TEST_S3FS_QCLOUD: ${{ secrets.TEST_S3FS_QCLOUD }}
-          S3ENDPOINT: ${{ secrets.S3ENDPOINT }}
-          S3REGION: ${{ secrets.S3REGION }}
-          S3APIKEY: ${{ secrets.S3APIKEY }}
-          S3APISECRET: ${{ secrets.S3APISECRET }}
-          S3BUCKET: ${{ secrets.S3BUCKET }}
-        run: |
-          set -euo pipefail
-          missing=()
-          for name in TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD S3ENDPOINT S3REGION S3APIKEY S3APISECRET S3BUCKET; do
-            if [ -z "${!name:-}" ]; then
-              missing+=("${name}")
-            fi
-          done
-          if [ "${#missing[@]}" -eq 0 ]; then
-            echo 'ready=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'ready=false' >> "$GITHUB_OUTPUT"
-            echo "::notice::UT coverage skipped because required secrets are unavailable: ${missing[*]}"
-          fi
       - id: eligibility
         name: Decide coverage eligibility
         env:
           IN_ORG: ${{ steps.check_in_org.outputs.in_org }}
           SAFE_LABEL: ${{ steps.check_safe_label.outputs.safe_label }}
-          SECRETS_READY: ${{ steps.check_coverage_secrets.outputs.ready }}
         run: |
           set -euo pipefail
-          if { [ "${IN_ORG}" = '1' ] || [ "${SAFE_LABEL}" = '1' ]; } && [ "${SECRETS_READY}" = 'true' ]; then
+          if [ "${IN_ORG}" = '1' ] || [ "${SAFE_LABEL}" = '1' ]; then
             echo 'allowed=true' >> "$GITHUB_OUTPUT"
           else
             echo 'allowed=false' >> "$GITHUB_OUTPUT"
@@ -132,9 +86,6 @@ jobs:
     needs: [check_coverage_eligibility]
     if: ${{ needs.check_coverage_eligibility.outputs.allowed == 'true' }}
     environment: ci
-    # Preserve the Guangzhou network path and capacity used by main's
-    # external Aliyun/QCloud coverage UT. This is intentionally larger than
-    # the UT-only minimum while we validate the external-storage timeout fix.
     runs-on: amd64-mo-guangzhou-2xlarge16
     timeout-minutes: 60
     steps:
@@ -167,13 +118,6 @@ jobs:
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
-          export endpoint='${{ secrets.S3ENDPOINT }}'
-          export region='${{ secrets.S3REGION }}'
-          export apikey='${{ secrets.S3APIKEY }}'
-          export apisecret='${{ secrets.S3APISECRET }}'
-          export bucket='${{ secrets.S3BUCKET }}'
-          export TEST_S3FS_ALIYUN='${{ secrets.TEST_S3FS_ALIYUN }}'
-          export TEST_S3FS_QCLOUD='${{ secrets.TEST_S3FS_QCLOUD }}'
           coverage_profile="${RUNNER_TEMP}/ut-coverage.out"
           coverage_report="${RUNNER_TEMP}/ut-coverage-report.json"
           rm -f "${coverage_profile}" "${coverage_report}"
@@ -187,10 +131,9 @@ jobs:
           cgo_cflags="-I${GITHUB_WORKSPACE}/cgo -I${thirdparties_install_dir}/include"
           cgo_ldflags="-L${GITHUB_WORKSPACE}/cgo -lmo -L${thirdparties_install_dir}/lib -lusearch_c -Wl,-rpath,${thirdparties_install_dir}/lib -lm"
 
-          # Keep the same all-package coverage scope and external storage
-          # coverage as main. Save the verbose JSON report as an artifact
-          # rather than flooding the Actions console; the next step prints a
-          # concise parsed failure summary when this command fails.
+          # Keep the same all-package coverage scope. Save the verbose JSON
+          # report as an artifact rather than flooding the Actions console;
+          # the next step prints a concise parsed failure summary on failure.
           set +e
           CGO_CFLAGS="${cgo_cflags}" CGO_LDFLAGS="${cgo_ldflags}" \
             go test -mod=readonly -json -short -v -tags matrixone_test -p 6 \
