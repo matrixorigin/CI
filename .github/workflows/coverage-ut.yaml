@@ -22,6 +22,12 @@ on:
       TEST_S3FS_QCLOUD:
         description: "Object storage configuration for UT coverage"
         required: false
+      DOCKERHUB_USERNAME:
+        description: "Optional Docker Hub login for the ci-builder cache seed (rate limits)"
+        required: false
+      DOCKERHUB_TOKEN:
+        description: "Optional Docker Hub token for the ci-builder cache seed (rate limits)"
+        required: false
       S3ENDPOINT:
         description: "S3ENDPOINT For Test"
         required: false
@@ -158,6 +164,39 @@ jobs:
           sparse-checkout: scripts/prepare_coverage_cgo.sh
           sparse-checkout-cone-mode: false
           path: .ci-workflow
+      # Best-effort: seed the Go build/module caches and the prebuilt C
+      # thirdparties from the nightly ci-builder image (see
+      # optools/images/Dockerfile.ci-builder in matrixone). The image warms
+      # the exact covermode=set/coverpkg flavor this job compiles, so only
+      # packages the PR changed (plus the few path-keyed cgo packages)
+      # recompile. Any failure here just leaves the job building cold.
+      - name: Seed Go caches from CI builder image
+        continue-on-error: true
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          command -v docker >/dev/null || { echo "docker unavailable; skipping seed"; exit 0; }
+          if [ -n "${DOCKERHUB_TOKEN}" ]; then
+            echo "${DOCKERHUB_TOKEN}" | docker login -u "${DOCKERHUB_USERNAME}" --password-stdin || true
+          fi
+          docker pull matrixorigin/matrixone:ci-builder
+          ctr=$(docker create matrixorigin/matrixone:ci-builder)
+          trap 'docker rm -f "${ctr}" >/dev/null 2>&1' EXIT
+          gocache=$(go env GOCACHE)
+          gomodcache=$(go env GOMODCACHE)
+          mkdir -p "${gocache}" "${gomodcache}" "${RUNNER_TEMP}/mo-seed"
+          if [ -z "$(ls -A "${gocache}")" ]; then
+            docker cp "${ctr}:/root/.cache/go-build/." "${gocache}/"
+          fi
+          if [ -z "$(ls -A "${gomodcache}")" ]; then
+            # tar stream instead of a plain copy: the module cache may carry
+            # read-only directories, which docker cp cannot populate.
+            docker cp "${ctr}:/go/pkg/mod" - | tar -x --no-same-permissions --strip-components=1 -C "${gomodcache}"
+          fi
+          docker cp "${ctr}:/mo-prebuilt/thirdparties/install" "${RUNNER_TEMP}/mo-seed/thirdparties-install"
+          echo "MO_PREBUILT_THIRDPARTIES=${RUNNER_TEMP}/mo-seed/thirdparties-install" >> "$GITHUB_ENV"
       - id: coverage_ut
         name: Run coverage unit tests
         timeout-minutes: 45

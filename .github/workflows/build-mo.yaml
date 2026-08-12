@@ -36,6 +36,7 @@ jobs:
     # Must stay on the same runner pool as the BVT consumers so the binary
     # links against the same glibc the test runners (and the ubuntu:22.04
     # runtime image) provide.
+    environment: ci
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
     name: Build MatrixOne (shared)
     timeout-minutes: 40

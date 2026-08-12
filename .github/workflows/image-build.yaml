@@ -206,7 +206,9 @@ jobs:
     if: ${{ github.event_name != 'release' }}
     environment: ci
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    # The warm stage now compiles three flavors (mo-service -cover, UT with
+    # -race, coverage-UT with coverpkg), each roughly a full-tree compile.
+    timeout-minutes: 120
     steps:
       - name: Checkout
         uses: actions/checkout@v6
