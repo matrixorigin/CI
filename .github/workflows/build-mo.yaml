@@ -30,6 +30,12 @@ on:
       DOCKERHUB_TOKEN:
         description: "Optional Docker Hub token for the ci-builder pull (rate limits)"
         required: false
+      ACR_USERNAME:
+        description: "Optional ACR login for the ci-builder mirror pull"
+        required: false
+      ACR_TOKEN:
+        description: "Optional ACR token for the ci-builder mirror pull"
+        required: false
 
 jobs:
   build-linux-amd64:
@@ -64,20 +70,34 @@ jobs:
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+          ACR_TOKEN: ${{ secrets.ACR_TOKEN }}
         run: |
           set +e
+          ACR_IMAGE="registry.cn-shanghai.aliyuncs.com/matrixorigin/matrixone:ci-builder"
+          HUB_IMAGE="matrixorigin/matrixone:ci-builder"
+          if [ -n "${ACR_TOKEN}" ]; then
+            echo "${ACR_TOKEN}" | docker login registry.cn-shanghai.aliyuncs.com -u "${ACR_USERNAME}" --password-stdin || true
+          fi
           if [ -n "${DOCKERHUB_TOKEN}" ]; then
-            echo "${DOCKERHUB_TOKEN}" | docker login -u "${DOCKERHUB_USERNAME}" --password-stdin
+            echo "${DOCKERHUB_TOKEN}" | docker login -u "${DOCKERHUB_USERNAME}" --password-stdin || true
           fi
-          if docker pull matrixorigin/matrixone:ci-builder; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
+          # Prefer the ACR mirror (fast from the self-hosted China runners),
+          # time-bounded so a slow cross-region pull cannot eat the savings;
+          # fall back to Docker Hub.
+          image=""
+          if timeout 300 docker pull "${ACR_IMAGE}"; then
+            image="${ACR_IMAGE}"
+          elif docker pull "${HUB_IMAGE}"; then
+            image="${HUB_IMAGE}"
+          fi
+          if [ -z "${image}" ]; then
             echo "::warning::ci-builder image unavailable; building from source on the runner"
-            echo "available=false" >> "$GITHUB_OUTPUT"
           fi
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go And Java
-        if: ${{ steps.builder.outputs.available != 'true' }}
+        if: ${{ steps.builder.outputs.image == '' }}
         uses: matrixorigin/CI/actions/setup-env@main
         with:
           go-version-file: "${{ github.workspace }}/go.mod"
@@ -85,14 +105,14 @@ jobs:
       - name: Build MatrixOne
         run: |
           cd "$GITHUB_WORKSPACE"
-          if [ "${{ steps.builder.outputs.available }}" = "true" ]; then
+          if [ -n "${{ steps.builder.outputs.image }}" ]; then
             # The mount path must match the ci-builder warm build's WORKDIR:
             # cgo compile-cache entries hash the -I include paths.
             docker run --rm \
               -v "$GITHUB_WORKSPACE":/go/src/github.com/matrixorigin/matrixone \
               -w /go/src/github.com/matrixorigin/matrixone \
               -e MO_GOBUILD_OPT='${{ inputs.gobuild_opt }}' \
-              matrixorigin/matrixone:ci-builder \
+              '${{ steps.builder.outputs.image }}' \
               bash -c '
                 set -euo pipefail
                 git config --global --add safe.directory /go/src/github.com/matrixorigin/matrixone

@@ -43,6 +43,12 @@ on:
       DOCKERHUB_TOKEN:
         description: "Optional Docker Hub token for the ci-builder cache seed (rate limits)"
         required: false
+      ACR_USERNAME:
+        description: "Optional ACR login for the ci-builder mirror pull"
+        required: false
+      ACR_TOKEN:
+        description: "Optional ACR token for the ci-builder mirror pull"
+        required: false
 
 jobs:
   ut-linux-x86:
@@ -136,14 +142,30 @@ jobs:
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+          ACR_TOKEN: ${{ secrets.ACR_TOKEN }}
         run: |
           set -euo pipefail
           command -v docker >/dev/null || { echo "docker unavailable; skipping seed"; exit 0; }
+          ACR_IMAGE="registry.cn-shanghai.aliyuncs.com/matrixorigin/matrixone:ci-builder"
+          HUB_IMAGE="matrixorigin/matrixone:ci-builder"
+          if [ -n "${ACR_TOKEN}" ]; then
+            echo "${ACR_TOKEN}" | docker login registry.cn-shanghai.aliyuncs.com -u "${ACR_USERNAME}" --password-stdin || true
+          fi
           if [ -n "${DOCKERHUB_TOKEN}" ]; then
             echo "${DOCKERHUB_TOKEN}" | docker login -u "${DOCKERHUB_USERNAME}" --password-stdin || true
           fi
-          docker pull matrixorigin/matrixone:ci-builder
-          ctr=$(docker create matrixorigin/matrixone:ci-builder)
+          # Prefer the ACR mirror (fast from the self-hosted China runners),
+          # time-bounded so a slow cross-region pull cannot eat the savings;
+          # fall back to Docker Hub.
+          image=""
+          if timeout 300 docker pull "${ACR_IMAGE}"; then
+            image="${ACR_IMAGE}"
+          elif docker pull "${HUB_IMAGE}"; then
+            image="${HUB_IMAGE}"
+          fi
+          [ -n "${image}" ] || { echo "ci-builder image unreachable; skipping seed"; exit 0; }
+          ctr=$(docker create "${image}")
           trap 'docker rm -f "${ctr}" >/dev/null 2>&1' EXIT
           gocache=$(go env GOCACHE)
           gomodcache=$(go env GOMODCACHE)
@@ -286,6 +308,59 @@ jobs:
           setup-java: false
           setup-cmake: true
           go-version-file: "${{ github.workspace }}/go.mod"
+      # Best-effort: seed the Go build/module caches, golangci-lint's
+      # analysis cache, and the prebuilt C thirdparties from the nightly
+      # ci-builder image (arm64 leg; see optools/images/Dockerfile.ci-builder
+      # in matrixone). The image warms the exact static-check pass this job
+      # runs, so vet and lint recompile only what the PR changed. Any
+      # failure here just leaves the job building cold.
+      - name: Seed Go caches from CI builder image
+        continue-on-error: true
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+          ACR_TOKEN: ${{ secrets.ACR_TOKEN }}
+        run: |
+          set -euo pipefail
+          command -v docker >/dev/null || { echo "docker unavailable; skipping seed"; exit 0; }
+          ACR_IMAGE="registry.cn-shanghai.aliyuncs.com/matrixorigin/matrixone:ci-builder"
+          HUB_IMAGE="matrixorigin/matrixone:ci-builder"
+          if [ -n "${ACR_TOKEN}" ]; then
+            echo "${ACR_TOKEN}" | docker login registry.cn-shanghai.aliyuncs.com -u "${ACR_USERNAME}" --password-stdin || true
+          fi
+          if [ -n "${DOCKERHUB_TOKEN}" ]; then
+            echo "${DOCKERHUB_TOKEN}" | docker login -u "${DOCKERHUB_USERNAME}" --password-stdin || true
+          fi
+          # Prefer the ACR mirror (fast from the self-hosted China runners),
+          # time-bounded so a slow cross-region pull cannot eat the savings;
+          # fall back to Docker Hub.
+          image=""
+          if timeout 300 docker pull "${ACR_IMAGE}"; then
+            image="${ACR_IMAGE}"
+          elif docker pull "${HUB_IMAGE}"; then
+            image="${HUB_IMAGE}"
+          fi
+          [ -n "${image}" ] || { echo "ci-builder image unreachable; skipping seed"; exit 0; }
+          ctr=$(docker create "${image}")
+          trap 'docker rm -f "${ctr}" >/dev/null 2>&1' EXIT
+          gocache=$(go env GOCACHE)
+          gomodcache=$(go env GOMODCACHE)
+          lintcache="${HOME}/.cache/golangci-lint"
+          mkdir -p "${gocache}" "${gomodcache}" "${lintcache}" "${RUNNER_TEMP}/mo-seed"
+          if [ -z "$(ls -A "${gocache}")" ]; then
+            docker cp "${ctr}:/root/.cache/go-build/." "${gocache}/"
+          fi
+          if [ -z "$(ls -A "${gomodcache}")" ]; then
+            # tar stream instead of a plain copy: the module cache may carry
+            # read-only directories, which docker cp cannot populate.
+            docker cp "${ctr}:/go/pkg/mod" - | tar -x --no-same-permissions --strip-components=1 -C "${gomodcache}"
+          fi
+          if [ -z "$(ls -A "${lintcache}")" ]; then
+            docker cp "${ctr}:/root/.cache/golangci-lint/." "${lintcache}/" || true
+          fi
+          docker cp "${ctr}:/mo-prebuilt/thirdparties/install" "${RUNNER_TEMP}/mo-seed/thirdparties-install"
+          echo "MO_PREBUILT_THIRDPARTIES=${RUNNER_TEMP}/mo-seed/thirdparties-install" >> "$GITHUB_ENV"
       - name: Prepare ENV
         env:
           GOPROXY: http://goproxy.goproxy.svc.cluster.local,https://goproxy.cn,direct
@@ -293,6 +368,12 @@ jobs:
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
           make clean && make config
+          # make clean wiped thirdparties/install; restore the prebuilt copy
+          # so make thirdparties below is a no-op.
+          if [ -n "${MO_PREBUILT_THIRDPARTIES:-}" ] && [ -d "${MO_PREBUILT_THIRDPARTIES}" ]; then
+            rm -rf thirdparties/install
+            cp -r "${MO_PREBUILT_THIRDPARTIES}" thirdparties/install
+          fi
           make thirdparties
           test -f thirdparties/install/include/xxhash.h
           test -f thirdparties/install/include/usearch.h

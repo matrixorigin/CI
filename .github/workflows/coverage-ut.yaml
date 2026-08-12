@@ -28,6 +28,12 @@ on:
       DOCKERHUB_TOKEN:
         description: "Optional Docker Hub token for the ci-builder cache seed (rate limits)"
         required: false
+      ACR_USERNAME:
+        description: "Optional ACR login for the ci-builder mirror pull"
+        required: false
+      ACR_TOKEN:
+        description: "Optional ACR token for the ci-builder mirror pull"
+        required: false
       S3ENDPOINT:
         description: "S3ENDPOINT For Test"
         required: false
@@ -175,14 +181,30 @@ jobs:
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+          ACR_TOKEN: ${{ secrets.ACR_TOKEN }}
         run: |
           set -euo pipefail
           command -v docker >/dev/null || { echo "docker unavailable; skipping seed"; exit 0; }
+          ACR_IMAGE="registry.cn-shanghai.aliyuncs.com/matrixorigin/matrixone:ci-builder"
+          HUB_IMAGE="matrixorigin/matrixone:ci-builder"
+          if [ -n "${ACR_TOKEN}" ]; then
+            echo "${ACR_TOKEN}" | docker login registry.cn-shanghai.aliyuncs.com -u "${ACR_USERNAME}" --password-stdin || true
+          fi
           if [ -n "${DOCKERHUB_TOKEN}" ]; then
             echo "${DOCKERHUB_TOKEN}" | docker login -u "${DOCKERHUB_USERNAME}" --password-stdin || true
           fi
-          docker pull matrixorigin/matrixone:ci-builder
-          ctr=$(docker create matrixorigin/matrixone:ci-builder)
+          # Prefer the ACR mirror (fast from the self-hosted China runners),
+          # time-bounded so a slow cross-region pull cannot eat the savings;
+          # fall back to Docker Hub.
+          image=""
+          if timeout 300 docker pull "${ACR_IMAGE}"; then
+            image="${ACR_IMAGE}"
+          elif docker pull "${HUB_IMAGE}"; then
+            image="${HUB_IMAGE}"
+          fi
+          [ -n "${image}" ] || { echo "ci-builder image unreachable; skipping seed"; exit 0; }
+          ctr=$(docker create "${image}")
           trap 'docker rm -f "${ctr}" >/dev/null 2>&1' EXIT
           gocache=$(go env GOCACHE)
           gomodcache=$(go env GOMODCACHE)
