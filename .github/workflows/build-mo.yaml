@@ -24,6 +24,12 @@ on:
       TOKEN_ACTION:
         description: "Token for checkout (e.g. pull from fork/private)"
         required: false
+      DOCKERHUB_USERNAME:
+        description: "Optional Docker Hub login for the ci-builder pull (rate limits)"
+        required: false
+      DOCKERHUB_TOKEN:
+        description: "Optional Docker Hub token for the ci-builder pull (rate limits)"
+        required: false
 
 jobs:
   build-linux-amd64:
@@ -44,7 +50,33 @@ jobs:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
 
+      # The nightly ci-builder image (matrixorigin/CI image-build.yaml,
+      # ci-builder job; Dockerfile at optools/images/Dockerfile.ci-builder)
+      # carries prebuilt PR-invariant inputs: Go module cache, Go build cache
+      # from a full -cover build of the default branch, and the compiled C
+      # thirdparties. Building inside it recompiles only what the PR changed;
+      # go build incrementally downloads modules newer than the baked cache,
+      # so a stale image only costs speed. The login avoids Docker Hub
+      # anonymous pull rate limits; both login and pull are best-effort.
+      - name: Pull CI builder image
+        id: builder
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set +e
+          if [ -n "${DOCKERHUB_TOKEN}" ]; then
+            echo "${DOCKERHUB_TOKEN}" | docker login -u "${DOCKERHUB_USERNAME}" --password-stdin
+          fi
+          if docker pull matrixorigin/matrixone:ci-builder; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::ci-builder image unavailable; building from source on the runner"
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Go And Java
+        if: ${{ steps.builder.outputs.available != 'true' }}
         uses: matrixorigin/CI/actions/setup-env@main
         with:
           go-version-file: "${{ github.workspace }}/go.mod"
@@ -52,7 +84,24 @@ jobs:
       - name: Build MatrixOne
         run: |
           cd "$GITHUB_WORKSPACE"
-          make clean && make GOBUILD_OPT='${{ inputs.gobuild_opt }}' build
+          if [ "${{ steps.builder.outputs.available }}" = "true" ]; then
+            # The mount path must match the ci-builder warm build's WORKDIR:
+            # cgo compile-cache entries hash the -I include paths.
+            docker run --rm \
+              -v "$GITHUB_WORKSPACE":/go/src/github.com/matrixorigin/matrixone \
+              -w /go/src/github.com/matrixorigin/matrixone \
+              -e MO_GOBUILD_OPT='${{ inputs.gobuild_opt }}' \
+              matrixorigin/matrixone:ci-builder \
+              bash -c '
+                set -euo pipefail
+                git config --global --add safe.directory /go/src/github.com/matrixorigin/matrixone
+                rm -rf thirdparties/install
+                cp -r /mo-prebuilt/thirdparties/install thirdparties/install
+                make build GOBUILD_OPT="${MO_GOBUILD_OPT}"'
+            sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE"
+          else
+            make clean && make GOBUILD_OPT='${{ inputs.gobuild_opt }}' build
+          fi
           git rev-parse --short HEAD
 
       - name: Package build artifact
