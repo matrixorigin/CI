@@ -1,0 +1,88 @@
+# Shared MatrixOne build for PR CI.
+#
+# Builds the coverage-instrumented mo-service once per run and publishes it as
+# a run-scoped artifact. The BVT workflows (e2e-standalone-parallel,
+# e2e-compose-parallel) accept the artifact name via their build_artifact
+# input and skip their own 10-minute builds; when the input is empty or the
+# artifact is unusable they fall back to building from source, so this
+# workflow can land before or after the callers are wired up.
+name: MatrixOne Shared Build
+
+on:
+  workflow_call:
+    inputs:
+      gobuild_opt:
+        description: "GOBUILD_OPT passed to make build (consumers expect -cover)"
+        required: false
+        type: string
+        default: "-cover"
+    outputs:
+      artifact_name:
+        description: "Name of the uploaded build artifact"
+        value: ${{ jobs.build-linux-amd64.outputs.artifact_name }}
+    secrets:
+      TOKEN_ACTION:
+        description: "Token for checkout (e.g. pull from fork/private)"
+        required: false
+
+jobs:
+  build-linux-amd64:
+    # Must stay on the same runner pool as the BVT consumers so the binary
+    # links against the same glibc the test runners (and the ubuntu:22.04
+    # runtime image) provide.
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
+    name: Build MatrixOne (shared)
+    timeout-minutes: 40
+    outputs:
+      artifact_name: ${{ steps.package.outputs.artifact_name }}
+    steps:
+      - name: checkout head
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          token: ${{ secrets.TOKEN_ACTION }}
+          fetch-depth: "3"
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up Go And Java
+        uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          go-version-file: "${{ github.workspace }}/go.mod"
+
+      - name: Build MatrixOne
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          make clean && make GOBUILD_OPT='${{ inputs.gobuild_opt }}' build
+          git rev-parse --short HEAD
+
+      - name: Package build artifact
+        id: package
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          {
+            echo 'head_sha=${{ github.event.pull_request.head.sha }}'
+            echo 'gobuild_opt=${{ inputs.gobuild_opt }}'
+          } > BUILD_INFO
+          # cgo shared libraries are staged under a dedicated directory so the
+          # runtime image build can COPY them without picking up host build
+          # residue from cgo/.
+          rm -rf prebuilt-cgo && mkdir -p prebuilt-cgo
+          cp cgo/*.so prebuilt-cgo/
+          # The tar preserves the self-contained runtime tree that make build
+          # produces at the repo root: mo-service with rpath $ORIGIN/lib, the
+          # thirdparties shared libraries in lib/, and the jieba dict/.
+          pack_dir="${RUNNER_TEMP}/mo-build"
+          mkdir -p "${pack_dir}"
+          tar --exclude='*.a' -czf "${pack_dir}/mo-build.tar.gz" \
+            mo-service BUILD_INFO lib dict prebuilt-cgo
+          ls -lh "${pack_dir}/mo-build.tar.gz"
+          echo "artifact_name=mo-shared-build-attempt-${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: mo-shared-build-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mo-build/mo-build.tar.gz
+          if-no-files-found: error
+          retention-days: 3

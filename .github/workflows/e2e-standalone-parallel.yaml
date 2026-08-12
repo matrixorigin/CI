@@ -13,6 +13,11 @@ on:
         required: false
         type: string
         default: ""
+      build_artifact:
+        description: "Run-scoped artifact holding a shared -cover mo-service build; empty builds from source"
+        required: false
+        type: string
+        default: ""
     secrets:
       TOKEN_ACTION:
         description: "Token for checkout (e.g. pull from fork/private)"
@@ -269,10 +274,37 @@ jobs:
         with:
           go-version-file: "${{ github.workspace }}/head/go.mod"
 
+      - name: Download shared MatrixOne build
+        if: ${{ inputs.build_artifact != '' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ inputs.build_artifact }}
+          path: ${{ runner.temp }}/mo-prebuilt
+
       - name: Build MatrixOne
         run: |
           cd "$GITHUB_WORKSPACE/head"
-          make clean && make GOBUILD_OPT=-cover build
+          prebuilt_tar="${RUNNER_TEMP}/mo-prebuilt/mo-build.tar.gz"
+          use_prebuilt=0
+          if [ -s "${prebuilt_tar}" ]; then
+            tar -xzf "${prebuilt_tar}" -C "${RUNNER_TEMP}/mo-prebuilt" BUILD_INFO
+            prebuilt_sha=$(sed -n 's/^head_sha=//p' "${RUNNER_TEMP}/mo-prebuilt/BUILD_INFO")
+            prebuilt_opt=$(sed -n 's/^gobuild_opt=//p' "${RUNNER_TEMP}/mo-prebuilt/BUILD_INFO")
+            if [ "${prebuilt_sha}" = '${{ github.event.pull_request.head.sha }}' ] \
+              && [ "${prebuilt_opt}" = '-cover' ]; then
+              use_prebuilt=1
+            else
+              echo "::warning::shared build mismatch (sha=${prebuilt_sha}, opt=${prebuilt_opt}); building from source"
+            fi
+          fi
+          if [ "${use_prebuilt}" = "1" ]; then
+            echo "Using shared prebuilt mo-service (${prebuilt_sha})"
+            tar -xzf "${prebuilt_tar}" -C .
+            chmod +x mo-service
+          else
+            make clean && make GOBUILD_OPT=-cover build
+          fi
           git rev-parse --short HEAD
 
       - name: Add cn.txn
