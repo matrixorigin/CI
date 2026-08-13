@@ -138,7 +138,7 @@ jobs:
             '
               length == 2
               and (map(.schema_version) == [1, 1])
-              and ((map(.deployment) | sort) == ["compose-proxy", "compose-pessimistic"])
+              and ((map(.deployment) | sort) == ["compose-pessimistic", "compose-proxy"])
               and ((map(.group) | sort) == [0, 1])
               and ((map(.generation) | unique | length) == 1)
               and ($expected_generation == "" or all(.[]; .generation == $expected_generation))
