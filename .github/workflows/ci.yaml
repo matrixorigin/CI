@@ -294,6 +294,11 @@ jobs:
           setup-java: false
           setup-cmake: true
           go-version-file: "${{ github.workspace }}/go.mod"
+      - name: Clean generated SCA outputs
+        run: |
+          set -euo pipefail
+          make clean
+          rm -rf .sca-static-check-tools
       - name: Resolve Go module cache metadata
         id: go-module-cache-metadata
         run: |
@@ -325,28 +330,88 @@ jobs:
             mkdir "$runtime_dir"
           fi
           echo "GOMODCACHE=$runtime_dir" >> "$GITHUB_ENV"
+      - name: Resolve native cache metadata
+        id: native-cache-metadata
+        run: |
+          set -euo pipefail
+          compiler="$(cc -dumpmachine)-$(cc -dumpfullversion -dumpversion)"
+          echo "compiler=${compiler// /_}" >> "$GITHUB_OUTPUT"
+      - name: Restore native SCA prerequisites
+        id: native-cache
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            thirdparties/install
+            cgo/*.o
+            cgo/libmo.a
+            cgo/libmo.so
+          key: matrixone-sca-native-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.native-cache-metadata.outputs.compiler }}-${{ hashFiles('cgo/*.c', 'cgo/*.h', 'cgo/Makefile', 'thirdparties/Makefile', 'thirdparties/*.tar.gz', 'thirdparties/download') }}
+      - name: Resolve static-check tool cache metadata
+        id: static-check-tool-cache-metadata
+        run: |
+          set -euo pipefail
+          recipe_hash="$(sed -n '/^install-static-check-tools:/,/^$/p' Makefile | sha256sum | awk '{print $1}')"
+          test -n "$recipe_hash"
+          echo "recipe-hash=$recipe_hash" >> "$GITHUB_OUTPUT"
+      - name: Restore static-check tools
+        id: static-check-tool-cache
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: .sca-static-check-tools
+          key: matrixone-sca-tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-module-cache-metadata.outputs.version }}-${{ steps.static-check-tool-cache-metadata.outputs.recipe-hash }}
       - name: Prepare ENV
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
-          make clean && make config
-          make thirdparties
-          test -f thirdparties/install/include/xxhash.h
-          test -f thirdparties/install/include/usearch.h
-          make cgo
-          retry_times=5
-          delay=10
-          for ((i = 1; i <= retry_times; i++)); do
-            if make install-static-check-tools; then
-              break
-            fi
-            if [ "$i" -eq "$retry_times" ]; then
-              echo "install-static-check-tools failed after ${retry_times} attempts"
-              exit 1
-            fi
-            echo "install-static-check-tools attempt ${i} failed, retrying in ${delay}s..."
-            sleep $delay
-          done
+          make config
+          if [[ "${{ steps.native-cache.outputs.cache-hit }}" == "true" ]] && \
+            [[ -f thirdparties/install/include/xxhash.h ]] && \
+            [[ -f thirdparties/install/include/usearch.h ]] && \
+            [[ -f thirdparties/install/lib/libroaring.a ]] && \
+            [[ -f thirdparties/install/lib/libusearch_c.a ]] && \
+            [[ -n "$(find thirdparties/install/lib -maxdepth 1 -type f -name 'onnxruntime*.so' -print -quit)" ]] && \
+            [[ -f cgo/libmo.a ]] && \
+            [[ -f cgo/libmo.so ]]; then
+            rm -rf "$GITHUB_WORKSPACE/lib"
+            cp -r thirdparties/install/lib "$GITHUB_WORKSPACE/lib"
+          else
+            make thirdparties
+            test -f thirdparties/install/include/xxhash.h
+            test -f thirdparties/install/include/usearch.h
+            make cgo
+            test -f cgo/libmo.so
+          fi
+      - name: Prepare static-check tools
+        run: |
+          set -euo pipefail
+          runtime_dir="$(mktemp -d "${RUNNER_TEMP%/}/matrixone-sca-tools.XXXXXX")"
+          staging_dir="$GITHUB_WORKSPACE/.sca-static-check-tools"
+          if [[ "${{ steps.static-check-tool-cache.outputs.cache-hit }}" == "true" ]] && \
+            [[ -x "$staging_dir/golangci-lint" ]] && \
+            [[ -x "$staging_dir/molint" ]] && \
+            [[ -x "$staging_dir/license-eye" ]]; then
+            mv "$staging_dir"/* "$runtime_dir/"
+          else
+            retry_times=5
+            delay=10
+            for ((i = 1; i <= retry_times; i++)); do
+              if make install-static-check-tools; then
+                break
+              fi
+              if [ "$i" -eq "$retry_times" ]; then
+                echo "install-static-check-tools failed after ${retry_times} attempts"
+                exit 1
+              fi
+              echo "install-static-check-tools attempt ${i} failed, retrying in ${delay}s..."
+              sleep "$delay"
+            done
+            tool_bin="$(go env GOPATH)/bin"
+            cp "$tool_bin/golangci-lint" "$tool_bin/molint" "$tool_bin/license-eye" "$runtime_dir/"
+          fi
+          test -x "$runtime_dir/golangci-lint"
+          test -x "$runtime_dir/molint"
+          test -x "$runtime_dir/license-eye"
+          echo "$runtime_dir" >> "$GITHUB_PATH"
       - name: Static Code Analysis
         run: |
           cd $GITHUB_WORKSPACE
