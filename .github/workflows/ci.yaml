@@ -270,6 +270,10 @@ jobs:
     # explicit escape hatch for a larger runner.
     runs-on: ${{ vars.SCA_RUNNER_LABEL || 'arm64-mo-shanghai-4c8g' }}
     name: SCA Test on Linux/arm64
+    env:
+      # Keep dependency downloads on the Shanghai proxy for every SCA step,
+      # including the license dependency scan in `make static-check`.
+      GOPROXY: http://goproxy.goproxy.svc.cluster.local,https://goproxy.cn,direct
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -287,12 +291,11 @@ jobs:
       - name: Set up Go
         uses: matrixorigin/CI/actions/setup-env@main
         with:
+          cache: true
           setup-java: false
           setup-cmake: true
           go-version-file: "${{ github.workspace }}/go.mod"
       - name: Prepare ENV
-        env:
-          GOPROXY: http://goproxy.goproxy.svc.cluster.local,https://goproxy.cn,direct
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
