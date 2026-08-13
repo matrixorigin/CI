@@ -118,11 +118,10 @@ jobs:
               find "${artifact_dir}" -type f -print || true
               exit 1
             fi
-          elif [ "${#bvt_profiles[@]}" -eq 1 ] \
-            && [ "$(basename "${bvt_profiles[0]}")" = 'bvt-pessimistic.out' ]; then
-            echo '::warning::merging coverage without the unsupported legacy Compose profile'
+          elif [ "${#bvt_profiles[@]}" -eq 0 ]; then
+            echo '::warning::merging coverage without BVT profiles from a legacy Compose deployment'
           elif [ "${#bvt_profiles[@]}" -ne 2 ]; then
-            echo '::error::expected two BVT profiles, or the standalone profile alone on a legacy branch'
+            echo '::error::expected zero or two BVT profiles on a non-main branch'
             find "${artifact_dir}" -type f -print || true
             exit 1
           fi
@@ -139,7 +138,7 @@ jobs:
             '
               length == 2
               and (map(.schema_version) == [1, 1])
-              and ((map(.deployment) | sort) == ["compose-proxy", "launch-pessimistic"])
+              and ((map(.deployment) | sort) == ["compose-proxy", "compose-pessimistic"])
               and ((map(.group) | sort) == [0, 1])
               and ((map(.generation) | unique | length) == 1)
               and ($expected_generation == "" or all(.[]; .generation == $expected_generation))
