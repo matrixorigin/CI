@@ -119,11 +119,60 @@ jobs:
           echo "bucket=${{ secrets.S3BUCKET }}" >> $GITHUB_ENV
           # set ut workdir
           echo "UT_WORKDIR=${{ github.workspace }}" >> $GITHUB_ENV
+      - name: Configure Shanghai Go proxy
+        if: ${{ contains(vars.UT_RUNNER_LABEL, 'shanghai') }}
+        env:
+          SHANGHAI_GOPROXY: http://goproxy.goproxy.svc.cluster.local,https://goproxy.cn,direct
+        run: |
+          set -euo pipefail
+
+          echo "Runner: ${{ runner.name }}"
+          echo "Runner OS: ${{ runner.os }}"
+
+          proxy_url="${SHANGHAI_GOPROXY%%,*}"
+          proxy_host="${proxy_url#*://}"
+          probe_module="github.com/spf13/cobra"
+          probe_version="$(
+            awk -v module="$probe_module" '
+              $1 == module { print $2; exit }
+              $1 == "require" && $2 == module { print $3; exit }
+            ' go.mod 2>/dev/null || true
+          )"
+          proxy_status=""
+          proxy_enabled="false"
+          probe_result="not-attempted"
+
+          if [[ -z "$probe_version" ]]; then
+            probe_result="module-not-found-in-go.mod"
+          elif ! timeout 20s getent hosts "$proxy_host"; then
+            probe_result="dns-failed-or-timed-out"
+          elif proxy_status="$(curl \
+              --silent \
+              --show-error \
+              --connect-timeout 5 \
+              --max-time 30 \
+              --output /dev/null \
+              --write-out '%{http_code}' \
+              "${proxy_url}/${probe_module}/@v/${probe_version}.info")" && \
+            [[ "$proxy_status" == "200" ]]; then
+            proxy_enabled="true"
+            probe_result="module-http-200"
+            echo "Shanghai internal GOPROXY served ${probe_module}@${probe_version}"
+            echo "Using GOPROXY=${SHANGHAI_GOPROXY}"
+            echo "GOPROXY=${SHANGHAI_GOPROXY}" >> "$GITHUB_ENV"
+          else
+            probe_result="module-http-${proxy_status:-unavailable}"
+          fi
+
+          if [[ "$proxy_enabled" != "true" ]]; then
+            echo "::warning::Shanghai internal GOPROXY probe failed (${probe_result}); leaving GOPROXY unchanged"
+          fi
       - name: Unit Testing
         id: ut
         run: |
-          cd $GITHUB_WORKSPACE && make clean && make config
-          make ut UT_PARALLEL=${{ vars.UT_PARALLEL || 6 }} UT_TIMEOUT=${{ vars.UT_TIMEOUT || 40 }}
+          # Keep the explicit config and time it separately for the proxy canary.
+          cd $GITHUB_WORKSPACE && make clean && time make config
+          time make ut UT_PARALLEL=${{ vars.UT_PARALLEL || 6 }} UT_TIMEOUT=${{ vars.UT_TIMEOUT || 40 }}
       - name: Print Result(Old)
         if: ${{ always() }}
         continue-on-error: true
