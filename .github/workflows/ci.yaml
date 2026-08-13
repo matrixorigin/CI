@@ -122,14 +122,14 @@ jobs:
       - name: Configure Shanghai Go proxy
         if: ${{ contains(vars.UT_RUNNER_LABEL, 'shanghai') }}
         env:
-          SHANGHAI_GOPROXY: http://goproxy.goproxy.svc.cluster.local,https://goproxy.cn,direct
+          SHANGHAI_GOPROXY: http://goproxy.goproxy.svc.cluster.local|https://goproxy.cn|direct
         run: |
           set -euo pipefail
 
           echo "Runner: ${{ runner.name }}"
           echo "Runner OS: ${{ runner.os }}"
 
-          proxy_url="${SHANGHAI_GOPROXY%%,*}"
+          proxy_url="${SHANGHAI_GOPROXY%%|*}"
           proxy_host="${proxy_url#*://}"
           probe_module="github.com/spf13/cobra"
           probe_version="$(
