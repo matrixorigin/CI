@@ -20,10 +20,11 @@ on:
       artifact_name:
         description: "Name of the uploaded build artifact"
         value: ${{ jobs.build-linux-amd64.outputs.artifact_name }}
-    secrets:
-      TOKEN_ACTION:
-        description: "Token for checkout (e.g. pull from fork/private)"
-        required: false
+
+# This workflow compiles the untrusted PR head: cap the job token to
+# read-only and accept no caller secrets at all.
+permissions:
+  contents: read
 
 jobs:
   build-linux-amd64:
@@ -44,7 +45,6 @@ jobs:
       - name: checkout head
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
-          token: ${{ secrets.TOKEN_ACTION }}
           persist-credentials: false
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
@@ -68,16 +68,27 @@ jobs:
           set +e
           ACR_IMAGE="registry.cn-shanghai.aliyuncs.com/matrixorigin/matrixone:ci-builder"
           HUB_IMAGE="matrixorigin/matrixone:ci-builder"
-          # Prefer the ACR mirror (fast from the self-hosted China runners);
-          # fall back to Docker Hub.
+          # Route by runner locality: GitHub-hosted runners reach Docker Hub
+          # fast and the Shanghai ACR slowly; the self-hosted China pools are
+          # the reverse. Each attempt is time-bounded, and layers are
+          # content-addressed so a timed-out first attempt still counts
+          # toward the second attempt of the same image.
+          if [ "${RUNNER_ENVIRONMENT:-}" = "github-hosted" ]; then
+            first="${HUB_IMAGE}"; second="${ACR_IMAGE}"
+          else
+            first="${ACR_IMAGE}"; second="${HUB_IMAGE}"
+          fi
           image=""
-          if timeout 300 docker pull "${ACR_IMAGE}"; then
-            image="${ACR_IMAGE}"
-          elif timeout 300 docker pull "${HUB_IMAGE}"; then
-            image="${HUB_IMAGE}"
+          if timeout 300 docker pull "${first}"; then
+            image="${first}"
+          elif timeout 300 docker pull "${second}"; then
+            image="${second}"
           fi
           if [ -z "${image}" ]; then
             echo "::warning::ci-builder image unavailable; building from source on the runner"
+            # Reclaim any partially pulled layers so they cannot starve the
+            # cold build of disk.
+            docker system prune -f >/dev/null 2>&1 || true
           fi
           echo "image=${image}" >> "$GITHUB_OUTPUT"
 
@@ -117,7 +128,9 @@ jobs:
               make build GOBUILD_OPT="${MO_GOBUILD_OPT}"'
           status=$?
           sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" || true
-          [ "${status}" -eq 0 ]
+          if [ "${status}" -ne 0 ]; then
+            exit "${status}"
+          fi
           # Loader smoke test: a broken cached artifact fails here so the
           # from-source fallback below repairs it. A coverage-instrumented
           # binary needs a writable GOCOVERDIR even for -h.

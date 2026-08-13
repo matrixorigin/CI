@@ -133,24 +133,28 @@ jobs:
           ACR_IMAGE="registry.cn-shanghai.aliyuncs.com/matrixorigin/matrixone:ci-builder"
           HUB_IMAGE="matrixorigin/matrixone:ci-builder"
           # ANONYMOUS pulls on purpose: this job later executes PR-controlled
-          # code, so no registry credential may ever touch this runner. Both
-          # pulls are time-bounded so a registry outage cannot make the
-          # optimized path slower than a cold build; layers are content-
-          # addressed, so a timed-out ACR attempt still counts toward the
-          # Docker Hub attempt of the same image. Prefer the ACR mirror
-          # (fast from the self-hosted China runners).
+          # code, so no registry credential may ever touch this runner. Route
+          # by runner locality (GitHub-hosted reaches Docker Hub fast, the
+          # self-hosted China pools reach ACR fast); each attempt is time-
+          # bounded, and layers are content-addressed so a timed-out first
+          # attempt still counts toward the second.
+          if [ "${RUNNER_ENVIRONMENT:-}" = "github-hosted" ]; then
+            first="${HUB_IMAGE}"; second="${ACR_IMAGE}"
+          else
+            first="${ACR_IMAGE}"; second="${HUB_IMAGE}"
+          fi
           image=""
-          if timeout 300 docker pull "${ACR_IMAGE}"; then
-            image="${ACR_IMAGE}"
-          elif timeout 300 docker pull "${HUB_IMAGE}"; then
-            image="${HUB_IMAGE}"
+          if timeout 300 docker pull "${first}"; then
+            image="${first}"
+          elif timeout 300 docker pull "${second}"; then
+            image="${second}"
           fi
           [ -n "${image}" ] || { echo "ci-builder image unreachable; skipping seed"; exit 0; }
           ctr=$(docker create "${image}")
           trap 'docker rm -f "${ctr}" >/dev/null 2>&1' EXIT
           gocache=$(go env GOCACHE)
           gomodcache=$(go env GOMODCACHE)
-          mkdir -p "${gocache}" "${gomodcache}" "${RUNNER_TEMP}/mo-seed"
+          mkdir -p "${gocache}" "${gomodcache}"
           if [ -z "$(ls -A "${gocache}")" ]; then
             docker cp "${ctr}:/root/.cache/go-build/." "${gocache}/"
           fi
@@ -159,28 +163,15 @@ jobs:
             # read-only directories, which docker cp cannot populate.
             docker cp "${ctr}:/go/pkg/mod" - | tar -x --no-same-permissions --strip-components=1 -C "${gomodcache}"
           fi
-          # Restore the prebuilt thirdparties only on an exact fingerprint
-          # match, so changed native inputs or a diverged branch rebuild from
-          # source instead of silently testing stale native code.
-          docker cp "${ctr}:/mo-prebuilt/thirdparties.fingerprint" "${RUNNER_TEMP}/mo-seed/thirdparties.fingerprint"
-          expected=$(printf 'schema=1\nos=%s\narch=%s\nthirdparties_tree=%s' \
-            "$(uname -s)" "$(uname -m)" "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD:thirdparties)")
-          if [ "${expected}" = "$(cat "${RUNNER_TEMP}/mo-seed/thirdparties.fingerprint")" ]; then
-            docker cp "${ctr}:/mo-prebuilt/thirdparties/install" "${RUNNER_TEMP}/mo-seed/thirdparties-install"
-            echo "MO_PREBUILT_THIRDPARTIES=${RUNNER_TEMP}/mo-seed/thirdparties-install" >> "$GITHUB_ENV"
-          else
-            echo "thirdparties fingerprint mismatch; native deps will build from source"
-          fi
+          # Host jobs deliberately seed Go caches ONLY: the Go build cache
+          # is content-addressed and always correctness-safe, while prebuilt
+          # native libraries would need a producer/consumer toolchain-ABI
+          # fingerprint to reuse outside the builder container. Native deps
+          # keep building from source here.
       - name: Unit Testing
         id: ut
         run: |
           cd $GITHUB_WORKSPACE && make clean && make config
-          # make clean wiped thirdparties/install; restore the prebuilt copy
-          # so make ut's thirdparties dependency is a no-op.
-          if [ -n "${MO_PREBUILT_THIRDPARTIES:-}" ] && [ -d "${MO_PREBUILT_THIRDPARTIES}" ]; then
-            rm -rf thirdparties/install
-            cp -r "${MO_PREBUILT_THIRDPARTIES}" thirdparties/install
-          fi
           make ut UT_PARALLEL=${{ vars.UT_PARALLEL || 6 }} UT_TIMEOUT=${{ vars.UT_TIMEOUT || 40 }}
       - name: Print Result(Old)
         if: ${{ always() }}
@@ -313,17 +304,21 @@ jobs:
           ACR_IMAGE="registry.cn-shanghai.aliyuncs.com/matrixorigin/matrixone:ci-builder"
           HUB_IMAGE="matrixorigin/matrixone:ci-builder"
           # ANONYMOUS pulls on purpose: this job later executes PR-controlled
-          # code, so no registry credential may ever touch this runner. Both
-          # pulls are time-bounded so a registry outage cannot make the
-          # optimized path slower than a cold build; layers are content-
-          # addressed, so a timed-out ACR attempt still counts toward the
-          # Docker Hub attempt of the same image. Prefer the ACR mirror
-          # (fast from the self-hosted China runners).
+          # code, so no registry credential may ever touch this runner. Route
+          # by runner locality (GitHub-hosted reaches Docker Hub fast, the
+          # self-hosted China pools reach ACR fast); each attempt is time-
+          # bounded, and layers are content-addressed so a timed-out first
+          # attempt still counts toward the second.
+          if [ "${RUNNER_ENVIRONMENT:-}" = "github-hosted" ]; then
+            first="${HUB_IMAGE}"; second="${ACR_IMAGE}"
+          else
+            first="${ACR_IMAGE}"; second="${HUB_IMAGE}"
+          fi
           image=""
-          if timeout 300 docker pull "${ACR_IMAGE}"; then
-            image="${ACR_IMAGE}"
-          elif timeout 300 docker pull "${HUB_IMAGE}"; then
-            image="${HUB_IMAGE}"
+          if timeout 300 docker pull "${first}"; then
+            image="${first}"
+          elif timeout 300 docker pull "${second}"; then
+            image="${second}"
           fi
           [ -n "${image}" ] || { echo "ci-builder image unreachable; skipping seed"; exit 0; }
           ctr=$(docker create "${image}")
@@ -331,7 +326,7 @@ jobs:
           gocache=$(go env GOCACHE)
           gomodcache=$(go env GOMODCACHE)
           lintcache="${HOME}/.cache/golangci-lint"
-          mkdir -p "${gocache}" "${gomodcache}" "${lintcache}" "${RUNNER_TEMP}/mo-seed"
+          mkdir -p "${gocache}" "${gomodcache}" "${lintcache}"
           if [ -z "$(ls -A "${gocache}")" ]; then
             docker cp "${ctr}:/root/.cache/go-build/." "${gocache}/"
           fi
@@ -343,18 +338,11 @@ jobs:
           if [ -z "$(ls -A "${lintcache}")" ]; then
             docker cp "${ctr}:/root/.cache/golangci-lint/." "${lintcache}/" || true
           fi
-          # Restore the prebuilt thirdparties only on an exact fingerprint
-          # match, so changed native inputs or a diverged branch rebuild from
-          # source instead of silently testing stale native code.
-          docker cp "${ctr}:/mo-prebuilt/thirdparties.fingerprint" "${RUNNER_TEMP}/mo-seed/thirdparties.fingerprint"
-          expected=$(printf 'schema=1\nos=%s\narch=%s\nthirdparties_tree=%s' \
-            "$(uname -s)" "$(uname -m)" "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD:thirdparties)")
-          if [ "${expected}" = "$(cat "${RUNNER_TEMP}/mo-seed/thirdparties.fingerprint")" ]; then
-            docker cp "${ctr}:/mo-prebuilt/thirdparties/install" "${RUNNER_TEMP}/mo-seed/thirdparties-install"
-            echo "MO_PREBUILT_THIRDPARTIES=${RUNNER_TEMP}/mo-seed/thirdparties-install" >> "$GITHUB_ENV"
-          else
-            echo "thirdparties fingerprint mismatch; native deps will build from source"
-          fi
+          # Host jobs deliberately seed Go caches ONLY: the Go build cache
+          # is content-addressed and always correctness-safe, while prebuilt
+          # native libraries would need a producer/consumer toolchain-ABI
+          # fingerprint to reuse outside the builder container. Native deps
+          # keep building from source here.
       - name: Prepare ENV
         env:
           GOPROXY: http://goproxy.goproxy.svc.cluster.local,https://goproxy.cn,direct
@@ -362,12 +350,6 @@ jobs:
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
           make clean && make config
-          # make clean wiped thirdparties/install; restore the prebuilt copy
-          # so make thirdparties below is a no-op.
-          if [ -n "${MO_PREBUILT_THIRDPARTIES:-}" ] && [ -d "${MO_PREBUILT_THIRDPARTIES}" ]; then
-            rm -rf thirdparties/install
-            cp -r "${MO_PREBUILT_THIRDPARTIES}" thirdparties/install
-          fi
           make thirdparties
           test -f thirdparties/install/include/xxhash.h
           test -f thirdparties/install/include/usearch.h
