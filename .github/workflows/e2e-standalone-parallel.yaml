@@ -469,6 +469,12 @@ jobs:
           set -uo pipefail
           coverage_dir="$GITHUB_WORKSPACE/coverage"
           coverage_profile="${RUNNER_TEMP}/bvt-pessimistic.out"
+          compose_file="$GITHUB_WORKSPACE/etc/launch-tae-compose/compose.yaml"
+          if ! grep -Eq 'GOCOVERDIR=/coverage' "${compose_file}" \
+            || ! grep -Eq 'coverage:/coverage' "${compose_file}"; then
+            echo '::warning::Compose BVT coverage is unsupported by this legacy branch; keeping the successful BVT result'
+            exit 0
+          fi
           if go tool covdata textfmt -i="${coverage_dir}" -o "${coverage_profile}"; then
             test -s "${coverage_profile}"
           elif [ "${{ steps.bvt_on_pr_version.conclusion }}" = "success" ]; then
@@ -494,10 +500,14 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p ${{ github.workspace }}/upload
-          rm -rf ./mo-tester/.git
-          rm -rf ./mo-tester/lib
-          mv ${{ github.workspace }}/mo-tester ${{ github.workspace }}/upload/
-          mv ${{ github.workspace }}/docker-compose-log ${{ github.workspace }}/upload/
+          if [ -d "${{ github.workspace }}/mo-tester" ]; then
+            rm -rf ./mo-tester/.git
+            rm -rf ./mo-tester/lib
+            mv ${{ github.workspace }}/mo-tester ${{ github.workspace }}/upload/
+          fi
+          if [ -d "${{ github.workspace }}/docker-compose-log" ]; then
+            mv ${{ github.workspace }}/docker-compose-log ${{ github.workspace }}/upload/
+          fi
 
       - uses: actions/upload-artifact@v7
         if: ${{ failure() || cancelled()}}
@@ -506,4 +516,5 @@ jobs:
           name: Compose-multi-CN-e2e-BVT-Test-on-Linux-x64(PESSIMISTIC)-reports
           path: |
             ${{ github.workspace }}/upload
+            ${{ github.workspace }}/docker-compose-log
           retention-days: 7
