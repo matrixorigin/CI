@@ -37,18 +37,6 @@ on:
       EE_DB_DB:
         description: "matrixone cloud db"
         required: true
-      DOCKERHUB_USERNAME:
-        description: "Optional Docker Hub login for the ci-builder cache seed (rate limits)"
-        required: false
-      DOCKERHUB_TOKEN:
-        description: "Optional Docker Hub token for the ci-builder cache seed (rate limits)"
-        required: false
-      ACR_USERNAME:
-        description: "Optional ACR login for the ci-builder mirror pull"
-        required: false
-      ACR_TOKEN:
-        description: "Optional ACR token for the ci-builder mirror pull"
-        required: false
 
 jobs:
   ut-linux-x86:
@@ -139,29 +127,22 @@ jobs:
       # recompile. Any failure here just leaves the job building cold.
       - name: Seed Go caches from CI builder image
         continue-on-error: true
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
-          ACR_TOKEN: ${{ secrets.ACR_TOKEN }}
         run: |
           set -euo pipefail
           command -v docker >/dev/null || { echo "docker unavailable; skipping seed"; exit 0; }
           ACR_IMAGE="registry.cn-shanghai.aliyuncs.com/matrixorigin/matrixone:ci-builder"
           HUB_IMAGE="matrixorigin/matrixone:ci-builder"
-          if [ -n "${ACR_TOKEN}" ]; then
-            echo "${ACR_TOKEN}" | docker login registry.cn-shanghai.aliyuncs.com -u "${ACR_USERNAME}" --password-stdin || true
-          fi
-          if [ -n "${DOCKERHUB_TOKEN}" ]; then
-            echo "${DOCKERHUB_TOKEN}" | docker login -u "${DOCKERHUB_USERNAME}" --password-stdin || true
-          fi
-          # Prefer the ACR mirror (fast from the self-hosted China runners),
-          # time-bounded so a slow cross-region pull cannot eat the savings;
-          # fall back to Docker Hub.
+          # ANONYMOUS pulls on purpose: this job later executes PR-controlled
+          # code, so no registry credential may ever touch this runner. Both
+          # pulls are time-bounded so a registry outage cannot make the
+          # optimized path slower than a cold build; layers are content-
+          # addressed, so a timed-out ACR attempt still counts toward the
+          # Docker Hub attempt of the same image. Prefer the ACR mirror
+          # (fast from the self-hosted China runners).
           image=""
           if timeout 300 docker pull "${ACR_IMAGE}"; then
             image="${ACR_IMAGE}"
-          elif docker pull "${HUB_IMAGE}"; then
+          elif timeout 300 docker pull "${HUB_IMAGE}"; then
             image="${HUB_IMAGE}"
           fi
           [ -n "${image}" ] || { echo "ci-builder image unreachable; skipping seed"; exit 0; }
@@ -178,8 +159,18 @@ jobs:
             # read-only directories, which docker cp cannot populate.
             docker cp "${ctr}:/go/pkg/mod" - | tar -x --no-same-permissions --strip-components=1 -C "${gomodcache}"
           fi
-          docker cp "${ctr}:/mo-prebuilt/thirdparties/install" "${RUNNER_TEMP}/mo-seed/thirdparties-install"
-          echo "MO_PREBUILT_THIRDPARTIES=${RUNNER_TEMP}/mo-seed/thirdparties-install" >> "$GITHUB_ENV"
+          # Restore the prebuilt thirdparties only on an exact fingerprint
+          # match, so changed native inputs or a diverged branch rebuild from
+          # source instead of silently testing stale native code.
+          docker cp "${ctr}:/mo-prebuilt/thirdparties.fingerprint" "${RUNNER_TEMP}/mo-seed/thirdparties.fingerprint"
+          expected=$(printf 'schema=1\nos=%s\narch=%s\nthirdparties_tree=%s' \
+            "$(uname -s)" "$(uname -m)" "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD:thirdparties)")
+          if [ "${expected}" = "$(cat "${RUNNER_TEMP}/mo-seed/thirdparties.fingerprint")" ]; then
+            docker cp "${ctr}:/mo-prebuilt/thirdparties/install" "${RUNNER_TEMP}/mo-seed/thirdparties-install"
+            echo "MO_PREBUILT_THIRDPARTIES=${RUNNER_TEMP}/mo-seed/thirdparties-install" >> "$GITHUB_ENV"
+          else
+            echo "thirdparties fingerprint mismatch; native deps will build from source"
+          fi
       - name: Unit Testing
         id: ut
         run: |
@@ -316,29 +307,22 @@ jobs:
       # failure here just leaves the job building cold.
       - name: Seed Go caches from CI builder image
         continue-on-error: true
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
-          ACR_TOKEN: ${{ secrets.ACR_TOKEN }}
         run: |
           set -euo pipefail
           command -v docker >/dev/null || { echo "docker unavailable; skipping seed"; exit 0; }
           ACR_IMAGE="registry.cn-shanghai.aliyuncs.com/matrixorigin/matrixone:ci-builder"
           HUB_IMAGE="matrixorigin/matrixone:ci-builder"
-          if [ -n "${ACR_TOKEN}" ]; then
-            echo "${ACR_TOKEN}" | docker login registry.cn-shanghai.aliyuncs.com -u "${ACR_USERNAME}" --password-stdin || true
-          fi
-          if [ -n "${DOCKERHUB_TOKEN}" ]; then
-            echo "${DOCKERHUB_TOKEN}" | docker login -u "${DOCKERHUB_USERNAME}" --password-stdin || true
-          fi
-          # Prefer the ACR mirror (fast from the self-hosted China runners),
-          # time-bounded so a slow cross-region pull cannot eat the savings;
-          # fall back to Docker Hub.
+          # ANONYMOUS pulls on purpose: this job later executes PR-controlled
+          # code, so no registry credential may ever touch this runner. Both
+          # pulls are time-bounded so a registry outage cannot make the
+          # optimized path slower than a cold build; layers are content-
+          # addressed, so a timed-out ACR attempt still counts toward the
+          # Docker Hub attempt of the same image. Prefer the ACR mirror
+          # (fast from the self-hosted China runners).
           image=""
           if timeout 300 docker pull "${ACR_IMAGE}"; then
             image="${ACR_IMAGE}"
-          elif docker pull "${HUB_IMAGE}"; then
+          elif timeout 300 docker pull "${HUB_IMAGE}"; then
             image="${HUB_IMAGE}"
           fi
           [ -n "${image}" ] || { echo "ci-builder image unreachable; skipping seed"; exit 0; }
@@ -359,8 +343,18 @@ jobs:
           if [ -z "$(ls -A "${lintcache}")" ]; then
             docker cp "${ctr}:/root/.cache/golangci-lint/." "${lintcache}/" || true
           fi
-          docker cp "${ctr}:/mo-prebuilt/thirdparties/install" "${RUNNER_TEMP}/mo-seed/thirdparties-install"
-          echo "MO_PREBUILT_THIRDPARTIES=${RUNNER_TEMP}/mo-seed/thirdparties-install" >> "$GITHUB_ENV"
+          # Restore the prebuilt thirdparties only on an exact fingerprint
+          # match, so changed native inputs or a diverged branch rebuild from
+          # source instead of silently testing stale native code.
+          docker cp "${ctr}:/mo-prebuilt/thirdparties.fingerprint" "${RUNNER_TEMP}/mo-seed/thirdparties.fingerprint"
+          expected=$(printf 'schema=1\nos=%s\narch=%s\nthirdparties_tree=%s' \
+            "$(uname -s)" "$(uname -m)" "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD:thirdparties)")
+          if [ "${expected}" = "$(cat "${RUNNER_TEMP}/mo-seed/thirdparties.fingerprint")" ]; then
+            docker cp "${ctr}:/mo-prebuilt/thirdparties/install" "${RUNNER_TEMP}/mo-seed/thirdparties-install"
+            echo "MO_PREBUILT_THIRDPARTIES=${RUNNER_TEMP}/mo-seed/thirdparties-install" >> "$GITHUB_ENV"
+          else
+            echo "thirdparties fingerprint mismatch; native deps will build from source"
+          fi
       - name: Prepare ENV
         env:
           GOPROXY: http://goproxy.goproxy.svc.cluster.local,https://goproxy.cn,direct
