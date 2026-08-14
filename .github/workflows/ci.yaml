@@ -119,6 +119,54 @@ jobs:
           echo "bucket=${{ secrets.S3BUCKET }}" >> $GITHUB_ENV
           # set ut workdir
           echo "UT_WORKDIR=${{ github.workspace }}" >> $GITHUB_ENV
+      - name: Configure Shanghai Go proxy
+        if: ${{ contains(vars.UT_RUNNER_LABEL, 'shanghai') }}
+        env:
+          SHANGHAI_GOPROXY: http://goproxy.goproxy.svc.cluster.local|https://goproxy.cn|direct
+        run: |
+          set -euo pipefail
+
+          echo "Runner: ${{ runner.name }}"
+          echo "Runner OS: ${{ runner.os }}"
+
+          proxy_url="${SHANGHAI_GOPROXY%%|*}"
+          proxy_host="${proxy_url#*://}"
+          probe_module="github.com/spf13/cobra"
+          probe_version="$(
+            awk -v module="$probe_module" '
+              $1 == module { print $2; exit }
+              $1 == "require" && $2 == module { print $3; exit }
+            ' go.mod 2>/dev/null || true
+          )"
+          proxy_status=""
+          proxy_enabled="false"
+          probe_result="not-attempted"
+
+          if [[ -z "$probe_version" ]]; then
+            probe_result="module-not-found-in-go.mod"
+          elif ! timeout 20s getent hosts "$proxy_host"; then
+            probe_result="dns-failed-or-timed-out"
+          elif proxy_status="$(curl \
+              --silent \
+              --show-error \
+              --connect-timeout 5 \
+              --max-time 30 \
+              --output /dev/null \
+              --write-out '%{http_code}' \
+              "${proxy_url}/${probe_module}/@v/${probe_version}.info")" && \
+            [[ "$proxy_status" == "200" ]]; then
+            proxy_enabled="true"
+            probe_result="module-http-200"
+            echo "Shanghai internal GOPROXY served ${probe_module}@${probe_version}"
+            echo "Using GOPROXY=${SHANGHAI_GOPROXY}"
+            echo "GOPROXY=${SHANGHAI_GOPROXY}" >> "$GITHUB_ENV"
+          else
+            probe_result="module-http-${proxy_status:-unavailable}"
+          fi
+
+          if [[ "$proxy_enabled" != "true" ]]; then
+            echo "::warning::Shanghai internal GOPROXY probe failed (${probe_result}); leaving GOPROXY unchanged"
+          fi
       # Best-effort: seed the Go build/module caches and the prebuilt C
       # thirdparties from the nightly ci-builder image (see
       # optools/images/Dockerfile.ci-builder in matrixone). The image warms
@@ -201,8 +249,9 @@ jobs:
       - name: Unit Testing
         id: ut
         run: |
-          cd $GITHUB_WORKSPACE && make clean && make config
-          make ut UT_PARALLEL=${{ vars.UT_PARALLEL || 6 }} UT_TIMEOUT=${{ vars.UT_TIMEOUT || 40 }}
+          # Keep the explicit config and time it separately for the proxy canary.
+          cd $GITHUB_WORKSPACE && make clean && time make config
+          time make ut UT_PARALLEL=${{ vars.UT_PARALLEL || 6 }} UT_TIMEOUT=${{ vars.UT_TIMEOUT || 40 }}
       - name: Print Result(Old)
         if: ${{ always() }}
         continue-on-error: true
@@ -314,121 +363,140 @@ jobs:
           yamlFiles: |
             .github/ISSUE_TEMPLATE/*.yml
             .github/ISSUE_TEMPLATE/*.yaml
+      - name: Configure Shanghai Go proxy
+        if: ${{ !vars.SCA_RUNNER_LABEL || contains(vars.SCA_RUNNER_LABEL, 'shanghai') }}
+        run: |
+          echo "GOPROXY=http://goproxy.goproxy.svc.cluster.local|https://goproxy.cn|direct" >> "$GITHUB_ENV"
       - name: Set up Go
         uses: matrixorigin/CI/actions/setup-env@main
         with:
           setup-java: false
           setup-cmake: true
           go-version-file: "${{ github.workspace }}/go.mod"
-      # Best-effort: seed the Go build/module caches, golangci-lint's
-      # analysis cache, and the prebuilt C thirdparties from the nightly
-      # ci-builder image (arm64 leg; see optools/images/Dockerfile.ci-builder
-      # in matrixone). The image warms the exact static-check pass this job
-      # runs, so vet and lint recompile only what the PR changed. Any
-      # failure here just leaves the job building cold.
-      - name: Seed Go caches from CI builder image
-        continue-on-error: true
+      - name: Clean generated SCA outputs
         run: |
           set -euo pipefail
-          command -v docker >/dev/null || { echo "docker unavailable; skipping seed"; exit 0; }
-          gocache=$(go env GOCACHE)
-          gomodcache=$(go env GOMODCACHE)
-          lintcache="${HOME}/.cache/golangci-lint"
-          mkdir -p "${gocache}" "${gomodcache}" "${lintcache}"
-          # Persistent runners arrive warm: skip the pull entirely.
-          if [ -n "$(ls -A "${gocache}")" ]; then
-            echo "Go build cache already populated; skipping seed"
-            exit 0
-          fi
-          # The image plus the extracted caches peak around ~26GB; on a
-          # disk-constrained runner a cold build (today's behavior) is
-          # strictly safer than an ENOSPC mid-job.
-          avail_kb=$(df -Pk "${HOME}" | awk 'NR==2 {print $4}')
-          if [ "${avail_kb}" -lt 31457280 ]; then
-            echo "only $((avail_kb / 1024 / 1024))GB free; skipping cache seed"
-            exit 0
-          fi
-          ACR_IMAGE="registry.cn-shanghai.aliyuncs.com/matrixorigin/matrixone:ci-builder"
-          HUB_IMAGE="matrixorigin/matrixone:ci-builder"
-          # ANONYMOUS pulls on purpose: this job later executes PR-controlled
-          # code, so no registry credential may ever touch this runner. Route
-          # by runner locality (GitHub-hosted reaches Docker Hub fast, the
-          # self-hosted China pools reach ACR fast); each attempt is time-
-          # bounded, and layers are content-addressed so a timed-out first
-          # attempt still counts toward the second.
-          if [ "${RUNNER_ENVIRONMENT:-}" = "github-hosted" ]; then
-            first="${HUB_IMAGE}"; second="${ACR_IMAGE}"
+          make clean
+          rm -rf .sca-static-check-tools
+      - name: Resolve Go module cache metadata
+        id: go-module-cache-metadata
+        run: |
+          set -euo pipefail
+          cache_dir="$GITHUB_WORKSPACE/.sca-go-module-cache"
+          # Self-hosted runner workspaces can outlive a job. Start from only the
+          # trusted cache archive, not files left by a previous PR.
+          GOMODCACHE="$cache_dir" go clean -modcache
+          echo "GOMODCACHE=$cache_dir" >> "$GITHUB_ENV"
+          echo "version=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
+      - name: Restore Go module cache
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          # A relative path keeps both the hidden cache version and tar entries
+          # identical to the trusted producer across different runner layouts.
+          path: .sca-go-module-cache
+          key: matrixone-go-mod-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-module-cache-metadata.outputs.version }}-${{ hashFiles('go.mod', 'go.sum') }}
+          restore-keys: |
+            matrixone-go-mod-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-module-cache-metadata.outputs.version }}-
+      - name: Move Go module cache out of the source tree
+        run: |
+          set -euo pipefail
+          staging_dir="$GOMODCACHE"
+          runtime_root=$(mktemp -d "${RUNNER_TEMP%/}/matrixone-go-mod.XXXXXX")
+          runtime_dir="$runtime_root/cache"
+          if [ -d "$staging_dir" ]; then
+            mv "$staging_dir" "$runtime_dir"
           else
-            first="${ACR_IMAGE}"; second="${HUB_IMAGE}"
+            mkdir "$runtime_dir"
           fi
-          image=""
-          if timeout 300 docker pull "${first}"; then
-            image="${first}"
-          elif timeout 300 docker pull "${second}"; then
-            image="${second}"
-          fi
-          if [ -z "${image}" ]; then
-            echo "ci-builder image unreachable; skipping seed"
-            docker system prune -f >/dev/null 2>&1 || true
-            exit 0
-          fi
-          ctr=$(docker create "${image}")
-          gocache_stage="${gocache}.seed-stage"
-          gomodcache_stage="${gomodcache}.seed-stage"
-          lintcache_stage="${lintcache}.seed-stage"
-          trap 'docker rm -f "${ctr}" >/dev/null 2>&1; rm -rf "${gocache_stage}" "${gomodcache_stage}" "${lintcache_stage}"' EXIT
-          # Surface the nightly warm health recorded by the builder image
-          # (absent on images that predate it).
-          docker cp "${ctr}:/mo-prebuilt/warm-status" - 2>/dev/null | tar -xO 2>/dev/null || true
-          # Extract into same-filesystem staging dirs and rename into place
-          # only when complete: a mid-stream failure must never leave a
-          # half-populated cache that this or a later run mistakes for warm.
-          rm -rf "${gocache_stage}" "${gomodcache_stage}" "${lintcache_stage}"
-          mkdir -p "${gocache_stage}" "${gomodcache_stage}" "${lintcache_stage}"
-          docker cp "${ctr}:/root/.cache/go-build/." "${gocache_stage}/"
-          # tar stream instead of a plain copy: the module cache may carry
-          # read-only directories, which docker cp cannot populate.
-          docker cp "${ctr}:/go/pkg/mod" - | tar -x --no-same-permissions --strip-components=1 -C "${gomodcache_stage}"
-          docker cp "${ctr}:/root/.cache/golangci-lint/." "${lintcache_stage}/" || true
-          rmdir "${gocache}" && mv "${gocache_stage}" "${gocache}"
-          if [ -z "$(ls -A "${gomodcache}")" ]; then
-            rmdir "${gomodcache}" && mv "${gomodcache_stage}" "${gomodcache}"
-          fi
-          if [ -z "$(ls -A "${lintcache}")" ] && [ -n "$(ls -A "${lintcache_stage}")" ]; then
-            rmdir "${lintcache}" && mv "${lintcache_stage}" "${lintcache}"
-          fi
-          # Free the image before the job's real work needs the disk.
-          docker rm -f "${ctr}" >/dev/null 2>&1 || true
-          docker rmi "${image}" >/dev/null 2>&1 || true
-          # Host jobs deliberately seed Go caches ONLY: the Go build cache
-          # is content-addressed and always correctness-safe, while prebuilt
-          # native libraries would need a producer/consumer toolchain-ABI
-          # fingerprint to reuse outside the builder container. Native deps
-          # keep building from source here.
+          echo "GOMODCACHE=$runtime_dir" >> "$GITHUB_ENV"
+      # Keep these metadata outputs and the key schema aligned with
+      # matrixorigin/matrixone:.github/workflows/sca-go-module-cache.yaml.
+      - name: Resolve native cache metadata
+        id: native-cache-metadata
+        run: |
+          set -euo pipefail
+          compiler="$(cc -dumpmachine)-$(cc -dumpfullversion -dumpversion)"
+          cxx_compiler="$(c++ -dumpmachine)-$(c++ -dumpfullversion -dumpversion)"
+          cmake_version="$(cmake --version | sed -n '1p')"
+          echo "compiler=${compiler// /_}" >> "$GITHUB_OUTPUT"
+          echo "cxx-compiler=${cxx_compiler// /_}" >> "$GITHUB_OUTPUT"
+          echo "cmake=${cmake_version// /_}" >> "$GITHUB_OUTPUT"
+      - name: Restore native SCA prerequisites
+        id: native-cache
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            thirdparties/install
+            cgo/*.o
+            cgo/libmo.a
+            cgo/libmo.so
+          key: matrixone-sca-native-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.native-cache-metadata.outputs.compiler }}-${{ steps.native-cache-metadata.outputs.cxx-compiler }}-${{ steps.native-cache-metadata.outputs.cmake }}-${{ hashFiles('Makefile', 'cgo/*.c', 'cgo/*.h', 'cgo/Makefile', 'thirdparties/Makefile', 'thirdparties/*.tar.gz', 'thirdparties/download') }}
+      - name: Resolve static-check tool cache metadata
+        id: static-check-tool-cache-metadata
+        run: |
+          set -euo pipefail
+          recipe_hash="$(sed -n '/^install-static-check-tools:/,/^$/p' Makefile | sha256sum | awk '{print $1}')"
+          test -n "$recipe_hash"
+          echo "recipe-hash=$recipe_hash" >> "$GITHUB_OUTPUT"
+      - name: Restore static-check tools
+        id: static-check-tool-cache
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: .sca-static-check-tools
+          key: matrixone-sca-tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-module-cache-metadata.outputs.version }}-${{ steps.static-check-tool-cache-metadata.outputs.recipe-hash }}
       - name: Prepare ENV
-        env:
-          GOPROXY: http://goproxy.goproxy.svc.cluster.local,https://goproxy.cn,direct
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
-          make clean && make config
-          make thirdparties
-          test -f thirdparties/install/include/xxhash.h
-          test -f thirdparties/install/include/usearch.h
-          make cgo
-          retry_times=5
-          delay=10
-          for ((i = 1; i <= retry_times; i++)); do
-            if make install-static-check-tools; then
-              break
-            fi
-            if [ "$i" -eq "$retry_times" ]; then
-              echo "install-static-check-tools failed after ${retry_times} attempts"
-              exit 1
-            fi
-            echo "install-static-check-tools attempt ${i} failed, retrying in ${delay}s..."
-            sleep $delay
-          done
+          make config
+          if [[ "${{ steps.native-cache.outputs.cache-hit }}" == "true" ]] && \
+            [[ -f thirdparties/install/include/xxhash.h ]] && \
+            [[ -f thirdparties/install/include/usearch.h ]] && \
+            [[ -f thirdparties/install/lib/libroaring.a ]] && \
+            [[ -f thirdparties/install/lib/libusearch_c.a ]] && \
+            [[ -n "$(find thirdparties/install/lib -maxdepth 1 -type f -name 'onnxruntime*.so' -print -quit)" ]] && \
+            [[ -f cgo/libmo.a ]] && \
+            [[ -f cgo/libmo.so ]]; then
+            rm -rf "$GITHUB_WORKSPACE/lib"
+            cp -r thirdparties/install/lib "$GITHUB_WORKSPACE/lib"
+          else
+            make thirdparties
+            test -f thirdparties/install/include/xxhash.h
+            test -f thirdparties/install/include/usearch.h
+            make cgo
+            test -f cgo/libmo.so
+          fi
+      - name: Prepare static-check tools
+        run: |
+          set -euo pipefail
+          runtime_dir="$(mktemp -d "${RUNNER_TEMP%/}/matrixone-sca-tools.XXXXXX")"
+          staging_dir="$GITHUB_WORKSPACE/.sca-static-check-tools"
+          if [[ "${{ steps.static-check-tool-cache.outputs.cache-hit }}" == "true" ]] && \
+            [[ -x "$staging_dir/golangci-lint" ]] && \
+            [[ -x "$staging_dir/molint" ]] && \
+            [[ -x "$staging_dir/license-eye" ]]; then
+            mv "$staging_dir"/* "$runtime_dir/"
+          else
+            retry_times=5
+            delay=10
+            for ((i = 1; i <= retry_times; i++)); do
+              if make install-static-check-tools; then
+                break
+              fi
+              if [ "$i" -eq "$retry_times" ]; then
+                echo "install-static-check-tools failed after ${retry_times} attempts"
+                exit 1
+              fi
+              echo "install-static-check-tools attempt ${i} failed, retrying in ${delay}s..."
+              sleep "$delay"
+            done
+            tool_bin="$(go env GOPATH)/bin"
+            cp "$tool_bin/golangci-lint" "$tool_bin/molint" "$tool_bin/license-eye" "$runtime_dir/"
+          fi
+          test -x "$runtime_dir/golangci-lint"
+          test -x "$runtime_dir/molint"
+          test -x "$runtime_dir/license-eye"
+          echo "$runtime_dir" >> "$GITHUB_PATH"
       - name: Static Code Analysis
         run: |
           cd $GITHUB_WORKSPACE

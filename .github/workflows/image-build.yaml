@@ -196,32 +196,23 @@ jobs:
           docker buildx imagetools inspect "${ACR_DOCKER_IMAGE}:${VERSION}"
 
   ci-builder:
-    # Nightly CI builder images: a Go toolchain carrying every PR-invariant
-    # build input prebuilt (Go module cache, Go build cache, compiled C
-    # thirdparties). Per architecture the warm set matches what PR CI
-    # compiles there: amd64 warms the -cover build plus both UT test
-    # flavors (build-mo.yaml, ci.yaml UT, coverage-ut.yaml), arm64 warms
-    # the plain build plus the static-check pass (ci.yaml SCA). Skipped for
-    # release tags so the caches always track the default branch, and
-    # skipped gracefully on branches that do not ship the Dockerfile yet.
-    name: Build CI builder image (${{ matrix.arch }})
+    # Nightly amd64 CI builder image: a Go toolchain carrying every
+    # PR-invariant build input prebuilt (Go module cache, Go build caches
+    # warmed in the flavors PR CI compiles, compiled C thirdparties) for the
+    # shared build (build-mo.yaml) and the UT/coverage-UT cache seeds. The
+    # arm64 SCA job is served by its own actions/cache pipeline (see
+    # matrixorigin/matrixone sca-go-module-cache.yaml), so only amd64 is
+    # published. Skipped for release tags so the caches always track the
+    # default branch, and skipped gracefully on branches that do not ship
+    # the Dockerfile yet.
+    name: Build CI builder image
     if: ${{ github.event_name != 'release' }}
     # Best-effort: a builder-image problem must not turn the nightly product
     # image pipeline red; consumers fall back to cold builds until the next
     # successful publish.
     continue-on-error: true
     environment: ci
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: linux/amd64
-            arch: amd64
-            runner: ubuntu-22.04
-          - platform: linux/arm64
-            arch: arm64
-            runner: ubuntu-22.04-arm
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-22.04
     # Each warm flavor is roughly a full-tree compile.
     timeout-minutes: 120
     steps:
@@ -257,8 +248,8 @@ jobs:
           DOCKER_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/${GITHUB_REPOSITORY#*/}
           ACR_DOCKER_IMAGE="registry.cn-shanghai.aliyuncs.com/${DOCKER_IMAGE}"
           echo "docker_image=${DOCKER_IMAGE}" >> "$GITHUB_OUTPUT"
-          echo "tag=${DOCKER_IMAGE}:ci-builder-${{ matrix.arch }}" >> "$GITHUB_OUTPUT"
-          echo "acr_tag=${ACR_DOCKER_IMAGE}:ci-builder-${{ matrix.arch }}" >> "$GITHUB_OUTPUT"
+          echo "tag=${DOCKER_IMAGE}:ci-builder" >> "$GITHUB_OUTPUT"
+          echo "acr_tag=${ACR_DOCKER_IMAGE}:ci-builder" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         if: ${{ steps.gate.outputs.present == 'true' }}
@@ -290,66 +281,9 @@ jobs:
           builder: ${{ steps.buildx.outputs.name }}
           context: .
           file: ./optools/images/Dockerfile.ci-builder
-          platforms: ${{ matrix.platform }}
+          platforms: linux/amd64
           push: true
           tags: |
             ${{ steps.prep.outputs.tag }}
             ${{ steps.prep.outputs.acr_tag }}
 
-  ci-builder-manifest:
-    # Combine the per-arch builder images under one tag so consumers just
-    # pull matrixorigin/matrixone:ci-builder and get their architecture.
-    name: Publish CI builder manifest
-    if: ${{ github.event_name != 'release' }}
-    continue-on-error: true
-    environment: ci
-    runs-on: ubuntu-22.04
-    needs: ci-builder
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          token: ${{ secrets.TOKEN_ACTION }}
-          fetch-depth: 1
-
-      - name: Check Dockerfile presence
-        id: gate
-        run: |
-          if [ -f optools/images/Dockerfile.ci-builder ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Set up Docker Buildx
-        if: ${{ steps.gate.outputs.present == 'true' }}
-        uses: docker/setup-buildx-action@v4
-
-      - name: Login to DockerHub
-        if: ${{ steps.gate.outputs.present == 'true' }}
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Login to Alicloud Container Registry
-        if: ${{ steps.gate.outputs.present == 'true' }}
-        uses: docker/login-action@v4
-        with:
-          registry: registry.cn-shanghai.aliyuncs.com
-          username: ${{ secrets.ACR_USERNAME }}
-          password: ${{ secrets.ACR_TOKEN }}
-
-      - name: Create manifest
-        if: ${{ steps.gate.outputs.present == 'true' }}
-        run: |
-          DOCKER_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/${GITHUB_REPOSITORY#*/}
-          ACR_DOCKER_IMAGE="registry.cn-shanghai.aliyuncs.com/${DOCKER_IMAGE}"
-          docker buildx imagetools create --tag "${DOCKER_IMAGE}:ci-builder" \
-            "${DOCKER_IMAGE}:ci-builder-amd64" \
-            "${DOCKER_IMAGE}:ci-builder-arm64"
-          docker buildx imagetools create --tag "${ACR_DOCKER_IMAGE}:ci-builder" \
-            "${ACR_DOCKER_IMAGE}:ci-builder-amd64" \
-            "${ACR_DOCKER_IMAGE}:ci-builder-arm64"
-          docker buildx imagetools inspect "${DOCKER_IMAGE}:ci-builder"
-          docker buildx imagetools inspect "${ACR_DOCKER_IMAGE}:ci-builder"
