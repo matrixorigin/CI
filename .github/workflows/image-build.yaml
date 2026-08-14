@@ -133,6 +133,11 @@ jobs:
             type=registry,ref=${{ steps.prep.outputs.cache_repo }}
             type=registry,ref=${{ steps.prep.outputs.legacy_cache_repo }}
           cache-to: type=registry,ref=${{ steps.prep.outputs.cache_repo }},mode=max
+          # Aliyun ACR rejects OCI attestation manifests
+          # (application/vnd.oci.empty.v1+json); without this every ACR push
+          # fails with "denied: unknown manifest class".
+          provenance: false
+          sbom: false
 
   manifest:
     name: Publish multi-arch manifests
@@ -286,4 +291,8 @@ jobs:
           tags: |
             ${{ steps.prep.outputs.tag }}
             ${{ steps.prep.outputs.acr_tag }}
+          # Aliyun ACR rejects OCI attestation manifests; see the product
+          # build step above.
+          provenance: false
+          sbom: false
 
