@@ -267,9 +267,12 @@ jobs:
           if [ -s "${prebuilt_tar}" ] && [ -f ./optools/images/Dockerfile.prebuilt ]; then
             ctx="${RUNNER_TEMP}/mo-image-ctx"
             rm -rf "${ctx}" && mkdir -p "${ctx}"
-            tar -xzf "${prebuilt_tar}" -C "${ctx}"
-            prebuilt_sha=$(sed -n 's/^head_sha=//p' "${ctx}/BUILD_INFO")
-            prebuilt_opt=$(sed -n 's/^gobuild_opt=//p' "${ctx}/BUILD_INFO")
+            if ! tar -xzf "${prebuilt_tar}" -C "${ctx}"; then
+              echo "::warning::shared build artifact failed to extract; falling back to full docker build"
+              rm -rf "${ctx}" && mkdir -p "${ctx}"
+            fi
+            prebuilt_sha=$(sed -n 's/^head_sha=//p' "${ctx}/BUILD_INFO" 2>/dev/null || true)
+            prebuilt_opt=$(sed -n 's/^gobuild_opt=//p' "${ctx}/BUILD_INFO" 2>/dev/null || true)
             if [ "${prebuilt_sha}" = '${{ github.event.pull_request.head.sha }}' ] \
               && [ "${prebuilt_opt}" = '-cover' ]; then
               cp -r ./etc "${ctx}/etc"

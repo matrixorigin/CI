@@ -206,6 +206,10 @@ jobs:
     # skipped gracefully on branches that do not ship the Dockerfile yet.
     name: Build CI builder image (${{ matrix.arch }})
     if: ${{ github.event_name != 'release' }}
+    # Best-effort: a builder-image problem must not turn the nightly product
+    # image pipeline red; consumers fall back to cold builds until the next
+    # successful publish.
+    continue-on-error: true
     environment: ci
     strategy:
       fail-fast: false
@@ -297,6 +301,7 @@ jobs:
     # pull matrixorigin/matrixone:ci-builder and get their architecture.
     name: Publish CI builder manifest
     if: ${{ github.event_name != 'release' }}
+    continue-on-error: true
     environment: ci
     runs-on: ubuntu-22.04
     needs: ci-builder

@@ -101,7 +101,9 @@ jobs:
         if: ${{ steps.builder.outputs.image != '' }}
         continue-on-error: true
         run: |
-          set -uo pipefail
+          # The Actions default shell runs with errexit; clear it so the
+          # docker run status is captured and ownership repair always runs.
+          set -u +e -o pipefail
           cd "$GITHUB_WORKSPACE"
           # The mount path must match the ci-builder warm build's WORKDIR:
           # cgo compile-cache entries hash the -I include paths. The prebuilt
@@ -112,9 +114,14 @@ jobs:
             -v "$GITHUB_WORKSPACE":/go/src/github.com/matrixorigin/matrixone \
             -w /go/src/github.com/matrixorigin/matrixone \
             -e MO_GOBUILD_OPT='${{ inputs.gobuild_opt }}' \
+            -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
             '${{ steps.builder.outputs.image }}' \
             bash -c '
               set -euo pipefail
+              # Return workspace ownership to the runner user no matter how
+              # this script exits; the host-side chown is only a backup and
+              # may lack passwordless sudo on self-hosted runners.
+              trap "chown -R \"${HOST_UID}:${HOST_GID}\" /go/src/github.com/matrixorigin/matrixone >/dev/null 2>&1 || true" EXIT
               git config --global --add safe.directory /go/src/github.com/matrixorigin/matrixone
               expected=$(printf "schema=1\nos=%s\narch=%s\nthirdparties_tree=%s" \
                 "$(uname -s)" "$(uname -m)" "$(git rev-parse HEAD:thirdparties)")
@@ -173,7 +180,7 @@ jobs:
           pack_dir="${RUNNER_TEMP}/mo-build"
           mkdir -p "${pack_dir}"
           tar --exclude='*.a' -czf "${pack_dir}/mo-build.tar.gz" \
-            mo-service BUILD_INFO lib dict
+            BUILD_INFO mo-service lib dict
           ls -lh "${pack_dir}/mo-build.tar.gz"
           echo "artifact_name=mo-shared-build-attempt-${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
 

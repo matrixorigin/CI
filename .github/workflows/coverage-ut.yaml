@@ -169,6 +169,22 @@ jobs:
         run: |
           set -euo pipefail
           command -v docker >/dev/null || { echo "docker unavailable; skipping seed"; exit 0; }
+          gocache=$(go env GOCACHE)
+          gomodcache=$(go env GOMODCACHE)
+          mkdir -p "${gocache}" "${gomodcache}"
+          # Persistent runners arrive warm: skip the pull entirely.
+          if [ -n "$(ls -A "${gocache}")" ]; then
+            echo "Go build cache already populated; skipping seed"
+            exit 0
+          fi
+          # The image plus the extracted caches peak around ~26GB; on a
+          # disk-constrained runner a cold build (today's behavior) is
+          # strictly safer than an ENOSPC mid-job.
+          avail_kb=$(df -Pk "${HOME}" | awk 'NR==2 {print $4}')
+          if [ "${avail_kb}" -lt 31457280 ]; then
+            echo "only $((avail_kb / 1024 / 1024))GB free; skipping cache seed"
+            exit 0
+          fi
           ACR_IMAGE="registry.cn-shanghai.aliyuncs.com/matrixorigin/matrixone:ci-builder"
           HUB_IMAGE="matrixorigin/matrixone:ci-builder"
           # ANONYMOUS pulls on purpose: this job later executes PR-controlled
@@ -188,20 +204,34 @@ jobs:
           elif timeout 300 docker pull "${second}"; then
             image="${second}"
           fi
-          [ -n "${image}" ] || { echo "ci-builder image unreachable; skipping seed"; exit 0; }
+          if [ -z "${image}" ]; then
+            echo "ci-builder image unreachable; skipping seed"
+            docker system prune -f >/dev/null 2>&1 || true
+            exit 0
+          fi
           ctr=$(docker create "${image}")
-          trap 'docker rm -f "${ctr}" >/dev/null 2>&1' EXIT
-          gocache=$(go env GOCACHE)
-          gomodcache=$(go env GOMODCACHE)
-          mkdir -p "${gocache}" "${gomodcache}"
-          if [ -z "$(ls -A "${gocache}")" ]; then
-            docker cp "${ctr}:/root/.cache/go-build/." "${gocache}/"
-          fi
+          gocache_stage="${gocache}.seed-stage"
+          gomodcache_stage="${gomodcache}.seed-stage"
+          trap 'docker rm -f "${ctr}" >/dev/null 2>&1; rm -rf "${gocache_stage}" "${gomodcache_stage}"' EXIT
+          # Surface the nightly warm health recorded by the builder image
+          # (absent on images that predate it).
+          docker cp "${ctr}:/mo-prebuilt/warm-status" - 2>/dev/null | tar -xO 2>/dev/null || true
+          # Extract into same-filesystem staging dirs and rename into place
+          # only when complete: a mid-stream failure must never leave a
+          # half-populated cache that this or a later run mistakes for warm.
+          rm -rf "${gocache_stage}" "${gomodcache_stage}"
+          mkdir -p "${gocache_stage}" "${gomodcache_stage}"
+          docker cp "${ctr}:/root/.cache/go-build/." "${gocache_stage}/"
+          # tar stream instead of a plain copy: the module cache may carry
+          # read-only directories, which docker cp cannot populate.
+          docker cp "${ctr}:/go/pkg/mod" - | tar -x --no-same-permissions --strip-components=1 -C "${gomodcache_stage}"
+          rmdir "${gocache}" && mv "${gocache_stage}" "${gocache}"
           if [ -z "$(ls -A "${gomodcache}")" ]; then
-            # tar stream instead of a plain copy: the module cache may carry
-            # read-only directories, which docker cp cannot populate.
-            docker cp "${ctr}:/go/pkg/mod" - | tar -x --no-same-permissions --strip-components=1 -C "${gomodcache}"
+            rmdir "${gomodcache}" && mv "${gomodcache_stage}" "${gomodcache}"
           fi
+          # Free the image before the job's real work needs the disk.
+          docker rm -f "${ctr}" >/dev/null 2>&1 || true
+          docker rmi "${image}" >/dev/null 2>&1 || true
           # Host jobs deliberately seed Go caches ONLY: the Go build cache
           # is content-addressed and always correctness-safe, while prebuilt
           # native libraries would need a producer/consumer toolchain-ABI

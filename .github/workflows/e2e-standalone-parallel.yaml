@@ -286,22 +286,36 @@ jobs:
         run: |
           cd "$GITHUB_WORKSPACE/head"
           prebuilt_tar="${RUNNER_TEMP}/mo-prebuilt/mo-build.tar.gz"
+          stage="${RUNNER_TEMP}/mo-prebuilt/stage"
           use_prebuilt=0
+          # Every check is guarded: a missing, truncated, mismatched, or
+          # non-runnable artifact falls through to the from-source build.
+          # The tar extracts once into a staging dir; the loader smoke test
+          # runs there (rpath $ORIGIN/lib resolves against the staged lib/)
+          # before anything touches the checkout.
           if [ -s "${prebuilt_tar}" ]; then
-            tar -xzf "${prebuilt_tar}" -C "${RUNNER_TEMP}/mo-prebuilt" BUILD_INFO
-            prebuilt_sha=$(sed -n 's/^head_sha=//p' "${RUNNER_TEMP}/mo-prebuilt/BUILD_INFO")
-            prebuilt_opt=$(sed -n 's/^gobuild_opt=//p' "${RUNNER_TEMP}/mo-prebuilt/BUILD_INFO")
-            if [ "${prebuilt_sha}" = '${{ github.event.pull_request.head.sha }}' ] \
-              && [ "${prebuilt_opt}" = '-cover' ]; then
-              use_prebuilt=1
+            rm -rf "${stage}" && mkdir -p "${stage}"
+            if tar -xzf "${prebuilt_tar}" -C "${stage}"; then
+              prebuilt_sha=$(sed -n 's/^head_sha=//p' "${stage}/BUILD_INFO" 2>/dev/null || true)
+              prebuilt_opt=$(sed -n 's/^gobuild_opt=//p' "${stage}/BUILD_INFO" 2>/dev/null || true)
+              if [ "${prebuilt_sha}" = '${{ github.event.pull_request.head.sha }}' ] \
+                && [ "${prebuilt_opt}" = '-cover' ] \
+                && chmod +x "${stage}/mo-service" \
+                && env -u LD_LIBRARY_PATH GOCOVERDIR="$(mktemp -d)" "${stage}/mo-service" -h >/dev/null 2>&1; then
+                use_prebuilt=1
+              else
+                echo "::warning::shared build unusable (sha=${prebuilt_sha:-?}, opt=${prebuilt_opt:-?}); building from source"
+              fi
             else
-              echo "::warning::shared build mismatch (sha=${prebuilt_sha}, opt=${prebuilt_opt}); building from source"
+              echo "::warning::shared build artifact failed to extract; building from source"
             fi
           fi
           if [ "${use_prebuilt}" = "1" ]; then
             echo "Using shared prebuilt mo-service (${prebuilt_sha})"
-            tar -xzf "${prebuilt_tar}" -C .
-            chmod +x mo-service
+            rm -rf lib dict
+            mv "${stage}/mo-service" ./mo-service
+            mv "${stage}/lib" ./lib
+            mv "${stage}/dict" ./dict
           else
             make clean && make GOBUILD_OPT=-cover build
           fi
