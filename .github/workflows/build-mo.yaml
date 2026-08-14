@@ -1,0 +1,193 @@
+# Shared MatrixOne build for PR CI.
+#
+# Builds the coverage-instrumented mo-service once per run and publishes it as
+# a run-scoped artifact. The BVT workflows (e2e-standalone-parallel,
+# e2e-compose-parallel) accept the artifact name via their build_artifact
+# input and skip their own 10-minute builds; when the input is empty or the
+# artifact is unusable they fall back to building from source, so this
+# workflow can land before or after the callers are wired up.
+name: MatrixOne Shared Build
+
+on:
+  workflow_call:
+    inputs:
+      gobuild_opt:
+        description: "GOBUILD_OPT passed to make build (consumers expect -cover)"
+        required: false
+        type: string
+        default: "-cover"
+    outputs:
+      artifact_name:
+        description: "Name of the uploaded build artifact"
+        value: ${{ jobs.build-linux-amd64.outputs.artifact_name }}
+
+# This workflow compiles the untrusted PR head: cap the job token to
+# read-only and accept no caller secrets at all.
+permissions:
+  contents: read
+
+jobs:
+  build-linux-amd64:
+    # Must stay on the same runner pool as the BVT consumers so the binary
+    # links against the same glibc the test runners (and the ubuntu:22.04
+    # runtime image) provide.
+    #
+    # Trust contract: this job checks out and COMPILES the untrusted PR head,
+    # so it must never hold credentials the PR code could reach. No
+    # environment, no registry logins (the ci-builder pulls below are
+    # anonymous), and the checkout does not persist its token.
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
+    name: Build MatrixOne (shared)
+    timeout-minutes: 40
+    outputs:
+      artifact_name: ${{ steps.package.outputs.artifact_name }}
+    steps:
+      - name: checkout head
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+          fetch-depth: "3"
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      # The nightly ci-builder image (matrixorigin/CI image-build.yaml,
+      # ci-builder job; Dockerfile at optools/images/Dockerfile.ci-builder)
+      # carries prebuilt PR-invariant inputs: Go module cache, Go build cache
+      # from a full -cover build of the default branch, and the compiled C
+      # thirdparties. Building inside it recompiles only what the PR changed;
+      # go build incrementally downloads modules newer than the baked cache,
+      # so a stale image only costs speed. Pulls are ANONYMOUS on purpose:
+      # this job compiles untrusted PR code, so no registry credential may
+      # ever touch this runner. Both pulls are time-bounded so a registry
+      # outage cannot make the optimized path slower than a cold build
+      # (layers are content-addressed, so a timed-out ACR attempt still
+      # counts toward the Docker Hub attempt of the same image).
+      - name: Pull CI builder image
+        id: builder
+        run: |
+          set +e
+          ACR_IMAGE="registry.cn-shanghai.aliyuncs.com/matrixorigin/matrixone:ci-builder"
+          HUB_IMAGE="matrixorigin/matrixone:ci-builder"
+          # Route by runner locality: GitHub-hosted runners reach Docker Hub
+          # fast and the Shanghai ACR slowly; the self-hosted China pools are
+          # the reverse. Each attempt is time-bounded, and layers are
+          # content-addressed so a timed-out first attempt still counts
+          # toward the second attempt of the same image.
+          if [ "${RUNNER_ENVIRONMENT:-}" = "github-hosted" ]; then
+            first="${HUB_IMAGE}"; second="${ACR_IMAGE}"
+          else
+            first="${ACR_IMAGE}"; second="${HUB_IMAGE}"
+          fi
+          image=""
+          if timeout 300 docker pull "${first}"; then
+            image="${first}"
+          elif timeout 300 docker pull "${second}"; then
+            image="${second}"
+          fi
+          if [ -z "${image}" ]; then
+            echo "::warning::ci-builder image unavailable; building from source on the runner"
+            # Reclaim any partially pulled layers so they cannot starve the
+            # cold build of disk.
+            docker system prune -f >/dev/null 2>&1 || true
+          fi
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+
+      # Best-effort cached build: any failure here (stale image, toolchain
+      # skew, broken cache) falls through to the from-source build below, so
+      # cache/infrastructure problems never fail this job — only a genuine
+      # compile failure does, which correctly blocks the BVT consumers once.
+      - name: Build MatrixOne (cached)
+        id: cached
+        if: ${{ steps.builder.outputs.image != '' }}
+        continue-on-error: true
+        run: |
+          # The Actions default shell runs with errexit; clear it so the
+          # docker run status is captured and ownership repair always runs.
+          set -u +e -o pipefail
+          cd "$GITHUB_WORKSPACE"
+          # The mount path must match the ci-builder warm build's WORKDIR:
+          # cgo compile-cache entries hash the -I include paths. The prebuilt
+          # thirdparties are restored only on an exact fingerprint match, so
+          # PRs that change native inputs (or branches whose native tree
+          # diverges from the nightly image) rebuild them from source.
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE":/go/src/github.com/matrixorigin/matrixone \
+            -w /go/src/github.com/matrixorigin/matrixone \
+            -e MO_GOBUILD_OPT='${{ inputs.gobuild_opt }}' \
+            -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+            '${{ steps.builder.outputs.image }}' \
+            bash -c '
+              set -euo pipefail
+              # Return workspace ownership to the runner user no matter how
+              # this script exits; the host-side chown is only a backup and
+              # may lack passwordless sudo on self-hosted runners.
+              trap "chown -R \"${HOST_UID}:${HOST_GID}\" /go/src/github.com/matrixorigin/matrixone >/dev/null 2>&1 || true" EXIT
+              git config --global --add safe.directory /go/src/github.com/matrixorigin/matrixone
+              expected=$(printf "schema=1\nos=%s\narch=%s\nthirdparties_tree=%s" \
+                "$(uname -s)" "$(uname -m)" "$(git rev-parse HEAD:thirdparties)")
+              if [ "${expected}" = "$(cat /mo-prebuilt/thirdparties.fingerprint 2>/dev/null)" ]; then
+                rm -rf thirdparties/install
+                cp -r /mo-prebuilt/thirdparties/install thirdparties/install
+              else
+                echo "prebuilt thirdparties fingerprint mismatch; building native deps from source"
+                rm -rf thirdparties/install
+              fi
+              make build GOBUILD_OPT="${MO_GOBUILD_OPT}"'
+          status=$?
+          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" || true
+          if [ "${status}" -ne 0 ]; then
+            exit "${status}"
+          fi
+          # Loader smoke test: a broken cached artifact fails here so the
+          # from-source fallback below repairs it. A coverage-instrumented
+          # binary needs a writable GOCOVERDIR even for -h.
+          env -u LD_LIBRARY_PATH GOCOVERDIR="$(mktemp -d)" ./mo-service -h >/dev/null
+
+      - name: Set up Go And Java
+        if: ${{ steps.cached.outcome != 'success' }}
+        uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          go-version-file: "${{ github.workspace }}/go.mod"
+
+      - name: Build MatrixOne (from source)
+        if: ${{ steps.cached.outcome != 'success' }}
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          # make clean also clears any partial cached-build outputs.
+          make clean && make GOBUILD_OPT='${{ inputs.gobuild_opt }}' build
+
+      - name: Package build artifact
+        id: package
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          git rev-parse --short HEAD
+          {
+            echo 'head_sha=${{ github.event.pull_request.head.sha }}'
+            echo 'gobuild_opt=${{ inputs.gobuild_opt }}'
+          } > BUILD_INFO
+          # Consolidate every runtime DSO under lib/, the binary'"'"'s
+          # $ORIGIN/lib rpath: make build already put the thirdparties
+          # libraries there; add MatrixOne'"'"'s own cgo library so consumers
+          # need no extra layout knowledge.
+          cp cgo/*.so lib/
+          # Final artifact smoke test: the staged tree must run with no help
+          # from the environment before it is published.
+          env -u LD_LIBRARY_PATH GOCOVERDIR="$(mktemp -d)" ./mo-service -h >/dev/null
+          # The tar preserves the self-contained runtime tree that make build
+          # produces at the repo root: mo-service with rpath $ORIGIN/lib, all
+          # runtime shared libraries in lib/, and the jieba dict/.
+          pack_dir="${RUNNER_TEMP}/mo-build"
+          mkdir -p "${pack_dir}"
+          tar --exclude='*.a' -czf "${pack_dir}/mo-build.tar.gz" \
+            BUILD_INFO mo-service lib dict
+          ls -lh "${pack_dir}/mo-build.tar.gz"
+          echo "artifact_name=mo-shared-build-attempt-${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: mo-shared-build-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mo-build/mo-build.tar.gz
+          if-no-files-found: error
+          retention-days: 3

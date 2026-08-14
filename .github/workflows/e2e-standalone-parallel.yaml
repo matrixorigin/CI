@@ -13,6 +13,11 @@ on:
         required: false
         type: string
         default: ""
+      build_artifact:
+        description: "Run-scoped artifact holding a shared -cover mo-service build; empty builds from source"
+        required: false
+        type: string
+        default: ""
     secrets:
       TOKEN_ACTION:
         description: "Token for checkout (e.g. pull from fork/private)"
@@ -279,6 +284,14 @@ jobs:
       - name: Print run attempt
         run: echo "run attempt is ${{ github.run_attempt }}"
 
+      - name: Download shared MatrixOne build
+        if: ${{ inputs.build_artifact != '' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ inputs.build_artifact }}
+          path: ${{ runner.temp }}/mo-prebuilt
+
       - name: Print Disk Usage Before Container Start
         if: ${{ always() }}
         run: |
@@ -298,7 +311,38 @@ jobs:
           cat ./etc/launch-tae-compose/config/tn.toml
           sed -i 's|:/test\b|:'"$GITHUB_WORKSPACE"'/test|g' ./etc/launch-tae-compose/compose.yaml
           mkdir -p "$GITHUB_WORKSPACE/coverage" "$GITHUB_WORKSPACE/docker-compose-log"
-          docker build --build-arg GOBUILD_OPT=-cover -t matrixorigin/matrixone:latest . -f ./optools/images/Dockerfile
+
+          # Assemble the runtime image from the shared -cover build when the
+          # run provides one; otherwise (or on any mismatch/failure) fall back
+          # to the full in-docker build.
+          image_built=0
+          prebuilt_tar="${RUNNER_TEMP}/mo-prebuilt/mo-build.tar.gz"
+          if [ -s "${prebuilt_tar}" ] && [ -f ./optools/images/Dockerfile.prebuilt ]; then
+            ctx="${RUNNER_TEMP}/mo-image-ctx"
+            rm -rf "${ctx}" && mkdir -p "${ctx}"
+            if ! tar -xzf "${prebuilt_tar}" -C "${ctx}"; then
+              echo "::warning::shared build artifact failed to extract; falling back to full docker build"
+              rm -rf "${ctx}" && mkdir -p "${ctx}"
+            fi
+            prebuilt_sha=$(sed -n 's/^head_sha=//p' "${ctx}/BUILD_INFO" 2>/dev/null || true)
+            prebuilt_opt=$(sed -n 's/^gobuild_opt=//p' "${ctx}/BUILD_INFO" 2>/dev/null || true)
+            if [ "${prebuilt_sha}" = '${{ github.event.pull_request.head.sha }}' ] \
+              && [ "${prebuilt_opt}" = '-cover' ]; then
+              cp -r ./etc "${ctx}/etc"
+              if docker build -t matrixorigin/matrixone:latest \
+                -f ./optools/images/Dockerfile.prebuilt "${ctx}"; then
+                image_built=1
+                echo "Using shared prebuilt mo-service (${prebuilt_sha})"
+              else
+                echo "::warning::prebuilt image assembly failed; falling back to full docker build"
+              fi
+            else
+              echo "::warning::shared build mismatch (sha=${prebuilt_sha}, opt=${prebuilt_opt}); falling back to full docker build"
+            fi
+          fi
+          if [ "${image_built}" != "1" ]; then
+            docker build --build-arg GOBUILD_OPT=-cover -t matrixorigin/matrixone:latest . -f ./optools/images/Dockerfile
+          fi
           docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn up -d
           i=1
           while [ $(mysql -h 127.0.0.1 -P 6001 -u dump -p111 --execute 'create database if not exists compose_test;use compose_test; create table if not exists compose_test_table(col1 int auto_increment primary key);show tables;' 2>&1 | tee /dev/stderr | grep 'compose_test_table' | wc -l) -lt 1 ]; do
