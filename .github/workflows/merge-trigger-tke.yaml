@@ -195,7 +195,7 @@ jobs:
           cache-to: type=registry,ref=${{ steps.prep.outputs.docker_image }}:cache-${{ github.base_ref }},mode=max
           platform: linux/amd64
           build-args: |
-            GOPROXY=http://goproxy.goproxy.svc.cluster.local|https://goproxy.cn|direct
+            GOPROXY=http://goproxy.goproxy.svc.cluster.local
   setup_mo_test_env:
     if: ${{ always() && !cancelled() && needs.docker_image_build.result == 'success' }}
     needs: docker_image_build
