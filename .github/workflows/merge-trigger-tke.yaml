@@ -166,6 +166,8 @@ jobs:
           cache-from: type=registry,ref=${{ steps.prep.outputs.docker_image }}:cache-${{ github.base_ref }}
           cache-to: type=registry,ref=${{ steps.prep.outputs.docker_image }}:cache-${{ github.base_ref }},mode=max
           platform: linux/amd64
+          build-args: |
+            RUNTIME_IMAGE=ccr.ccs.tencentyun.com/mo-infra/ubuntu:22.04
 
       # Source fallback. It keeps the existing build path available when the
       # Basic Image cannot be pulled or the cached build cannot start. A
