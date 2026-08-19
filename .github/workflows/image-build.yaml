@@ -217,7 +217,7 @@ jobs:
     # default branch, and skipped gracefully on branches that do not ship
     # the Dockerfile yet.
     name: Build CI builder image
-    if: ${{ github.event_name != 'release' }}
+    if: ${{ github.event_name != 'release' && github.ref == 'refs/heads/main' }}
     # Best-effort: a builder-image problem must not turn the nightly product
     # image pipeline red; consumers fall back to cold builds until the next
     # successful publish.
