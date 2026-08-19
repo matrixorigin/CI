@@ -176,6 +176,9 @@ jobs:
         if: ${{ steps.cached.outcome != 'success' }}
         run: |
           cd "$GITHUB_WORKSPACE/matrixone"
+          # The fallback must quote GOPROXY because the resilient `|` proxy
+          # chain is interpreted as a shell pipeline by an old Dockerfile.
+          sed -i 's#RUN go env -w GOPROXY=${GOPROXY}#RUN go env -w GOPROXY="${GOPROXY}"#' optools/images/Dockerfile
           sed -i 's#^RUN apt-get update#RUN sed -i "s?http.*ubuntu\.com?http://mirrors\.tuna\.tsinghua\.edu\.cn?g" /etc/apt/sources.list  \&\& apt-get clean all \&\& apt-get update#g' optools/images/Dockerfile
           sed -i 's#FROM golang:1.21.5-bookworm#FROM ccr.ccs.tencentyun.com/cicd-runner/golang:1.21.5-bookworm#g' optools/images/Dockerfile
           sed -i 's#FROM ubuntu:22.04#FROM ccr.ccs.tencentyun.com/mo-infra/ubuntu:22.04#g' optools/images/Dockerfile
@@ -197,7 +200,7 @@ jobs:
           cache-to: type=registry,ref=${{ steps.prep.outputs.docker_image }}:cache-${{ github.base_ref }},mode=max
           platform: linux/amd64
           build-args: |
-            GOPROXY=http://goproxy.goproxy.svc.cluster.local
+            GOPROXY=http://goproxy.goproxy.svc.cluster.local|https://goproxy.cn|direct
   setup_mo_test_env:
     if: ${{ always() && !cancelled() && needs.docker_image_build.result == 'success' }}
     needs: docker_image_build
