@@ -107,7 +107,7 @@ jobs:
         run: |
           set -u +e -o pipefail
           cd "$GITHUB_WORKSPACE"
-          docker run --rm \
+          docker run --rm -i \
             -v "$GITHUB_WORKSPACE/matrixone":/go/src/github.com/matrixorigin/matrixone \
             -w /go/src/github.com/matrixorigin/matrixone \
             -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
@@ -129,8 +129,15 @@ jobs:
           legacy=$(printf "schema=1\nos=%s\narch=%s\nthirdparties_tree=%s" \
             "$(uname -s)" "$(uname -m)" "$(git rev-parse HEAD:thirdparties)")
           printf '%s\n' "${legacy}" > /tmp/legacy-thirdparties.fingerprint
-          # Accept the old schema during rollout so an existing builder image
-          # remains useful until the first schema-2 image is published.
+          echo "Computed CI builder fingerprint:"
+          cat /tmp/expected-thirdparties.fingerprint
+          if [ -r /mo-prebuilt/thirdparties.fingerprint ]; then
+            echo "Cached CI builder fingerprint:"
+            cat /mo-prebuilt/thirdparties.fingerprint
+          fi
+          # Accept only the pre-helper schema-1 metadata during rollout.  The
+          # schema-3 contract covers the complete native input tree, so older
+          # partial fingerprints must rebuild rather than risk stale outputs.
           if cmp -s /tmp/expected-thirdparties.fingerprint /mo-prebuilt/thirdparties.fingerprint 2>/dev/null \
             || cmp -s /tmp/legacy-thirdparties.fingerprint /mo-prebuilt/thirdparties.fingerprint 2>/dev/null; then
             echo "CI builder native fingerprint matched"
@@ -147,6 +154,10 @@ jobs:
           if [ "${status}" -ne 0 ]; then
             exit "${status}"
           fi
+          # The cached build completed successfully.  Fail closed while
+          # staging its runtime artifacts so a missing library cannot be
+          # published as a successful image.
+          set -e
 
           cd "$GITHUB_WORKSPACE/matrixone"
           env -u LD_LIBRARY_PATH GOCOVERDIR="$(mktemp -d)" ./mo-service -h >/dev/null

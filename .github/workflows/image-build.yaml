@@ -214,10 +214,10 @@ jobs:
     # arm64 SCA job is served by its own actions/cache pipeline (see
     # matrixorigin/matrixone sca-go-module-cache.yaml), so only amd64 is
     # published. Skipped for release tags so the caches always track the
-    # default branch, and skipped gracefully on branches that do not ship
-    # the Dockerfile yet.
+    # default branch. Non-main refs run only the cheap presence gate and
+    # report why publication is skipped.
     name: Build CI builder image
-    if: ${{ github.event_name != 'release' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name != 'release' }}
     # Best-effort: a builder-image problem must not turn the nightly product
     # image pipeline red; consumers fall back to cold builds until the next
     # successful publish.
@@ -236,7 +236,10 @@ jobs:
       - name: Check Dockerfile presence
         id: gate
         run: |
-          if [ -f optools/images/Dockerfile.ci-builder ]; then
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::notice::ci-builder publication is restricted to refs/heads/main; ref=${GITHUB_REF}; skipping"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          elif [ -f optools/images/Dockerfile.ci-builder ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "::notice::optools/images/Dockerfile.ci-builder not present; skipping builder image"
