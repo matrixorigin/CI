@@ -126,7 +126,13 @@ jobs:
               "$(uname -s)" "$(uname -m)" "$(git rev-parse HEAD:thirdparties)")
           fi
           printf '%s\n' "${expected}" > /tmp/expected-thirdparties.fingerprint
-          if cmp -s /tmp/expected-thirdparties.fingerprint /mo-prebuilt/thirdparties.fingerprint 2>/dev/null; then
+          legacy=$(printf "schema=1\nos=%s\narch=%s\nthirdparties_tree=%s" \
+            "$(uname -s)" "$(uname -m)" "$(git rev-parse HEAD:thirdparties)")
+          printf '%s\n' "${legacy}" > /tmp/legacy-thirdparties.fingerprint
+          # Accept the old schema during rollout so an existing builder image
+          # remains useful until the first schema-2 image is published.
+          if cmp -s /tmp/expected-thirdparties.fingerprint /mo-prebuilt/thirdparties.fingerprint 2>/dev/null \
+            || cmp -s /tmp/legacy-thirdparties.fingerprint /mo-prebuilt/thirdparties.fingerprint 2>/dev/null; then
             echo "CI builder native fingerprint matched"
             rm -rf thirdparties/install
             cp -a /mo-prebuilt/thirdparties/install thirdparties/install

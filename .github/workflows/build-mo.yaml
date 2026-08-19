@@ -132,7 +132,14 @@ jobs:
                   "$(uname -s)" "$(uname -m)" "$(git rev-parse HEAD:thirdparties)")
               fi
               printf '%s\n' "${expected}" > /tmp/expected-thirdparties.fingerprint
-              if cmp -s /tmp/expected-thirdparties.fingerprint /mo-prebuilt/thirdparties.fingerprint 2>/dev/null; then
+              legacy=$(printf "schema=1\nos=%s\narch=%s\nthirdparties_tree=%s" \
+                "$(uname -s)" "$(uname -m)" "$(git rev-parse HEAD:thirdparties)")
+              printf '%s\n' "${legacy}" > /tmp/legacy-thirdparties.fingerprint
+              # Accept the old schema during rollout so the first MatrixOne
+              # commit with the new helper can still use the last builder
+              # image; new images always use the exact schema-2 contract.
+              if cmp -s /tmp/expected-thirdparties.fingerprint /mo-prebuilt/thirdparties.fingerprint 2>/dev/null \
+                || cmp -s /tmp/legacy-thirdparties.fingerprint /mo-prebuilt/thirdparties.fingerprint 2>/dev/null; then
                 rm -rf thirdparties/install
                 cp -r /mo-prebuilt/thirdparties/install thirdparties/install
               else
