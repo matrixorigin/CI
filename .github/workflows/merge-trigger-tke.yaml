@@ -84,8 +84,20 @@ jobs:
           BASIC_IMAGE: ccr.ccs.tencentyun.com/matrixone-dev/matrixone:ci-builder-amd64
         run: |
           set +e
-          if timeout 300 docker pull "${BASIC_IMAGE}"; then
-            digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "${BASIC_IMAGE}")
+          PREBUILT_DOCKERFILE="$GITHUB_WORKSPACE/matrixone/optools/images/Dockerfile.prebuilt"
+          if [ ! -f "${PREBUILT_DOCKERFILE}" ]; then
+            echo "::notice::Dockerfile.prebuilt is not present in this checkout; using the source Dockerfile fallback"
+            echo "ref=" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # TCR is an optional optimization mirror. Keep a registry outage
+          # from adding minutes to every post-merge regression before the
+          # source Dockerfile fallback takes over.
+          if timeout 90 docker pull "${BASIC_IMAGE}"; then
+            repository="${BASIC_IMAGE%%:*}"
+            digest=$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "${BASIC_IMAGE}" |
+              awk -v prefix="${repository}@" 'index($0, prefix) == 1 { print; exit }')
             if [ -n "${digest}" ]; then
               echo "ref=${digest}" >> "$GITHUB_OUTPUT"
               echo "tag=${BASIC_IMAGE}" >> "$GITHUB_OUTPUT"
@@ -180,8 +192,11 @@ jobs:
           tags: ${{ steps.prep.outputs.tags }}
           file-path: ${{ github.workspace }}/matrixone/optools/images/Dockerfile.prebuilt
           context: ${{ github.workspace }}/mo-runtime
-          cache-from: type=registry,ref=${{ steps.prep.outputs.docker_image }}:cache-${{ github.base_ref }}
-          cache-to: type=registry,ref=${{ steps.prep.outputs.docker_image }}:cache-${{ github.base_ref }},mode=max
+          # Keep the tiny prebuilt image cache separate from the expensive
+          # source-build cache. Otherwise a successful cached build erases the
+          # source layers needed by the fallback path.
+          cache-from: type=registry,ref=${{ steps.prep.outputs.docker_image }}:cache-prebuilt-${{ github.base_ref }}
+          cache-to: type=registry,ref=${{ steps.prep.outputs.docker_image }}:cache-prebuilt-${{ github.base_ref }},mode=max
           platform: linux/amd64
           build-args: |
             RUNTIME_IMAGE=ccr.ccs.tencentyun.com/mo-infra/ubuntu:22.04
@@ -213,8 +228,8 @@ jobs:
           tags: ${{ steps.prep.outputs.tags }}
           file-path: ${{ github.workspace }}/matrixone/optools/images/Dockerfile
           context: ${{ github.workspace }}/matrixone
-          cache-from: type=registry,ref=${{ steps.prep.outputs.docker_image }}:cache-${{ github.base_ref }}
-          cache-to: type=registry,ref=${{ steps.prep.outputs.docker_image }}:cache-${{ github.base_ref }},mode=max
+          cache-from: type=registry,ref=${{ steps.prep.outputs.docker_image }}:cache-source-${{ github.base_ref }}
+          cache-to: type=registry,ref=${{ steps.prep.outputs.docker_image }}:cache-source-${{ github.base_ref }},mode=max
           platform: linux/amd64
           build-args: |
             GOPROXY=http://goproxy.goproxy.svc.cluster.local|https://goproxy.cn|direct
