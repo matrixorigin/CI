@@ -123,9 +123,29 @@ jobs:
               # may lack passwordless sudo on self-hosted runners.
               trap "chown -R \"${HOST_UID}:${HOST_GID}\" /go/src/github.com/matrixorigin/matrixone >/dev/null 2>&1 || true" EXIT
               git config --global --add safe.directory /go/src/github.com/matrixorigin/matrixone
-              expected=$(printf "schema=1\nos=%s\narch=%s\nthirdparties_tree=%s" \
+              if [ -x ./optools/images/ci-builder-fingerprint.sh ]; then
+                expected=$(./optools/images/ci-builder-fingerprint.sh)
+              else
+                # Keep CI/MatrixOne merge order safe: older MatrixOne
+                # checkouts do not have the shared fingerprint helper yet.
+                expected=$(printf "schema=1\nos=%s\narch=%s\nthirdparties_tree=%s" \
+                  "$(uname -s)" "$(uname -m)" "$(git rev-parse HEAD:thirdparties)")
+              fi
+              printf '%s\n' "${expected}" > /tmp/expected-thirdparties.fingerprint
+              legacy=$(printf "schema=1\nos=%s\narch=%s\nthirdparties_tree=%s" \
                 "$(uname -s)" "$(uname -m)" "$(git rev-parse HEAD:thirdparties)")
-              if [ "${expected}" = "$(cat /mo-prebuilt/thirdparties.fingerprint 2>/dev/null)" ]; then
+              printf '%s\n' "${legacy}" > /tmp/legacy-thirdparties.fingerprint
+              echo "Computed CI builder fingerprint:"
+              cat /tmp/expected-thirdparties.fingerprint
+              if [ -r /mo-prebuilt/thirdparties.fingerprint ]; then
+                echo "Cached CI builder fingerprint:"
+                cat /mo-prebuilt/thirdparties.fingerprint
+              fi
+              # Accept only the pre-helper schema-1 metadata during rollout;
+              # the schema-3 contract covers the complete native input tree,
+              # while older partial fingerprints must rebuild safely.
+              if cmp -s /tmp/expected-thirdparties.fingerprint /mo-prebuilt/thirdparties.fingerprint 2>/dev/null \
+                || cmp -s /tmp/legacy-thirdparties.fingerprint /mo-prebuilt/thirdparties.fingerprint 2>/dev/null; then
                 rm -rf thirdparties/install
                 cp -r /mo-prebuilt/thirdparties/install thirdparties/install
               else
