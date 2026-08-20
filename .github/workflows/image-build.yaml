@@ -277,6 +277,7 @@ jobs:
           if [ -n "${TCR_USERNAME}" ] && [ -n "${TCR_TOKEN}" ]; then
             echo "tcr_enabled=true" >> "$GITHUB_OUTPUT"
           else
+            echo "::warning::TCR credentials are not configured; the TKE ci-builder mirror will remain unavailable and consumers will use the source fallback"
             echo "tcr_enabled=false" >> "$GITHUB_OUTPUT"
           fi
 
