@@ -68,8 +68,16 @@ run_phase() {
   else
     status=$?
   fi
-  cat "${report}" >> "${COVERAGE_REPORT}"
-  return "${status}"
+  local append_status
+  if cat "${report}" >> "${COVERAGE_REPORT}"; then
+    append_status=0
+  else
+    append_status=$?
+  fi
+  if (( status != 0 )); then
+    return "${status}"
+  fi
+  return "${append_status}"
 }
 
 rest_profile="${phase_dir}/rest.out"

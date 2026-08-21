@@ -259,7 +259,8 @@ jobs:
           coverage_report="${RUNNER_TEMP}/ut-coverage-report.json"
           rm -f "${coverage_profile}" "${coverage_report}"
 
-          mapfile -t test_packages < <(go list -mod=readonly ./... | grep -v 'driver\|engine/aoe\|engine/memEngine\|pkg/catalog')
+          test_scope=$(go list -mod=readonly ./... | grep -v 'driver\|engine/aoe\|engine/memEngine\|pkg/catalog')
+          mapfile -t test_packages <<<"${test_scope}"
           test -n "${test_packages[*]}"
           cover_pkgs=$(printf '%s\n' "${test_packages[@]}" | paste -sd, -)
           test -n "${cover_pkgs}"

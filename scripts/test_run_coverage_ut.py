@@ -73,6 +73,13 @@ def _run(
         }
     )
     env.update(extra_env)
+    if "FAKE_CAT_FAIL_CODE" in extra_env:
+        fake_cat = bin_dir / "cat"
+        fake_cat.write_text(
+            "#!/usr/bin/env bash\n"
+            "exit \"${FAKE_CAT_FAIL_CODE}\"\n"
+        )
+        fake_cat.chmod(0o755)
     result = subprocess.run(
         ["bash", str(SCRIPT), *packages],
         cwd=tmp_path,
@@ -126,6 +133,36 @@ def test_rest_failure_skips_plan_and_keeps_diagnostic_without_final_profile(tmp_
     assert json.loads(report.read_text().splitlines()[0])["Action"] == "fail"
 
 
+def test_go_list_partial_output_failure_stops_workflow_package_discovery(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_go = bin_dir / "go"
+    fake_go.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' github.com/matrixorigin/matrixone/pkg/sql/plan\n"
+        "exit 42\n"
+    )
+    fake_go.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    snippet = """\
+set -euo pipefail
+test_scope=$(go list -mod=readonly ./... | grep -v 'driver\\|engine/aoe\\|engine/memEngine\\|pkg/catalog')
+mapfile -t test_packages <<<"${test_scope}"
+printf '%s\\n' "${test_packages[@]}"
+"""
+    result = subprocess.run(
+        ["bash", "-c", snippet],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 42
+    assert result.stdout == ""
+
+
 def test_plan_failure_keeps_both_reports_and_does_not_publish_stale_profile(tmp_path):
     profile = tmp_path / "out" / "coverage.out"
     profile.parent.mkdir()
@@ -141,6 +178,16 @@ def test_plan_failure_keeps_both_reports_and_does_not_publish_stale_profile(tmp_
     assert not profile.exists()
     actions = [json.loads(line)["Action"] for line in report.read_text().splitlines()]
     assert actions == ["pass", "fail"]
+
+
+def test_report_append_failure_is_returned_after_successful_go_test(tmp_path):
+    result, profile, _, _ = _run(
+        tmp_path,
+        ["github.com/matrixorigin/matrixone/pkg/sql/rest", HEAVY],
+        FAKE_CAT_FAIL_CODE="41",
+    )
+    assert result.returncode == 41
+    assert not profile.exists()
 
 
 def test_missing_heavy_package_is_rejected(tmp_path):

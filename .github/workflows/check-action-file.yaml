@@ -7,6 +7,7 @@ on:
       - 'release/*'
     paths:
       - '.github/workflows/*.yaml'
+      - 'scripts/**'
 
 permissions:
   contents: read
@@ -25,6 +26,17 @@ jobs:
         with:
           files: |
             .github/workflows/**.yaml
+            scripts/**
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install coverage test dependencies
+        run: python -m pip install --disable-pip-version-check --no-input pytest
+      - name: Check coverage shell syntax
+        run: bash -n scripts/*.sh
+      - name: Run coverage helper and parser tests
+        run: python -m pytest -q scripts/test_run_coverage_ut.py scripts/test_parse_coverage.py scripts/test_prepare_coverage_cgo.py
       - name: Validate workflows
         if: steps.check-for-changed-workflows.outputs.any_changed == 'true'
         uses: dsanders11/json-schema-validate-action@v2.0.0
