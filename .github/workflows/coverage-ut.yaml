@@ -155,7 +155,9 @@ jobs:
           token: ${{ secrets.TOKEN_ACTION }}
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
-          sparse-checkout: scripts/prepare_coverage_cgo.sh
+          sparse-checkout: |
+            scripts/prepare_coverage_cgo.sh
+            scripts/run_coverage_ut.sh
           sparse-checkout-cone-mode: false
           path: .ci-workflow
       # Best-effort: seed the Go build/module caches and the prebuilt C
@@ -257,8 +259,9 @@ jobs:
           coverage_report="${RUNNER_TEMP}/ut-coverage-report.json"
           rm -f "${coverage_profile}" "${coverage_report}"
 
-          test_scope=$(go list -mod=readonly ./... | grep -v 'driver\|engine/aoe\|engine/memEngine\|pkg/catalog')
-          cover_pkgs=$(printf '%s\n' "${test_scope}" | paste -sd, -)
+          mapfile -t test_packages < <(go list -mod=readonly ./... | grep -v 'driver\|engine/aoe\|engine/memEngine\|pkg/catalog')
+          test -n "${test_packages[*]}"
+          cover_pkgs=$(printf '%s\n' "${test_packages[@]}" | paste -sd, -)
           test -n "${cover_pkgs}"
 
           "$GITHUB_WORKSPACE/.ci-workflow/scripts/prepare_coverage_cgo.sh"
@@ -267,15 +270,17 @@ jobs:
           cgo_ldflags="-L${GITHUB_WORKSPACE}/cgo -lmo -L${thirdparties_install_dir}/lib -lusearch_c -Wl,-rpath,${thirdparties_install_dir}/lib -lm"
 
           # Keep the same all-package coverage scope and external storage
-          # coverage as main. Save the verbose JSON report as an artifact
-          # rather than flooding the Actions console; the next step prints a
-          # concise parsed failure summary when this command fails.
+          # coverage as main. The helper runs every package except the
+          # memory-heavy plan package at -p 6, then runs plan alone at -p 1.
+          # It writes a newline-delimited JSON report for each completed phase
+          # and atomically publishes one compact profile only after both pass.
           set +e
           CGO_CFLAGS="${cgo_cflags}" CGO_LDFLAGS="${cgo_ldflags}" \
-            go test -mod=readonly -json -short -v -tags matrixone_test -p 6 \
-            -covermode=set -coverprofile="${coverage_profile}" -coverpkg="${cover_pkgs}" \
-            ${test_scope} \
-            > "${coverage_report}" 2>&1
+            COVERAGE_PROFILE="${coverage_profile}" \
+            COVERAGE_REPORT="${coverage_report}" \
+            COVER_PKGS="${cover_pkgs}" \
+            "${GITHUB_WORKSPACE}/.ci-workflow/scripts/run_coverage_ut.sh" \
+            "${test_packages[@]}"
           test_status=$?
           set -e
           echo "test_status=${test_status}" >> "$GITHUB_OUTPUT"
@@ -283,32 +288,6 @@ jobs:
             exit "${test_status}"
           fi
           test -s "${coverage_profile}"
-          raw_coverage_bytes=$(wc -c < "${coverage_profile}")
-          # -coverpkg emits the same instrumented block once per tested
-          # package. Collapse those duplicate records before crossing the
-          # artifact boundary; the coverage gate only needs hit/not-hit
-          # semantics and parse_coverage.py applies the same max(hit) merge.
-          LC_ALL=C awk '
-            NR == 1 { next }
-            $1 ~ /pkg\/pb|pkg\/sql\/parsers\/goyacc|yaccpar/ { next }
-            NF >= 3 {
-              key = $1 " " $2
-              hit = ($3 + 0 > 0) ? 1 : 0
-              if (!(key in coverage) || hit > coverage[key]) {
-                coverage[key] = hit
-              }
-            }
-            END {
-              print "mode: set"
-              for (key in coverage) {
-                print key, coverage[key]
-              }
-            }
-          ' "${coverage_profile}" > "${coverage_profile}.compacted"
-          test "$(wc -l < "${coverage_profile}.compacted")" -gt 1
-          mv "${coverage_profile}.compacted" "${coverage_profile}"
-          compacted_coverage_bytes=$(wc -c < "${coverage_profile}")
-          echo "UT coverage profile compacted from ${raw_coverage_bytes} to ${compacted_coverage_bytes} bytes"
       - name: Summarize 30 slowest coverage UT tests
         if: ${{ always() && !cancelled() }}
         run: |
