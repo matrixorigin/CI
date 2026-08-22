@@ -264,7 +264,19 @@ jobs:
           "$GITHUB_WORKSPACE/.ci-workflow/scripts/prepare_coverage_cgo.sh"
           thirdparties_install_dir="$GITHUB_WORKSPACE/thirdparties/install"
           cgo_cflags="-I${GITHUB_WORKSPACE}/cgo -I${thirdparties_install_dir}/include"
-          cgo_ldflags="-L${GITHUB_WORKSPACE}/cgo -lmo -L${thirdparties_install_dir}/lib -lusearch_c -Wl,-rpath,${thirdparties_install_dir}/lib -lm"
+          if ! cgo_native_ldflags=$(GOWORK=off go list -mod=readonly \
+            -f '{{join .CgoLDFLAGS " "}}' ./cgo); then
+            echo "failed to resolve MatrixOne CGo native link dependencies" >&2
+            exit 1
+          fi
+          if [[ -z "${cgo_native_ldflags}" ]]; then
+            echo "MatrixOne's cgo package declared no native link dependencies" >&2
+            exit 1
+          fi
+          # Temporary go test executables run outside the checkout, so the
+          # loader needs an absolute path to the repo-local libmo. Keep libmo
+          # before its queried dependency closure for static archive ordering.
+          cgo_ldflags="-Wl,-rpath,${GITHUB_WORKSPACE}/cgo:${thirdparties_install_dir}/lib -L${thirdparties_install_dir}/lib -L${GITHUB_WORKSPACE}/cgo -lmo ${cgo_native_ldflags}"
 
           # Keep the same all-package coverage scope and external storage
           # coverage as main. Save the verbose JSON report as an artifact
