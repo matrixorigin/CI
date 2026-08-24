@@ -87,23 +87,35 @@ jobs:
               "https://api.github.com/repos/${pr_repo}/pulls/${pr_number}" -o diff.patch
           fi
       - name: Download test coverage artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           # A full rerun rotates the shared generation. Filter out artifacts
           # left by previous attempts while retaining successful producers
           # from an earlier attempt during "Re-run failed jobs".
           pattern: ${{ inputs.expected_bvt_generation != '' && format('*coverage*generation-{0}-*', inputs.expected_bvt_generation) || '*coverage*' }}
-          merge-multiple: true
-          path: ${{ github.workspace }}/coverage-artifacts
+          # Keep attempts isolated. Concurrent extraction into one directory
+          # makes same-name profiles overwrite each other nondeterministically.
+          merge-multiple: false
+          path: ${{ runner.temp }}/coverage-artifacts
+      - name: Select latest coverage producer attempts
+        env:
+          EXPECTED_BVT_GENERATION: ${{ inputs.expected_bvt_generation }}
+        run: |
+          set -euo pipefail
+          find "${RUNNER_TEMP}/coverage-artifacts" -type f -printf '%P %s bytes\n' | sort \
+            | tee "${RUNNER_TEMP}/coverage-inputs.txt"
+          python3 "$GITHUB_WORKSPACE/CI/scripts/select_coverage_artifacts.py" \
+            --input "${RUNNER_TEMP}/coverage-artifacts" \
+            --output "${RUNNER_TEMP}/coverage-selected" \
+            --expected-generation "${EXPECTED_BVT_GENERATION}" \
+            --manifest "${RUNNER_TEMP}/coverage-selected-artifacts.json"
       - name: Merge profiles and check coverage rate
         id: merge_coverage
         run: |
           set -euo pipefail
-          artifact_dir="$GITHUB_WORKSPACE/coverage-artifacts"
-          processed_dir="$GITHUB_WORKSPACE/coverage-processed"
+          artifact_dir="${RUNNER_TEMP}/coverage-selected"
+          processed_dir="${RUNNER_TEMP}/coverage-processed"
           mkdir -p "${processed_dir}"
-          find "${artifact_dir}" -type f -printf '%P %s bytes\n' | sort \
-            | tee "${RUNNER_TEMP}/coverage-inputs.txt"
 
           mapfile -t ut_profiles < <(find "${artifact_dir}" -type f -name 'ut-coverage.out' | sort)
           mapfile -t bvt_profiles < <(find "${artifact_dir}" -type f -name 'bvt-*.out' | sort)
@@ -199,7 +211,11 @@ jobs:
           set -euo pipefail
           echo '### Coverage merge result' >> "$GITHUB_STEP_SUMMARY"
           echo "- Merge step: \`${{ steps.merge_coverage.outcome }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo '- Expected inputs: one UT profile and two BVT profiles.' >> "$GITHUB_STEP_SUMMARY"
+          if [ '${{ github.base_ref }}' = 'main' ]; then
+            echo '- Expected inputs: one UT profile and two BVT profiles.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '- Expected inputs: one UT profile and either zero or two BVT profiles for legacy branches.' >> "$GITHUB_STEP_SUMMARY"
+          fi
           summary="$GITHUB_WORKSPACE/coverage-summary.json"
           if [ -s "${summary}" ]; then
             overall=$(jq -r '.overall_coverage' "${summary}")
@@ -246,19 +262,31 @@ jobs:
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           fi
           echo '' >> "$GITHUB_STEP_SUMMARY"
-          echo '#### Downloaded profiles' >> "$GITHUB_STEP_SUMMARY"
+          echo '#### Downloaded coverage artifacts' >> "$GITHUB_STEP_SUMMARY"
           echo '' >> "$GITHUB_STEP_SUMMARY"
           echo '```text' >> "$GITHUB_STEP_SUMMARY"
           cat "${RUNNER_TEMP}/coverage-inputs.txt" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          if [ "${{ steps.merge_coverage.outcome }}" = 'success' ]; then
-            echo '- Result: `final-result-files` contains the changed-code profile, merged profile, summary, and PR coverage HTML.' >> "$GITHUB_STEP_SUMMARY"
+          if [ -s "${RUNNER_TEMP}/coverage-selected-artifacts.json" ]; then
+            echo '' >> "$GITHUB_STEP_SUMMARY"
+            echo '#### Selected producer attempts' >> "$GITHUB_STEP_SUMMARY"
+            echo '' >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            jq . "${RUNNER_TEMP}/coverage-selected-artifacts.json" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          merge_outcome='${{ steps.merge_coverage.outcome }}'
+          if [ "${merge_outcome}" = 'success' ]; then
+            echo '- Result prepared for publication as `final-result-files`: changed-code profile, merged profile, summary, and PR coverage HTML.' >> "$GITHUB_STEP_SUMMARY"
+          elif [ "${merge_outcome}" = 'failure' ]; then
+            echo '- Diagnostics artifact (best-effort): `coverage-merge-debug-attempt-${{ github.run_attempt }}` contains the input inventory and PR diff when publication succeeds; any merged outputs are prepared for publication as `final-result-files`.' >> "$GITHUB_STEP_SUMMARY"
           else
-            echo '- Diagnostics: `coverage-merge-debug` contains the input inventory and PR diff; `final-result-files` retains any merged outputs.' >> "$GITHUB_STEP_SUMMARY"
+            echo "- Result not prepared because the merge step was \`${merge_outcome}\`. See the first failed prerequisite or artifact-selection step." >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Upload coverage result
+        id: upload_coverage_result
         if: ${{ always() && !cancelled() && steps.merge_coverage.outputs.has_pr_coverage == 'true' }}
-        uses: actions/upload-artifact@v7
+        uses: matrixorigin/CI/actions/upload-artifact-with-retry@main
         with:
           name: final-result-files
           path: |
@@ -268,15 +296,34 @@ jobs:
             ${{ github.workspace }}/coverage-summary.json
           if-no-files-found: error
           retention-days: 7
+          overwrite: true
+      - name: Report coverage artifact publication
+        if: ${{ always() && !cancelled() && steps.merge_coverage.outputs.has_pr_coverage == 'true' }}
+        continue-on-error: true
+        env:
+          UPLOAD_OUTCOME: ${{ steps.upload_coverage_result.outcome }}
+          ARTIFACT_URL: ${{ steps.upload_coverage_result.outputs.artifact-url }}
+        run: |
+          if [ "${UPLOAD_OUTCOME}" = 'success' ]; then
+            if [ -n "${ARTIFACT_URL}" ]; then
+              echo "- Artifact publication: succeeded ([download \`final-result-files\`](${ARTIFACT_URL}))." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo '- Artifact publication: succeeded as `final-result-files`.' >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo '- Artifact publication: failed after 3 attempts; see `Upload coverage result` for the underlying upload errors.' >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Upload coverage merge diagnostics
         if: ${{ failure() && !cancelled() }}
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: coverage-merge-debug
+          name: coverage-merge-debug-attempt-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/coverage-inputs.txt
             ${{ runner.temp }}/coverage-parser.log
             ${{ runner.temp }}/bvt-group-manifests.json
+            ${{ runner.temp }}/coverage-selected-artifacts.json
             ${{ github.workspace }}/matrixone/diff.patch
             ${{ github.workspace }}/coverage-summary.json
           if-no-files-found: warn

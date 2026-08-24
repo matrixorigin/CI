@@ -1,0 +1,45 @@
+self-hosted-runner:
+  labels:
+    - amd64-mo-guangzhou-2xlarge16
+    - amd64-mo-guangzhou-2xlarge32
+    - amd64-mo-guangzhou-medium8
+    - amd64-mo-shanghai-4xlarge32
+    - amd64-mo-shanghai-dind
+    - arm64-mo-guangzhou-2xlarge16
+    - arm64-mo-shanghai-4c8g
+    - arm64-mo-shanghai-8c16g
+    - mac-arm64-mini
+
+paths:
+  .github/workflows/ci.yaml:
+    ignore:
+      - 'constant expression "false" in condition'
+  .github/workflows/coverage-ut.yaml:
+    ignore:
+      # Reusable-workflow-only contexts are supplied by MatrixOne callers.
+      - 'property "workflow_(repository|sha)" is not defined'
+  .github/workflows/e2e-compose-parallel.yaml:
+    ignore:
+      - 'constant expression "false" in condition'
+  .github/workflows/e2e-compose.yaml:
+    ignore:
+      - 'constant expression "false" in condition'
+  .github/workflows/e2e-standalone-parallel.yaml:
+    ignore:
+      - 'constant expression "false" in condition'
+  .github/workflows/e2e-standalone.yaml:
+    ignore:
+      - 'constant expression "false" in condition'
+  .github/workflows/e2e-upgrade.yaml:
+    ignore:
+      - 'constant expression "false" in condition'
+  .github/workflows/robot.yaml:
+    ignore:
+      # Existing legacy workflow; keep new changes clean without broadening
+      # this artifact-resilience PR into a robot migration.
+      - 'workflow command "set-output" was deprecated'
+  .github/workflows/utils.yaml:
+    ignore:
+      - 'constant expression "false" in condition'
+      # Legacy release workflow pinned from MatrixOne at CI@release/3.0-dev.
+      - 'property "setup_mo_test_env" is not defined'

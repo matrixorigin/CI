@@ -187,11 +187,12 @@ jobs:
           docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn down --remove-orphans
           docker volume rm launch-tae-compose_minio_storage
 
-      - uses: actions/upload-artifact@v7
+      - name: Upload optimistic Compose BVT failure diagnostics
+        uses: actions/upload-artifact@v7
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
-          name: Compose-multi-cn-e2e-bvt-test-docker-log(Optimistic,PUSH)
+          name: Compose-multi-cn-e2e-bvt-test-docker-log(Optimistic,PUSH)-attempt-${{ github.run_attempt }}
           path: |
             ${{ github.workspace }}/docker-compose-log
           retention-days: 7
@@ -421,15 +422,6 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload Compose BVT execution log
-        if: ${{ always() && !cancelled() }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: bvt-execution-compose
-          path: ${{ runner.temp }}/bvt-compose.log
-          if-no-files-found: warn
-          retention-days: 7
-
       - name: Print Docker Info Before Container Shutdown
         if: ${{ always() }}
         run: |
@@ -491,7 +483,7 @@ jobs:
 
       - name: Upload Compose BVT coverage
         if: ${{ always() && !cancelled() }}
-        uses: actions/upload-artifact@v7
+        uses: matrixorigin/CI/actions/upload-artifact-with-retry@main
         with:
           name: bvt-coverage-compose-generation-${{ steps.bvt_on_pr_version.outputs.bvt_generation || format('{0}-{1}', github.run_id, github.run_attempt) }}-attempt-${{ github.run_attempt }}
           path: |
@@ -500,11 +492,24 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      - uses: actions/upload-artifact@v7
+      - name: Upload Compose BVT execution log
+        if: ${{ always() && !cancelled() }}
+        # This log is diagnostic: publish it after the required coverage and
+        # do not turn a successful producer into a failed prerequisite.
+        continue-on-error: true
+        uses: matrixorigin/CI/actions/upload-artifact-with-retry@main
+        with:
+          name: bvt-execution-compose-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bvt-compose.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload Compose BVT failure diagnostics
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
+        uses: actions/upload-artifact@v7
         with:
-          name: Compose-multi-cn-e2e-bvt-test-docker-log(PROXY)
+          name: Compose-multi-cn-e2e-bvt-test-docker-log(PROXY)-attempt-${{ github.run_attempt }}
           path: |
             ${{ github.workspace }}/docker-compose-log
           retention-days: 7

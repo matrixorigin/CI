@@ -142,11 +142,12 @@ jobs:
           mv ${{ github.workspace }}/head/mo-service.log ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/mo-tester ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/head/dump-stacks* ${{ github.workspace }}/upload/
-      - uses: actions/upload-artifact@v7
+      - name: Upload optimistic standalone BVT failure diagnostics
+        uses: actions/upload-artifact@v7
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
-          name: Standalone-e2e-BVT-Test-on-Linux-x64(LAUNCH,Optimistic)-reports
+          name: Standalone-e2e-BVT-Test-on-Linux-x64(LAUNCH,Optimistic)-reports-attempt-${{ github.run_attempt }}
           path: |
             ${{ github.workspace }}/upload
           retention-days: 7
@@ -155,7 +156,7 @@ jobs:
         if: ${{ failure() }}
         continue-on-error: true
         with:
-          name: Standalone-e2e-BVT-Test-on-Linux-x64(LAUNCH,Optimistic)-mo-data
+          name: Standalone-e2e-BVT-Test-on-Linux-x64(LAUNCH,Optimistic)-mo-data-attempt-${{ github.run_attempt }}
           path: |
             ${{ github.workspace }}/head/mo-data
           retention-days: 7
@@ -243,11 +244,12 @@ jobs:
           mv ${{ github.workspace }}/head/mo-service.log ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/mo-tester ${{ github.workspace }}/upload/
           mv ${{ github.workspace }}/head/dump-stacks.log ${{ github.workspace }}/upload/
-      - uses: actions/upload-artifact@v7
+      - name: Upload proxy standalone BVT failure diagnostics
+        uses: actions/upload-artifact@v7
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
-          name: Standalone-Multi-CN-e2e-BVT-Test-on-Linux-x64(LAUNCH,PROXY)-reports
+          name: Standalone-Multi-CN-e2e-BVT-Test-on-Linux-x64(LAUNCH,PROXY)-reports-attempt-${{ github.run_attempt }}
           path: |
             ${{ github.workspace }}/upload
           retention-days: 7
@@ -466,15 +468,6 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload Compose + Pessimistic BVT execution log
-        if: ${{ always() && !cancelled() }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: bvt-execution-pessimistic
-          path: ${{ runner.temp }}/bvt-pessimistic.log
-          if-no-files-found: warn
-          retention-days: 7
-
       - name: Print Docker Info Before Container Shutdown
         if: ${{ always() }}
         run: |
@@ -530,12 +523,24 @@ jobs:
 
       - name: Upload Compose + Pessimistic BVT coverage
         if: ${{ always() && !cancelled() }}
-        uses: actions/upload-artifact@v7
+        uses: matrixorigin/CI/actions/upload-artifact-with-retry@main
         with:
           name: bvt-coverage-pessimistic-generation-${{ steps.bvt_on_pr_version.outputs.bvt_generation || format('{0}-{1}', github.run_id, github.run_attempt) }}-attempt-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/bvt-pessimistic.out
             ${{ runner.temp }}/bvt-pessimistic-manifest.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload Compose + Pessimistic BVT execution log
+        if: ${{ always() && !cancelled() }}
+        # This log is diagnostic: publish it after the required coverage and
+        # do not turn a successful producer into a failed prerequisite.
+        continue-on-error: true
+        uses: matrixorigin/CI/actions/upload-artifact-with-retry@main
+        with:
+          name: bvt-execution-pessimistic-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bvt-pessimistic.log
           if-no-files-found: warn
           retention-days: 7
 
@@ -553,11 +558,12 @@ jobs:
             mv ${{ github.workspace }}/docker-compose-log ${{ github.workspace }}/upload/
           fi
 
-      - uses: actions/upload-artifact@v7
+      - name: Upload Compose + Pessimistic BVT failure diagnostics
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
+        uses: actions/upload-artifact@v7
         with:
-          name: Compose-multi-CN-e2e-BVT-Test-on-Linux-x64(PESSIMISTIC)-reports
+          name: Compose-multi-CN-e2e-BVT-Test-on-Linux-x64(PESSIMISTIC)-reports-attempt-${{ github.run_attempt }}
           path: |
             ${{ github.workspace }}/upload
             ${{ github.workspace }}/docker-compose-log
