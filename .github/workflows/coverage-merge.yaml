@@ -252,11 +252,12 @@ jobs:
           cat "${RUNNER_TEMP}/coverage-inputs.txt" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           if [ "${{ steps.merge_coverage.outcome }}" = 'success' ]; then
-            echo '- Result: `final-result-files` contains the changed-code profile, merged profile, summary, and PR coverage HTML.' >> "$GITHUB_STEP_SUMMARY"
+            echo '- Result prepared for publication as `final-result-files`: changed-code profile, merged profile, summary, and PR coverage HTML.' >> "$GITHUB_STEP_SUMMARY"
           else
             echo '- Diagnostics artifact (best-effort): `coverage-merge-debug-attempt-${{ github.run_attempt }}` contains the input inventory and PR diff when publication succeeds; `final-result-files` retains any merged outputs.' >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Upload coverage result
+        id: upload_coverage_result
         if: ${{ always() && !cancelled() && steps.merge_coverage.outputs.has_pr_coverage == 'true' }}
         uses: matrixorigin/CI/actions/upload-artifact-with-retry@main
         with:
@@ -269,6 +270,22 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           overwrite: true
+      - name: Report coverage artifact publication
+        if: ${{ always() && !cancelled() && steps.merge_coverage.outputs.has_pr_coverage == 'true' }}
+        continue-on-error: true
+        env:
+          UPLOAD_OUTCOME: ${{ steps.upload_coverage_result.outcome }}
+          ARTIFACT_URL: ${{ steps.upload_coverage_result.outputs.artifact-url }}
+        run: |
+          if [ "${UPLOAD_OUTCOME}" = 'success' ]; then
+            if [ -n "${ARTIFACT_URL}" ]; then
+              echo "- Artifact publication: succeeded ([download \`final-result-files\`](${ARTIFACT_URL}))." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo '- Artifact publication: succeeded as `final-result-files`.' >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo '- Artifact publication: failed after 3 attempts; see `Upload coverage result` for the underlying service errors.' >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Upload coverage merge diagnostics
         if: ${{ failure() && !cancelled() }}
         continue-on-error: true
