@@ -9,16 +9,30 @@ self-hosted-runner:
     - arm64-mo-shanghai-4c8g
     - arm64-mo-shanghai-8c16g
     - mac-arm64-mini
-    - macos-12
-    - macos-13
 
 paths:
-  .github/workflows/**/*.{yml,yaml}:
+  .github/workflows/ci.yaml:
     ignore:
-      # These jobs are deliberately retained but disabled for later reuse.
       - 'constant expression "false" in condition'
+  .github/workflows/coverage-ut.yaml:
+    ignore:
       # Reusable-workflow-only contexts are supplied by MatrixOne callers.
       - 'property "workflow_(repository|sha)" is not defined'
+  .github/workflows/e2e-compose-parallel.yaml:
+    ignore:
+      - 'constant expression "false" in condition'
+  .github/workflows/e2e-compose.yaml:
+    ignore:
+      - 'constant expression "false" in condition'
+  .github/workflows/e2e-standalone-parallel.yaml:
+    ignore:
+      - 'constant expression "false" in condition'
+  .github/workflows/e2e-standalone.yaml:
+    ignore:
+      - 'constant expression "false" in condition'
+  .github/workflows/e2e-upgrade.yaml:
+    ignore:
+      - 'constant expression "false" in condition'
   .github/workflows/robot.yaml:
     ignore:
       # Existing legacy workflow; keep new changes clean without broadening
@@ -26,5 +40,6 @@ paths:
       - 'workflow command "set-output" was deprecated'
   .github/workflows/utils.yaml:
     ignore:
+      - 'constant expression "false" in condition'
       # Legacy release workflow pinned from MatrixOne at CI@release/3.0-dev.
       - 'property "setup_mo_test_env" is not defined'

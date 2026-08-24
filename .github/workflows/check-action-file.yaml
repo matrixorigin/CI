@@ -60,6 +60,60 @@ jobs:
         # Keep this gate focused on workflow/action semantics. The repository
         # has a separate backlog of legacy shellcheck and pyflakes findings.
         run: ${{ steps.install-actionlint.outputs.executable }} -shellcheck= -pyflakes= -color
+      - name: Guard deliberate workflow disablements
+        env:
+          ACTIONLINT: ${{ steps.install-actionlint.outputs.executable }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Record semantic locations and a short source hash, not line
+          # numbers, so unrelated edits do not churn the baseline.
+          expected="$(printf '%s\n' \
+            '.github/workflows/ci.yaml:ut-mac-x86:9:a81c7d5095cf' \
+            '.github/workflows/e2e-compose-parallel.yaml:bvt-docker-compose-push:9:57d5b9f8aae4' \
+            '.github/workflows/e2e-compose.yaml:bvt-docker-compose-push:9:57d5b9f8aae4' \
+            '.github/workflows/e2e-standalone-parallel.yaml:bvt-linux-x86:9:57d5b9f8aae4' \
+            '.github/workflows/e2e-standalone-parallel.yaml:multi-cn-proxy-bvt-linux-x86:9:57d5b9f8aae4' \
+            '.github/workflows/e2e-standalone.yaml:bvt-linux-x86:9:57d5b9f8aae4' \
+            '.github/workflows/e2e-upgrade.yaml:upgrade-ci-release-linux-amd64:9:57d5b9f8aae4' \
+            '.github/workflows/e2e-upgrade.yaml:upgrade-ci-target-linux-amd64:9:57d5b9f8aae4' \
+            '.github/workflows/utils.yaml:pr_basic_benchmarks:9:57d5b9f8aae4'
+          )"
+          findings="$(
+            "${ACTIONLINT}" -config-file /dev/null -shellcheck= -pyflakes= \
+              -format '{{range .}}{{.Filepath}}\t{{.Line}}\t{{.Column}}\t{{.Kind}}\t{{.Message}}\n{{end}}' \
+              2>/dev/null || true
+          )"
+          actual="$(
+            while IFS=$'\t' read -r file line column kind message; do
+              if [ "${kind}" != 'if-cond' ]; then
+                continue
+              fi
+              metadata="$(awk -v target="${line}" '
+                /^  [A-Za-z0-9_-]+:$/ {
+                  job = $1
+                  sub(/:$/, "", job)
+                }
+                NR == target {
+                  source = $0
+                  sub(/^[[:space:]]+/, "", source)
+                  sub(/[[:space:]]+$/, "", source)
+                  print job "\t" source
+                  exit
+                }
+              ' "${file}")"
+              job="${metadata%%$'\t'*}"
+              source="${metadata#*$'\t'}"
+              digest="$(printf '%s' "${source}" | sha256sum | cut -c1-12)"
+              printf '%s:%s:%s:%s\n' "${file}" "${job}" "${column}" "${digest}"
+            done <<< "${findings}" | LC_ALL=C sort
+          )"
+          if ! diff -u <(printf '%s\n' "${expected}") <(printf '%s\n' "${actual}"); then
+            echo '::error title=Workflow disablement drift::The set of constant-false conditions changed. Remove accidental disablements, or update the explicit baseline when the change is intentional.'
+            printf '%s\n' "${findings}" |
+              awk -F '\t' '$4 == "if-cond" { print $1 ":" $2 ":" $3 ": " $5 }'
+            exit 1
+          fi
       - name: Validate artifact retry action metadata
         uses: dsanders11/json-schema-validate-action@v2.0.0
         with:

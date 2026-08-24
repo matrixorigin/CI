@@ -28,7 +28,11 @@
           "properties": {
             "required": {"const": true}
           }
-        }
+        },
+        "if-no-files-found": {},
+        "retention-days": {},
+        "overwrite": {},
+        "compression-level": {}
       }
     },
     "outputs": {
@@ -78,10 +82,12 @@
               "allOf": [
                 {"$ref": "#/definitions/upload"},
                 {
+                  "type": "object",
                   "properties": {
                     "id": {"const": "upload_1"},
                     "if": {"const": "${{ !cancelled() }}"},
                     "with": {
+                      "type": "object",
                       "properties": {
                         "overwrite": {"const": "${{ inputs.overwrite }}"}
                       }
@@ -94,6 +100,7 @@
               "allOf": [
                 {"$ref": "#/definitions/best-effort-shell"},
                 {
+                  "type": "object",
                   "properties": {
                     "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' }}"},
                     "run": {"type": "string", "pattern": "sleep 5"}
@@ -105,10 +112,12 @@
               "allOf": [
                 {"$ref": "#/definitions/upload"},
                 {
+                  "type": "object",
                   "properties": {
                     "id": {"const": "upload_2"},
                     "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' }}"},
                     "with": {
+                      "type": "object",
                       "properties": {
                         "overwrite": {"const": true}
                       }
@@ -121,6 +130,7 @@
               "allOf": [
                 {"$ref": "#/definitions/best-effort-shell"},
                 {
+                  "type": "object",
                   "properties": {
                     "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' && steps.upload_2.outcome == 'success' }}"},
                     "run": {"type": "string", "pattern": "succeeded on attempt 2/3"}
@@ -132,6 +142,7 @@
               "allOf": [
                 {"$ref": "#/definitions/best-effort-shell"},
                 {
+                  "type": "object",
                   "properties": {
                     "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' && steps.upload_2.outcome == 'failure' }}"},
                     "run": {"type": "string", "pattern": "sleep 15"}
@@ -143,10 +154,12 @@
               "allOf": [
                 {"$ref": "#/definitions/upload"},
                 {
+                  "type": "object",
                   "properties": {
                     "id": {"const": "upload_3"},
                     "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' && steps.upload_2.outcome == 'failure' }}"},
                     "with": {
+                      "type": "object",
                       "properties": {
                         "overwrite": {"const": true}
                       }
@@ -159,6 +172,7 @@
               "allOf": [
                 {"$ref": "#/definitions/best-effort-shell"},
                 {
+                  "type": "object",
                   "properties": {
                     "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' && steps.upload_2.outcome == 'failure' && steps.upload_3.outcome == 'success' }}"},
                     "run": {"type": "string", "pattern": "succeeded on attempt 3/3"}
@@ -169,7 +183,11 @@
             {
               "type": "object",
               "required": ["if", "shell", "run"],
-              "not": {"required": ["continue-on-error"]},
+              "not": {
+                "type": "object",
+                "required": ["continue-on-error"],
+                "properties": {"continue-on-error": {}}
+              },
               "properties": {
                 "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' && steps.upload_2.outcome == 'failure' && steps.upload_3.outcome == 'failure' }}"},
                 "shell": {"const": "bash"},
@@ -187,6 +205,8 @@
       "type": "object",
       "required": ["id", "if", "continue-on-error", "uses", "with"],
       "properties": {
+        "id": {},
+        "if": {},
         "continue-on-error": {"const": true},
         "uses": {"const": "actions/upload-artifact@v7"},
         "with": {
@@ -215,8 +235,10 @@
       "type": "object",
       "required": ["if", "continue-on-error", "shell", "run"],
       "properties": {
+        "if": {},
         "continue-on-error": {"const": true},
-        "shell": {"const": "bash"}
+        "shell": {"const": "bash"},
+        "run": {}
       }
     }
   }
