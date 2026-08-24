@@ -2,8 +2,10 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Upload artifact retry state-machine contract",
   "type": "object",
-  "required": ["inputs", "outputs", "runs"],
+  "required": ["name", "description", "inputs", "outputs", "runs"],
   "properties": {
+    "name": {"type": "string"},
+    "description": {"type": "string"},
     "inputs": {
       "type": "object",
       "required": [
@@ -24,8 +26,10 @@
             "properties": {"default": {}}
           },
           "properties": {
+            "description": {"type": "string"},
             "required": {"const": true}
-          }
+          },
+          "additionalProperties": false
         },
         "path": {
           "type": "object",
@@ -36,42 +40,53 @@
             "properties": {"default": {}}
           },
           "properties": {
+            "description": {"type": "string"},
             "required": {"const": true}
-          }
+          },
+          "additionalProperties": false
         },
         "if-no-files-found": {
           "type": "object",
           "required": ["required", "default"],
           "properties": {
+            "description": {"type": "string"},
             "required": {"const": false},
             "default": {"const": "error"}
-          }
+          },
+          "additionalProperties": false
         },
         "retention-days": {
           "type": "object",
           "required": ["required", "default"],
           "properties": {
+            "description": {"type": "string"},
             "required": {"const": false},
             "default": {"const": "7"}
-          }
+          },
+          "additionalProperties": false
         },
         "overwrite": {
           "type": "object",
           "required": ["required", "default"],
           "properties": {
+            "description": {"type": "string"},
             "required": {"const": false},
             "default": {"const": "false"}
-          }
+          },
+          "additionalProperties": false
         },
         "compression-level": {
           "type": "object",
           "required": ["required", "default"],
           "properties": {
+            "description": {"type": "string"},
             "required": {"const": false},
             "default": {"const": "6"}
-          }
+          },
+          "additionalProperties": false
         }
-      }
+      },
+      "additionalProperties": false
     },
     "outputs": {
       "type": "object",
@@ -81,30 +96,37 @@
           "type": "object",
           "required": ["value"],
           "properties": {
+            "description": {"type": "string"},
             "value": {
               "const": "${{ steps.upload_3.outcome == 'success' && steps.upload_3.outputs['artifact-id'] || steps.upload_2.outcome == 'success' && steps.upload_2.outputs['artifact-id'] || steps.upload_1.outcome == 'success' && steps.upload_1.outputs['artifact-id'] || '' }}"
             }
-          }
+          },
+          "additionalProperties": false
         },
         "artifact-url": {
           "type": "object",
           "required": ["value"],
           "properties": {
+            "description": {"type": "string"},
             "value": {
               "const": "${{ steps.upload_3.outcome == 'success' && steps.upload_3.outputs['artifact-url'] || steps.upload_2.outcome == 'success' && steps.upload_2.outputs['artifact-url'] || steps.upload_1.outcome == 'success' && steps.upload_1.outputs['artifact-url'] || '' }}"
             }
-          }
+          },
+          "additionalProperties": false
         },
         "artifact-digest": {
           "type": "object",
           "required": ["value"],
           "properties": {
+            "description": {"type": "string"},
             "value": {
               "const": "${{ steps.upload_3.outcome == 'success' && steps.upload_3.outputs['artifact-digest'] || steps.upload_2.outcome == 'success' && steps.upload_2.outputs['artifact-digest'] || steps.upload_1.outcome == 'success' && steps.upload_1.outputs['artifact-digest'] || '' }}"
             }
-          }
+          },
+          "additionalProperties": false
         }
-      }
+      },
+      "additionalProperties": false
     },
     "runs": {
       "type": "object",
@@ -122,6 +144,7 @@
                 {
                   "type": "object",
                   "properties": {
+                    "name": {"const": "Upload artifact (attempt 1/3)"},
                     "id": {"const": "upload_1"},
                     "if": {"const": "${{ !cancelled() }}"},
                     "with": {
@@ -140,8 +163,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "name": {"const": "Back off before artifact upload retry 1"},
                     "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' }}"},
-                    "run": {"const": "echo '::warning title=Artifact upload retry::Attempt 1/3 failed; retrying in 5 seconds.'\nsleep 5\n"}
+                    "run": {"const": "builtin echo '::warning title=Artifact upload retry::Attempt 1/3 failed; retrying in 5 seconds.'\ncommand sleep 5\n"}
                   }
                 }
               ]
@@ -152,6 +176,7 @@
                 {
                   "type": "object",
                   "properties": {
+                    "name": {"const": "Upload artifact (attempt 2/3)"},
                     "id": {"const": "upload_2"},
                     "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' }}"},
                     "with": {
@@ -170,8 +195,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "name": {"const": "Report artifact upload recovery on attempt 2/3"},
                     "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' && steps.upload_2.outcome == 'success' }}"},
-                    "run": {"const": "echo '::notice title=Artifact upload recovered::Artifact publication succeeded on attempt 2/3.'"}
+                    "run": {"const": "builtin echo '::notice title=Artifact upload recovered::Artifact publication succeeded on attempt 2/3.'"}
                   }
                 }
               ]
@@ -182,8 +208,9 @@
                 {
                   "type": "object",
                   "properties": {
+                    "name": {"const": "Back off before artifact upload retry 2"},
                     "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' && steps.upload_2.outcome == 'failure' }}"},
-                    "run": {"const": "echo '::warning title=Artifact upload retry::Attempt 2/3 failed; retrying in 15 seconds.'\nsleep 15\n"}
+                    "run": {"const": "builtin echo '::warning title=Artifact upload retry::Attempt 2/3 failed; retrying in 15 seconds.'\ncommand sleep 15\n"}
                   }
                 }
               ]
@@ -194,6 +221,7 @@
                 {
                   "type": "object",
                   "properties": {
+                    "name": {"const": "Upload artifact (attempt 3/3)"},
                     "id": {"const": "upload_3"},
                     "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' && steps.upload_2.outcome == 'failure' }}"},
                     "with": {
@@ -212,37 +240,44 @@
                 {
                   "type": "object",
                   "properties": {
+                    "name": {"const": "Report artifact upload recovery on attempt 3/3"},
                     "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' && steps.upload_2.outcome == 'failure' && steps.upload_3.outcome == 'success' }}"},
-                    "run": {"const": "echo '::notice title=Artifact upload recovered::Artifact publication succeeded on attempt 3/3.'"}
+                    "run": {"const": "builtin echo '::notice title=Artifact upload recovered::Artifact publication succeeded on attempt 3/3.'"}
                   }
                 }
               ]
             },
             {
               "type": "object",
-              "required": ["if", "shell", "run"],
+              "required": ["name", "if", "shell", "env", "run"],
               "not": {
                 "type": "object",
                 "required": ["continue-on-error"],
                 "properties": {"continue-on-error": {}}
               },
               "properties": {
+                "name": {"const": "Fail after exhausting artifact upload attempts"},
                 "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' && steps.upload_2.outcome == 'failure' && steps.upload_3.outcome == 'failure' }}"},
                 "shell": {"const": "bash"},
-                "run": {"const": "echo '::error title=Artifact upload failed::All 3 attempts failed. See the preceding upload steps for the root error.'\nexit 1\n"}
-              }
+                "env": {"$ref": "#/definitions/sanitized-shell-env"},
+                "run": {"const": "builtin echo '::error title=Artifact upload failed::All 3 attempts failed. See the preceding upload steps for the root error.'\nbuiltin exit 1\n"}
+              },
+              "additionalProperties": false
             }
           ],
           "additionalItems": false
         }
-      }
+      },
+      "additionalProperties": false
     }
   },
+  "additionalProperties": false,
   "definitions": {
     "upload": {
       "type": "object",
-      "required": ["id", "if", "continue-on-error", "uses", "with"],
+      "required": ["name", "id", "if", "continue-on-error", "uses", "with"],
       "properties": {
+        "name": {"type": "string"},
         "id": {},
         "if": {},
         "continue-on-error": {"const": true},
@@ -267,17 +302,30 @@
           },
           "additionalProperties": false
         }
-      }
+      },
+      "additionalProperties": false
     },
     "best-effort-shell": {
       "type": "object",
-      "required": ["if", "continue-on-error", "shell", "run"],
+      "required": ["name", "if", "continue-on-error", "shell", "env", "run"],
       "properties": {
+        "name": {"type": "string"},
         "if": {},
         "continue-on-error": {"const": true},
         "shell": {"const": "bash"},
+        "env": {"$ref": "#/definitions/sanitized-shell-env"},
         "run": {}
-      }
+      },
+      "additionalProperties": false
+    },
+    "sanitized-shell-env": {
+      "type": "object",
+      "required": ["BASH_ENV", "PATH"],
+      "properties": {
+        "BASH_ENV": {"const": "/dev/null"},
+        "PATH": {"const": "/usr/bin:/bin"}
+      },
+      "additionalProperties": false
     }
   }
 }

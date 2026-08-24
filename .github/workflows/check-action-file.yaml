@@ -11,6 +11,8 @@ on:
       - '.github/actionlint.yaml'
       - 'actions/upload-artifact-with-retry/action.yaml'
       - 'actions/upload-artifact-with-retry/state-machine.schema.json'
+      - 'scripts/select_coverage_artifacts.py'
+      - 'scripts/test_select_coverage_artifacts.py'
 
 permissions:
   contents: read
@@ -54,6 +56,8 @@ jobs:
         # Keep this gate focused on workflow/action semantics. The repository
         # has a separate backlog of legacy shellcheck and pyflakes findings.
         run: ${{ steps.install-actionlint.outputs.executable }} -shellcheck= -pyflakes= -color
+      - name: Test coverage artifact generation selection
+        run: python3 scripts/test_select_coverage_artifacts.py -v
       - name: Guard deliberate workflow disablements
         env:
           ACTIONLINT: ${{ steps.install-actionlint.outputs.executable }}
