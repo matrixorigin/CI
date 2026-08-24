@@ -498,11 +498,10 @@ jobs:
         continue-on-error: true
         uses: matrixorigin/CI/actions/upload-artifact-with-retry@main
         with:
-          name: bvt-execution-compose
+          name: bvt-execution-compose-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/bvt-compose.log
           if-no-files-found: warn
           retention-days: 7
-          overwrite: true
 
       - uses: actions/upload-artifact@v7
         if: ${{ failure() || cancelled()}}

@@ -537,11 +537,10 @@ jobs:
         continue-on-error: true
         uses: matrixorigin/CI/actions/upload-artifact-with-retry@main
         with:
-          name: bvt-execution-pessimistic
+          name: bvt-execution-pessimistic-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/bvt-pessimistic.log
           if-no-files-found: warn
           retention-days: 7
-          overwrite: true
 
       - name: generate upload files
         if: ${{ always() }}
