@@ -23,17 +23,11 @@ jobs:
     runs-on: arm64-mo-shanghai-4c8g
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
-      - name: Check for any changed workflows
-        id: check-for-changed-workflows
-        uses: tj-actions/changed-files@v47
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          files: |
-            .github/workflows/**.yaml
-            .github/workflows/**.yml
-      - name: Validate workflows
-        if: steps.check-for-changed-workflows.outputs.any_changed == 'true'
-        uses: dsanders11/json-schema-validate-action@v2.0.0
+          persist-credentials: false
+      - name: Validate all workflows
+        uses: dsanders11/json-schema-validate-action@eddf079f55830cc9a916a3c512ba9086240d2fea # v2.0.0
         with:
           schema: https://json.schemastore.org/github-workflow.json
           files: |
@@ -115,12 +109,12 @@ jobs:
             exit 1
           fi
       - name: Validate artifact retry action metadata
-        uses: dsanders11/json-schema-validate-action@v2.0.0
+        uses: dsanders11/json-schema-validate-action@eddf079f55830cc9a916a3c512ba9086240d2fea # v2.0.0
         with:
           schema: https://json.schemastore.org/github-action.json
           files: actions/upload-artifact-with-retry/action.yaml
       - name: Validate artifact retry state machine
-        uses: dsanders11/json-schema-validate-action@v2.0.0
+        uses: dsanders11/json-schema-validate-action@eddf079f55830cc9a916a3c512ba9086240d2fea # v2.0.0
         with:
           schema: ./actions/upload-artifact-with-retry/state-machine.schema.json
           files: actions/upload-artifact-with-retry/action.yaml

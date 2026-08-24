@@ -18,6 +18,11 @@
         "name": {
           "type": "object",
           "required": ["required"],
+          "not": {
+            "type": "object",
+            "required": ["default"],
+            "properties": {"default": {}}
+          },
           "properties": {
             "required": {"const": true}
           }
@@ -25,14 +30,47 @@
         "path": {
           "type": "object",
           "required": ["required"],
+          "not": {
+            "type": "object",
+            "required": ["default"],
+            "properties": {"default": {}}
+          },
           "properties": {
             "required": {"const": true}
           }
         },
-        "if-no-files-found": {},
-        "retention-days": {},
-        "overwrite": {},
-        "compression-level": {}
+        "if-no-files-found": {
+          "type": "object",
+          "required": ["required", "default"],
+          "properties": {
+            "required": {"const": false},
+            "default": {"const": "error"}
+          }
+        },
+        "retention-days": {
+          "type": "object",
+          "required": ["required", "default"],
+          "properties": {
+            "required": {"const": false},
+            "default": {"const": "7"}
+          }
+        },
+        "overwrite": {
+          "type": "object",
+          "required": ["required", "default"],
+          "properties": {
+            "required": {"const": false},
+            "default": {"const": "false"}
+          }
+        },
+        "compression-level": {
+          "type": "object",
+          "required": ["required", "default"],
+          "properties": {
+            "required": {"const": false},
+            "default": {"const": "6"}
+          }
+        }
       }
     },
     "outputs": {
@@ -103,7 +141,7 @@
                   "type": "object",
                   "properties": {
                     "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' }}"},
-                    "run": {"type": "string", "pattern": "sleep 5"}
+                    "run": {"const": "echo '::warning title=Artifact upload retry::Attempt 1/3 failed; retrying in 5 seconds.'\nsleep 5\n"}
                   }
                 }
               ]
@@ -133,7 +171,7 @@
                   "type": "object",
                   "properties": {
                     "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' && steps.upload_2.outcome == 'success' }}"},
-                    "run": {"type": "string", "pattern": "succeeded on attempt 2/3"}
+                    "run": {"const": "echo '::notice title=Artifact upload recovered::Artifact publication succeeded on attempt 2/3.'"}
                   }
                 }
               ]
@@ -145,7 +183,7 @@
                   "type": "object",
                   "properties": {
                     "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' && steps.upload_2.outcome == 'failure' }}"},
-                    "run": {"type": "string", "pattern": "sleep 15"}
+                    "run": {"const": "echo '::warning title=Artifact upload retry::Attempt 2/3 failed; retrying in 15 seconds.'\nsleep 15\n"}
                   }
                 }
               ]
@@ -175,7 +213,7 @@
                   "type": "object",
                   "properties": {
                     "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' && steps.upload_2.outcome == 'failure' && steps.upload_3.outcome == 'success' }}"},
-                    "run": {"type": "string", "pattern": "succeeded on attempt 3/3"}
+                    "run": {"const": "echo '::notice title=Artifact upload recovered::Artifact publication succeeded on attempt 3/3.'"}
                   }
                 }
               ]
@@ -191,7 +229,7 @@
               "properties": {
                 "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' && steps.upload_2.outcome == 'failure' && steps.upload_3.outcome == 'failure' }}"},
                 "shell": {"const": "bash"},
-                "run": {"type": "string", "pattern": "exit 1"}
+                "run": {"const": "echo '::error title=Artifact upload failed::All 3 attempts failed. See the preceding upload steps for the root error.'\nexit 1\n"}
               }
             }
           ],
@@ -208,7 +246,7 @@
         "id": {},
         "if": {},
         "continue-on-error": {"const": true},
-        "uses": {"const": "actions/upload-artifact@v7"},
+        "uses": {"const": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"},
         "with": {
           "type": "object",
           "required": [
