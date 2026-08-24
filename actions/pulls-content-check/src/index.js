@@ -30,7 +30,8 @@ async function main() {
         pull_number: github.context.payload.pull_request.number
     })
     let pullContent = normalizePullContent(pull.body);
-    if (pullContent.length == 0) {
+    if (pullContent.length === 0) {
+        core.setOutput("pull_valid", "false")
         core.setFailed(`this request is not pull_request or the body of this pull_request is empty`);
         return
     }
