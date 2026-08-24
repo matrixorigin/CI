@@ -230,20 +230,22 @@ jobs:
           mv $GITHUB_WORKSPACE/upload/workspace/mo-service-upstream $GITHUB_WORKSPACE/upload-2/
           mv $GITHUB_WORKSPACE/upload/workspace/mo-data $GITHUB_WORKSPACE/upload-2/
 
-      - uses: actions/upload-artifact@v7
+      - name: Upload compatibility target failure reports
+        uses: actions/upload-artifact@v7
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
-          name: Compatibility-Test-Target-on-Linux-x64(LAUNCH)-reports
+          name: Compatibility-Test-Target-on-Linux-x64(LAUNCH)-reports-attempt-${{ github.run_attempt }}
           path: |
             ${{ github.workspace }}/upload-1
           retention-days: 7
 
-      - uses: actions/upload-artifact@v7
+      - name: Upload compatibility target failure data
+        uses: actions/upload-artifact@v7
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
-          name: Compatibility-Test-Target-on-Linux-x64(LAUNCH)-mo-data
+          name: Compatibility-Test-Target-on-Linux-x64(LAUNCH)-mo-data-attempt-${{ github.run_attempt }}
           path: |
             ${{ github.workspace }}/upload-2
           retention-days: 7
@@ -482,20 +484,22 @@ jobs:
           mv $GITHUB_WORKSPACE/upload/workspace/mo-service-upstream $GITHUB_WORKSPACE/upload-2/
           mv $GITHUB_WORKSPACE/upload/workspace/mo-data $GITHUB_WORKSPACE/upload-2/
 
-      - uses: actions/upload-artifact@v7
+      - name: Upload compatibility release failure reports
+        uses: actions/upload-artifact@v7
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
-          name: Compatibility-Test-Release-on-Linux-x64(LAUNCH)-reports
+          name: Compatibility-Test-Release-on-Linux-x64(LAUNCH)-reports-attempt-${{ github.run_attempt }}
           path: |
             ${{ github.workspace }}/upload-1
           retention-days: 7
 
-      - uses: actions/upload-artifact@v7
+      - name: Upload compatibility release failure data
+        uses: actions/upload-artifact@v7
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
         with:
-          name: Compatibility-Test-Release-on-Linux-x64(LAUNCH)-mo-data
+          name: Compatibility-Test-Release-on-Linux-x64(LAUNCH)-mo-data-attempt-${{ github.run_attempt }}
           path: |
             ${{ github.workspace }}/upload-2
           retention-days: 7

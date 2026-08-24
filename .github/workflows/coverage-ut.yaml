@@ -435,6 +435,7 @@ jobs:
           retention-days: 7
       - name: Upload failed UT diagnostics
         if: ${{ always() && !cancelled() && steps.coverage_ut.outcome == 'failure' }}
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: ut-coverage-diagnostics-attempt-${{ github.run_attempt }}
