@@ -7,8 +7,8 @@ test('normalizePullContent preserves a PR body string', () => {
     assert.equal(normalizePullContent('## Issue\n#27416'), '## Issue\n#27416');
 });
 
-for (const body of [null, undefined, '']) {
-    test(`normalizePullContent treats ${String(body)} as empty content`, () => {
+for (const [name, body] of [['null', null], ['undefined', undefined], ['an empty string', '']]) {
+    test(`normalizePullContent treats ${name} as empty content`, () => {
         assert.equal(normalizePullContent(body), '');
     });
 }
