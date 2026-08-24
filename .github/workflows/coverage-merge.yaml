@@ -254,7 +254,7 @@ jobs:
           if [ "${{ steps.merge_coverage.outcome }}" = 'success' ]; then
             echo '- Result: `final-result-files` contains the changed-code profile, merged profile, summary, and PR coverage HTML.' >> "$GITHUB_STEP_SUMMARY"
           else
-            echo '- Diagnostics: `coverage-merge-debug` contains the input inventory and PR diff; `final-result-files` retains any merged outputs.' >> "$GITHUB_STEP_SUMMARY"
+            echo '- Diagnostics artifact (best-effort): `coverage-merge-debug-attempt-${{ github.run_attempt }}` contains the input inventory and PR diff when publication succeeds; `final-result-files` retains any merged outputs.' >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Upload coverage result
         if: ${{ always() && !cancelled() && steps.merge_coverage.outputs.has_pr_coverage == 'true' }}
@@ -271,9 +271,10 @@ jobs:
           overwrite: true
       - name: Upload coverage merge diagnostics
         if: ${{ failure() && !cancelled() }}
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: coverage-merge-debug
+          name: coverage-merge-debug-attempt-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/coverage-inputs.txt
             ${{ runner.temp }}/coverage-parser.log

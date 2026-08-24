@@ -556,11 +556,12 @@ jobs:
             mv ${{ github.workspace }}/docker-compose-log ${{ github.workspace }}/upload/
           fi
 
-      - uses: actions/upload-artifact@v7
+      - name: Upload Compose + Pessimistic BVT failure diagnostics
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
+        uses: actions/upload-artifact@v7
         with:
-          name: Compose-multi-CN-e2e-BVT-Test-on-Linux-x64(PESSIMISTIC)-reports
+          name: Compose-multi-CN-e2e-BVT-Test-on-Linux-x64(PESSIMISTIC)-reports-attempt-${{ github.run_attempt }}
           path: |
             ${{ github.workspace }}/upload
             ${{ github.workspace }}/docker-compose-log

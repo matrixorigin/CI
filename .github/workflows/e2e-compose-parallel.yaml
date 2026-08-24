@@ -503,11 +503,12 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      - uses: actions/upload-artifact@v7
+      - name: Upload Compose BVT failure diagnostics
         if: ${{ failure() || cancelled()}}
         continue-on-error: true
+        uses: actions/upload-artifact@v7
         with:
-          name: Compose-multi-cn-e2e-bvt-test-docker-log(PROXY)
+          name: Compose-multi-cn-e2e-bvt-test-docker-log(PROXY)-attempt-${{ github.run_attempt }}
           path: |
             ${{ github.workspace }}/docker-compose-log
           retention-days: 7
