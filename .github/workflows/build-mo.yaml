@@ -205,9 +205,10 @@ jobs:
           echo "artifact_name=mo-shared-build-attempt-${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v7
+        uses: matrixorigin/CI/actions/upload-artifact-with-retry@main
         with:
           name: mo-shared-build-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/mo-build/mo-build.tar.gz
           if-no-files-found: error
           retention-days: 3
+          compression-level: 0

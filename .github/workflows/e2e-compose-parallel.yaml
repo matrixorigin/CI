@@ -491,7 +491,7 @@ jobs:
 
       - name: Upload Compose BVT coverage
         if: ${{ always() && !cancelled() }}
-        uses: actions/upload-artifact@v7
+        uses: matrixorigin/CI/actions/upload-artifact-with-retry@main
         with:
           name: bvt-coverage-compose-generation-${{ steps.bvt_on_pr_version.outputs.bvt_generation || format('{0}-{1}', github.run_id, github.run_attempt) }}-attempt-${{ github.run_attempt }}
           path: |
