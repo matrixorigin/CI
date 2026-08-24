@@ -1,0 +1,30 @@
+self-hosted-runner:
+  labels:
+    - amd64-mo-guangzhou-2xlarge16
+    - amd64-mo-guangzhou-2xlarge32
+    - amd64-mo-guangzhou-medium8
+    - amd64-mo-shanghai-4xlarge32
+    - amd64-mo-shanghai-dind
+    - arm64-mo-guangzhou-2xlarge16
+    - arm64-mo-shanghai-4c8g
+    - arm64-mo-shanghai-8c16g
+    - mac-arm64-mini
+    - macos-12
+    - macos-13
+
+paths:
+  .github/workflows/**/*.{yml,yaml}:
+    ignore:
+      # These jobs are deliberately retained but disabled for later reuse.
+      - 'constant expression "false" in condition'
+      # Reusable-workflow-only contexts are supplied by MatrixOne callers.
+      - 'property "workflow_(repository|sha)" is not defined'
+  .github/workflows/robot.yaml:
+    ignore:
+      # Existing legacy workflow; keep new changes clean without broadening
+      # this artifact-resilience PR into a robot migration.
+      - 'workflow command "set-output" was deprecated'
+  .github/workflows/utils.yaml:
+    ignore:
+      # Legacy release workflow pinned from MatrixOne at CI@release/3.0-dev.
+      - 'property "setup_mo_test_env" is not defined'

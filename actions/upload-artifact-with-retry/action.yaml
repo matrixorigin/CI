@@ -1,5 +1,5 @@
 name: Upload artifact with retry
-description: Retry transient GitHub artifact-service failures without rerunning producer work.
+description: Retry artifact publication failures without rerunning producer work.
 
 inputs:
   name:
@@ -114,5 +114,5 @@ runs:
       if: ${{ !cancelled() && steps.upload_1.outcome == 'failure' && steps.upload_2.outcome == 'failure' && steps.upload_3.outcome == 'failure' }}
       shell: bash
       run: |
-        echo '::error title=Artifact upload failed::All 3 attempts failed. See the preceding upload steps for the service error.'
+        echo '::error title=Artifact upload failed::All 3 attempts failed. See the preceding upload steps for the root error.'
         exit 1

@@ -1,0 +1,223 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Upload artifact retry state-machine contract",
+  "type": "object",
+  "required": ["inputs", "outputs", "runs"],
+  "properties": {
+    "inputs": {
+      "type": "object",
+      "required": [
+        "name",
+        "path",
+        "if-no-files-found",
+        "retention-days",
+        "overwrite",
+        "compression-level"
+      ],
+      "properties": {
+        "name": {
+          "type": "object",
+          "required": ["required"],
+          "properties": {
+            "required": {"const": true}
+          }
+        },
+        "path": {
+          "type": "object",
+          "required": ["required"],
+          "properties": {
+            "required": {"const": true}
+          }
+        }
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "required": ["artifact-id", "artifact-url", "artifact-digest"],
+      "properties": {
+        "artifact-id": {
+          "type": "object",
+          "required": ["value"],
+          "properties": {
+            "value": {
+              "const": "${{ steps.upload_3.outcome == 'success' && steps.upload_3.outputs['artifact-id'] || steps.upload_2.outcome == 'success' && steps.upload_2.outputs['artifact-id'] || steps.upload_1.outcome == 'success' && steps.upload_1.outputs['artifact-id'] || '' }}"
+            }
+          }
+        },
+        "artifact-url": {
+          "type": "object",
+          "required": ["value"],
+          "properties": {
+            "value": {
+              "const": "${{ steps.upload_3.outcome == 'success' && steps.upload_3.outputs['artifact-url'] || steps.upload_2.outcome == 'success' && steps.upload_2.outputs['artifact-url'] || steps.upload_1.outcome == 'success' && steps.upload_1.outputs['artifact-url'] || '' }}"
+            }
+          }
+        },
+        "artifact-digest": {
+          "type": "object",
+          "required": ["value"],
+          "properties": {
+            "value": {
+              "const": "${{ steps.upload_3.outcome == 'success' && steps.upload_3.outputs['artifact-digest'] || steps.upload_2.outcome == 'success' && steps.upload_2.outputs['artifact-digest'] || steps.upload_1.outcome == 'success' && steps.upload_1.outputs['artifact-digest'] || '' }}"
+            }
+          }
+        }
+      }
+    },
+    "runs": {
+      "type": "object",
+      "required": ["using", "steps"],
+      "properties": {
+        "using": {"const": "composite"},
+        "steps": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "items": [
+            {
+              "allOf": [
+                {"$ref": "#/definitions/upload"},
+                {
+                  "properties": {
+                    "id": {"const": "upload_1"},
+                    "if": {"const": "${{ !cancelled() }}"},
+                    "with": {
+                      "properties": {
+                        "overwrite": {"const": "${{ inputs.overwrite }}"}
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {"$ref": "#/definitions/best-effort-shell"},
+                {
+                  "properties": {
+                    "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' }}"},
+                    "run": {"type": "string", "pattern": "sleep 5"}
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {"$ref": "#/definitions/upload"},
+                {
+                  "properties": {
+                    "id": {"const": "upload_2"},
+                    "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' }}"},
+                    "with": {
+                      "properties": {
+                        "overwrite": {"const": true}
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {"$ref": "#/definitions/best-effort-shell"},
+                {
+                  "properties": {
+                    "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' && steps.upload_2.outcome == 'success' }}"},
+                    "run": {"type": "string", "pattern": "succeeded on attempt 2/3"}
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {"$ref": "#/definitions/best-effort-shell"},
+                {
+                  "properties": {
+                    "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' && steps.upload_2.outcome == 'failure' }}"},
+                    "run": {"type": "string", "pattern": "sleep 15"}
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {"$ref": "#/definitions/upload"},
+                {
+                  "properties": {
+                    "id": {"const": "upload_3"},
+                    "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' && steps.upload_2.outcome == 'failure' }}"},
+                    "with": {
+                      "properties": {
+                        "overwrite": {"const": true}
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {"$ref": "#/definitions/best-effort-shell"},
+                {
+                  "properties": {
+                    "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' && steps.upload_2.outcome == 'failure' && steps.upload_3.outcome == 'success' }}"},
+                    "run": {"type": "string", "pattern": "succeeded on attempt 3/3"}
+                  }
+                }
+              ]
+            },
+            {
+              "type": "object",
+              "required": ["if", "shell", "run"],
+              "not": {"required": ["continue-on-error"]},
+              "properties": {
+                "if": {"const": "${{ !cancelled() && steps.upload_1.outcome == 'failure' && steps.upload_2.outcome == 'failure' && steps.upload_3.outcome == 'failure' }}"},
+                "shell": {"const": "bash"},
+                "run": {"type": "string", "pattern": "exit 1"}
+              }
+            }
+          ],
+          "additionalItems": false
+        }
+      }
+    }
+  },
+  "definitions": {
+    "upload": {
+      "type": "object",
+      "required": ["id", "if", "continue-on-error", "uses", "with"],
+      "properties": {
+        "continue-on-error": {"const": true},
+        "uses": {"const": "actions/upload-artifact@v7"},
+        "with": {
+          "type": "object",
+          "required": [
+            "name",
+            "path",
+            "if-no-files-found",
+            "retention-days",
+            "overwrite",
+            "compression-level"
+          ],
+          "properties": {
+            "name": {"const": "${{ inputs.name }}"},
+            "path": {"const": "${{ inputs.path }}"},
+            "if-no-files-found": {"const": "${{ inputs.if-no-files-found }}"},
+            "retention-days": {"const": "${{ inputs.retention-days }}"},
+            "overwrite": {},
+            "compression-level": {"const": "${{ inputs.compression-level }}"}
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "best-effort-shell": {
+      "type": "object",
+      "required": ["if", "continue-on-error", "shell", "run"],
+      "properties": {
+        "continue-on-error": {"const": true},
+        "shell": {"const": "bash"}
+      }
+    }
+  }
+}

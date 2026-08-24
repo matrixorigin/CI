@@ -284,7 +284,7 @@ jobs:
               echo '- Artifact publication: succeeded as `final-result-files`.' >> "$GITHUB_STEP_SUMMARY"
             fi
           else
-            echo '- Artifact publication: failed after 3 attempts; see `Upload coverage result` for the underlying service errors.' >> "$GITHUB_STEP_SUMMARY"
+            echo '- Artifact publication: failed after 3 attempts; see `Upload coverage result` for the underlying upload errors.' >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Upload coverage merge diagnostics
         if: ${{ failure() && !cancelled() }}
