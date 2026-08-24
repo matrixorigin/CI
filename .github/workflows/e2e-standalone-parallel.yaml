@@ -466,15 +466,6 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload Compose + Pessimistic BVT execution log
-        if: ${{ always() && !cancelled() }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: bvt-execution-pessimistic
-          path: ${{ runner.temp }}/bvt-pessimistic.log
-          if-no-files-found: warn
-          retention-days: 7
-
       - name: Print Docker Info Before Container Shutdown
         if: ${{ always() }}
         run: |
@@ -538,6 +529,19 @@ jobs:
             ${{ runner.temp }}/bvt-pessimistic-manifest.json
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Upload Compose + Pessimistic BVT execution log
+        if: ${{ always() && !cancelled() }}
+        # This log is diagnostic: publish it after the required coverage and
+        # do not turn a successful producer into a failed prerequisite.
+        continue-on-error: true
+        uses: matrixorigin/CI/actions/upload-artifact-with-retry@main
+        with:
+          name: bvt-execution-pessimistic
+          path: ${{ runner.temp }}/bvt-pessimistic.log
+          if-no-files-found: warn
+          retention-days: 7
+          overwrite: true
 
       - name: generate upload files
         if: ${{ always() }}
