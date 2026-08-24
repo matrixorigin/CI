@@ -3,6 +3,7 @@ import github from '@actions/github';
 import chalk from 'chalk';
 import { fromMarkdown } from 'mdast-util-from-markdown';
 import { toString } from 'mdast-util-to-string'
+import { normalizePullContent } from './pull-content.js';
 
 const thisRepo = core.getInput("this_repo",{required: false})
 if (thisRepo != `${github.context.repo.owner}/${github.context.repo.repo}`) {
@@ -28,9 +29,10 @@ async function main() {
         ...github.context.repo,
         pull_number: github.context.payload.pull_request.number
     })
-    let pullContent = pull.body;
-    if (pullContent === undefined || pullContent.length == 0) {
+    let pullContent = normalizePullContent(pull.body);
+    if (pullContent.length == 0) {
         core.setFailed(`this request is not pull_request or the body of this pull_request is empty`);
+        return
     }
 
     const urlReplace = /\[.*\]\((http.*)\)/igm

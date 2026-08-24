@@ -43390,6 +43390,11 @@ function defaultOnError(left, right) {
   }
 }
 
+;// CONCATENATED MODULE: ./src/pull-content.js
+function normalizePullContent(body) {
+    return typeof body === "string" ? body : "";
+}
+
 ;// CONCATENATED MODULE: ./src/index.js
 
 
@@ -43421,9 +43426,10 @@ async function main() {
         ...github.context.repo,
         pull_number: github.context.payload.pull_request.number
     })
-    let pullContent = pull.body;
-    if (pullContent === undefined || pullContent.length == 0) {
+    let pullContent = normalizePullContent(pull.body);
+    if (pullContent.length == 0) {
         core.setFailed(`this request is not pull_request or the body of this pull_request is empty`);
+        return
     }
 
     const urlReplace = /\[.*\]\((http.*)\)/igm
@@ -43551,4 +43557,3 @@ function checkContentValid(messageContent) {
 main();
 
 })();
-
