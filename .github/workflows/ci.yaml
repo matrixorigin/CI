@@ -3,6 +3,12 @@ name: MatrixOne CI
 
 on:
   workflow_call:
+    inputs:
+      ut_parallel:
+        description: "Maximum number of UT packages built and tested concurrently"
+        required: false
+        type: number
+        default: 6
     secrets:
       TOKEN_ACTION:
         description: "Token for checkout (e.g. pull from fork/private)"
@@ -251,7 +257,9 @@ jobs:
         run: |
           # Keep the explicit config and time it separately for the proxy canary.
           cd $GITHUB_WORKSPACE && make clean && time make config
-          time make ut UT_PARALLEL=${{ vars.UT_PARALLEL || 6 }} UT_TIMEOUT=${{ vars.UT_TIMEOUT || 40 }}
+          # Keep the repository variable as the operational override while
+          # allowing callers to run a scoped parallelism experiment.
+          time make ut UT_PARALLEL=${{ vars.UT_PARALLEL || inputs.ut_parallel }} UT_TIMEOUT=${{ vars.UT_TIMEOUT || 40 }}
       - name: Print Result(Old)
         if: ${{ always() }}
         continue-on-error: true
