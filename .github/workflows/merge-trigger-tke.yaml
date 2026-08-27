@@ -442,7 +442,21 @@ jobs:
           echo "=========================="
 
           cd $GITHUB_WORKSPACE/mo-tester
-          ./run.sh -n -g -o -p $GITHUB_WORKSPACE/matrixone/test/distributed/cases -e optimistic  2>&1
+          # DATASTREAM BVT requires jstfu listening on 127.0.0.1:4444 in every
+          # CN network namespace. The regular Compose CI starts that sidecar and
+          # continues to run these cases. Checkin deploys a MatrixOneCluster to
+          # TKE instead, where adding the per-CN sidecar, its build artifact, and
+          # its readiness contract is substantially more involved. Keep checkin
+          # useful for all other distributed cases while that TKE deployment is
+          # implemented; do not remove this exclusion until jstfu is available
+          # and ready in every checkin CN pod.
+          case_root="$GITHUB_WORKSPACE/matrixone/test/distributed/cases"
+          include_list=$(find "$case_root" -type f \( -name '*.sql' -o -name '*.test' \) \
+            ! -path "$case_root/datastream/datastream.sql" \
+            ! -path "$case_root/datastream/datastream_load.sql" \
+            -print | LC_ALL=C sort | paste -sd, -)
+          test -n "$include_list"
+          ./run.sh -n -g -o -p "$case_root" -i "$include_list" -e optimistic 2>&1
           rm -rf .git lib
       - name: Collect Upload files
         if: ${{ always() || cancelled() }}
