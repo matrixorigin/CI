@@ -451,12 +451,14 @@ jobs:
           # implemented; do not remove this exclusion until jstfu is available
           # and ready in every checkin CN pod.
           case_root="$GITHUB_WORKSPACE/matrixone/test/distributed/cases"
-          include_list=$(find "$case_root" -type f \( -name '*.sql' -o -name '*.test' \) \
-            ! -path "$case_root/datastream/datastream.sql" \
-            ! -path "$case_root/datastream/datastream_load.sql" \
-            -print | LC_ALL=C sort | paste -sd, -)
-          test -n "$include_list"
-          ./run.sh -n -g -o -p "$case_root" -i "$include_list" -e optimistic 2>&1
+          disabled_datastream_dir="${case_root}.datastream-disabled"
+          test -d "$case_root/datastream"
+          # Passing every remaining script through run.sh -i exceeds execve's
+          # argument-size limit. Move the suite outside the scanned root and
+          # always restore it when this step exits instead.
+          mv "$case_root/datastream" "$disabled_datastream_dir"
+          trap 'mv "$disabled_datastream_dir" "$case_root/datastream"' EXIT
+          ./run.sh -n -g -o -p "$case_root" -e optimistic 2>&1
           rm -rf .git lib
       - name: Collect Upload files
         if: ${{ always() || cancelled() }}
