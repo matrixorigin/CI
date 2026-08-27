@@ -259,7 +259,7 @@ jobs:
           cd $GITHUB_WORKSPACE && make clean && time make config
           # Keep the repository variable as the operational override while
           # allowing callers to run a scoped parallelism experiment.
-          time make ut UT_PARALLEL=${{ vars.UT_PARALLEL || inputs.ut_parallel }} UT_TIMEOUT=${{ vars.UT_TIMEOUT || 40 }}
+          time make ut UT_CONFIGURED=1 UT_PARALLEL=${{ vars.UT_PARALLEL || inputs.ut_parallel }} UT_TIMEOUT=${{ vars.UT_TIMEOUT || 40 }}
       - name: Print Result(Old)
         if: ${{ always() }}
         continue-on-error: true
