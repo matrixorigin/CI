@@ -9,6 +9,11 @@ on:
         required: false
         type: number
         default: 6
+      ut_sharded:
+        description: "Run the complete race UT suite as three disjoint parallel shards"
+        required: false
+        type: boolean
+        default: false
     secrets:
       TOKEN_ACTION:
         description: "Token for checkout (e.g. pull from fork/private)"
@@ -45,10 +50,14 @@ on:
         required: true
 
 jobs:
-  ut-linux-x86:
+  ut-linux-x86-shard:
+    strategy:
+      fail-fast: false
+      matrix:
+        ut_shard: ${{ fromJSON(inputs.ut_sharded && '["light","issues","embedded","heavy-plan"]' || '["all"]') }}
     environment: ci
     runs-on: ${{ vars.UT_RUNNER_LABEL || 'ubuntu-22.04' }}
-    name: UT Test on Ubuntu/x86
+    name: UT Test shard ${{ matrix.ut_shard }} on Ubuntu/x86
     steps:
       - name: Pre Clean Some Unneeded Images
         run: |
@@ -259,7 +268,7 @@ jobs:
           cd $GITHUB_WORKSPACE && make clean && time make config
           # Keep the repository variable as the operational override while
           # allowing callers to run a scoped parallelism experiment.
-          time make ut UT_CONFIGURED=1 UT_PARALLEL=${{ vars.UT_PARALLEL || inputs.ut_parallel }} UT_TIMEOUT=${{ vars.UT_TIMEOUT || 40 }}
+          time make ut UT_CONFIGURED=1 UT_PARALLEL=${{ vars.UT_PARALLEL || inputs.ut_parallel }} UT_TIMEOUT=${{ vars.UT_TIMEOUT || 40 }} UT_SHARD=${{ matrix.ut_shard }}
       - name: Print Result(Old)
         if: ${{ always() }}
         continue-on-error: true
@@ -307,6 +316,25 @@ jobs:
         continue-on-error: true
         run: |
           find ./ut-report -name top.txt -exec cat {} \;
+
+  # Preserve the established required-check name and make it an AND gate over
+  # every shard. fail-fast=false above ensures one failure cannot hide missing
+  # coverage by cancelling the other shards.
+  ut-linux-x86:
+    if: ${{ always() }}
+    needs: ut-linux-x86-shard
+    runs-on: ubuntu-22.04
+    name: UT Test on Ubuntu/x86
+    steps:
+      - name: Require every UT shard
+        env:
+          UT_SHARD_RESULT: ${{ needs.ut-linux-x86-shard.result }}
+        run: |
+          if [[ "${UT_SHARD_RESULT}" != "success" ]]; then
+            echo "One or more UT shards did not succeed: ${UT_SHARD_RESULT}"
+            exit 1
+          fi
+          echo "Every UT shard succeeded"
 
   ut-mac-x86:
     #if: ${{ !github.event.pull_request.draft }}
