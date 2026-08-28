@@ -31,6 +31,9 @@ runs:
   using: "composite"
   steps:
     - name: Set up QEMU
+      # Native-only builds do not need binfmt. Skipping QEMU also keeps the
+      # TKE checkin path from pulling tonistiigi/binfmt from Docker Hub.
+      if: ${{ inputs.platform != 'linux/amd64' }}
       uses: docker/setup-qemu-action@v3
       with:
         image: tonistiigi/binfmt:latest

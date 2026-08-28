@@ -192,6 +192,9 @@ jobs:
           tags: ${{ steps.prep.outputs.tags }}
           file-path: ${{ github.workspace }}/matrixone/optools/images/Dockerfile.prebuilt
           context: ${{ github.workspace }}/mo-runtime
+          # setup-buildx defaults to moby/buildkit on Docker Hub. Use the IDC
+          # mirror so transient Docker Hub egress failures cannot block checkin.
+          buildx-driver-opts: image=shanghai.idc.matrixorigin.cn:30019/public/buildkit@sha256:58e6d150a3c5a4b92e99ea8df2cbe976ad6d2ae5beab39214e84fada05b059d5
           # Keep the tiny prebuilt image cache separate from the expensive
           # source-build cache. Otherwise a successful cached build erases the
           # source layers needed by the fallback path.
@@ -228,6 +231,8 @@ jobs:
           tags: ${{ steps.prep.outputs.tags }}
           file-path: ${{ github.workspace }}/matrixone/optools/images/Dockerfile
           context: ${{ github.workspace }}/matrixone
+          # Keep the fallback path independent of Docker Hub too.
+          buildx-driver-opts: image=shanghai.idc.matrixorigin.cn:30019/public/buildkit@sha256:58e6d150a3c5a4b92e99ea8df2cbe976ad6d2ae5beab39214e84fada05b059d5
           cache-from: type=registry,ref=${{ steps.prep.outputs.docker_image }}:cache-source-${{ github.base_ref }}
           cache-to: type=registry,ref=${{ steps.prep.outputs.docker_image }}:cache-source-${{ github.base_ref }},mode=max
           platform: linux/amd64
