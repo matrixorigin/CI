@@ -10,7 +10,7 @@ on:
         type: number
         default: 6
       ut_sharded:
-        description: "Run the complete race UT suite as three disjoint parallel shards"
+        description: "Run the complete race UT suite as four disjoint parallel shards"
         required: false
         type: boolean
         default: false
@@ -53,11 +53,16 @@ jobs:
   ut-linux-x86-shard:
     strategy:
       fail-fast: false
+      # Bound runner fan-out even if the shard list evolves later.
+      max-parallel: 4
       matrix:
         ut_shard: ${{ fromJSON(inputs.ut_sharded && '["light","issues","embedded","heavy-plan"]' || '["all"]') }}
     environment: ci
     runs-on: ${{ vars.UT_RUNNER_LABEL || 'ubuntu-22.04' }}
-    name: UT Test shard ${{ matrix.ut_shard }} on Ubuntu/x86
+    # Preserve the existing check and execution path for every caller that has
+    # not opted into sharding. In sharded mode only the summary job below owns
+    # the established required-check name.
+    name: ${{ inputs.ut_sharded && format('UT Test shard {0} on Ubuntu/x86', matrix.ut_shard) || 'UT Test on Ubuntu/x86' }}
     steps:
       - name: Pre Clean Some Unneeded Images
         run: |
@@ -266,9 +271,10 @@ jobs:
         run: |
           # Keep the explicit config and time it separately for the proxy canary.
           cd $GITHUB_WORKSPACE && make clean && time make config
-          # Keep the repository variable as the operational override while
-          # allowing callers to run a scoped parallelism experiment.
-          time make ut UT_CONFIGURED=1 UT_PARALLEL=${{ vars.UT_PARALLEL || inputs.ut_parallel }} UT_TIMEOUT=${{ vars.UT_TIMEOUT || 40 }} UT_SHARD=${{ matrix.ut_shard }}
+          # Unsharded callers retain the repository-variable override. An
+          # explicit sharded canary owns its per-runner budget so an inherited
+          # variable cannot silently replace the requested experiment value.
+          time make ut UT_CONFIGURED=1 UT_PARALLEL=${{ inputs.ut_sharded && inputs.ut_parallel || vars.UT_PARALLEL || inputs.ut_parallel }} UT_TIMEOUT=${{ vars.UT_TIMEOUT || 40 }} UT_SHARD=${{ matrix.ut_shard }}
       - name: Print Result(Old)
         if: ${{ always() }}
         continue-on-error: true
@@ -319,12 +325,14 @@ jobs:
 
   # Preserve the established required-check name and make it an AND gate over
   # every shard. fail-fast=false above ensures one failure cannot hide missing
-  # coverage by cancelling the other shards.
+  # coverage by cancelling the other shards. Keep this job disabled for the
+  # default single-runner mode: its real UT job already owns the required name,
+  # so merging this workflow has no extra runner cost for existing callers.
   ut-linux-x86:
-    if: ${{ always() }}
+    if: ${{ always() && inputs.ut_sharded }}
     needs: ut-linux-x86-shard
     runs-on: ubuntu-22.04
-    name: UT Test on Ubuntu/x86
+    name: ${{ inputs.ut_sharded && 'UT Test on Ubuntu/x86' || 'UT shard summary (disabled)' }}
     steps:
       - name: Require every UT shard
         env:
