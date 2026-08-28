@@ -124,7 +124,10 @@ jobs:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
+          # Every matrix child must test the immutable commit that triggered
+          # this run. A mutable branch ref can move while sibling shards queue,
+          # producing one green check from tests of different revisions.
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Set up Go
         uses: matrixorigin/CI/actions/setup-env@main
         with:
@@ -357,7 +360,7 @@ jobs:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Set up Go
         uses: matrixorigin/CI/actions/setup-env@main
         with:
@@ -399,7 +402,7 @@ jobs:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: thiagodnf/yaml-schema-checker@v0.0.12
         name: Check Issue Template
         with:
