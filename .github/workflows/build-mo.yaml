@@ -38,8 +38,9 @@ jobs:
     # anonymous), and the checkout does not persist its token.
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
     name: Build MatrixOne (shared)
-    # A cold jstfu dependency cache can add about two minutes after the Go
-    # build. Keep bounded headroom without changing the normal critical path.
+    # A first-run or dependency-changing jstfu build can add about two minutes
+    # after the Go build. Keep bounded headroom; ordinary PRs restore the cache
+    # populated by the trusted main-branch warmer.
     timeout-minutes: 45
     outputs:
       artifact_name: ${{ steps.package.outputs.artifact_name }}
@@ -51,6 +52,22 @@ jobs:
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
+
+      # Old or unrebased MatrixOne heads do not understand the prebuilt-jstfu
+      # environment contract. Do not add a serial Maven build that those
+      # consumers would ignore and then repeat inside Compose.
+      - name: Detect jstfu prebuilt contract
+        id: jstfu-contract
+        run: |
+          set -euo pipefail
+          enabled=false
+          if [ -f xtool/jstfu/pom.xml ] \
+            && grep -q '^jstfu-test:' Makefile \
+            && grep -qx 'x-jstfu-prebuilt-contract: "1"' etc/launch-tae-compose/compose.yaml; then
+            enabled=true
+          fi
+          echo "enabled=${enabled}" >> "$GITHUB_OUTPUT"
+          echo "jstfu prebuilt contract enabled: ${enabled}"
 
       # The nightly ci-builder image (matrixorigin/CI image-build.yaml,
       # ci-builder job; Dockerfile at optools/images/Dockerfile.ci-builder)
@@ -183,31 +200,59 @@ jobs:
       # in the run-scoped artifact. Consumers verify the recorded digest before
       # bypassing their local Maven build.
       - name: Set up JDK 17 for jstfu
-        if: ${{ hashFiles('xtool/jstfu/pom.xml') != '' }}
+        if: ${{ steps.jstfu-contract.outputs.enabled == 'true' }}
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
-          cache: maven
-          cache-dependency-path: |
-            xtool/jstfu/pom.xml
-            xtool/jstfu/.mvn/wrapper/maven-wrapper.properties
+
+      # pull_request_target is intentionally read-only for the default-branch
+      # cache scope. A trusted push/schedule workflow in MatrixOne populates
+      # this cache; PR code can restore it but can never publish cache content.
+      - name: Restore trusted jstfu Maven cache
+        id: jstfu-maven-cache
+        if: ${{ steps.jstfu-contract.outputs.enabled == 'true' }}
+        continue-on-error: true
+        env:
+          # One cache segment is larger than this 73MB cache. Bound a stalled
+          # cache service well below the job timeout, then use online Maven.
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: .jstfu-maven-cache
+          key: matrixone-jstfu-maven-v1-${{ runner.os }}-${{ runner.arch }}-jdk17-${{ hashFiles('xtool/jstfu/pom.xml', 'xtool/jstfu/.mvn/wrapper/maven-wrapper.properties', 'xtool/jstfu/mvnw') }}
+          restore-keys: |
+            matrixone-jstfu-maven-v1-${{ runner.os }}-${{ runner.arch }}-jdk17-
+
+      - name: Discard a partially restored jstfu cache
+        if: ${{ steps.jstfu-contract.outputs.enabled == 'true' && steps.jstfu-maven-cache.outcome == 'failure' }}
+        run: |
+          set -euo pipefail
+          cache_dir="$GITHUB_WORKSPACE/.jstfu-maven-cache"
+          echo "::warning::jstfu cache restore failed; using a clean online Maven build"
+          rm -rf "${cache_dir}"
+          mkdir -p "${cache_dir}"
 
       - name: Test and build jstfu
-        if: ${{ hashFiles('xtool/jstfu/pom.xml') != '' }}
+        if: ${{ steps.jstfu-contract.outputs.enabled == 'true' }}
         timeout-minutes: 10
+        env:
+          MAVEN_USER_HOME: ${{ github.workspace }}/.jstfu-maven-cache
+          JSTFU_MVN_FLAGS: >-
+            -B --no-transfer-progress
+            -Dmaven.wagon.http.retryHandler.count=3
+            -Dmaven.repo.local=${{ github.workspace }}/.jstfu-maven-cache/repository
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
-          if grep -q '^jstfu-test:' Makefile; then
-            make jstfu-test
+          if [ '${{ steps.jstfu-maven-cache.outputs.cache-hit }}' = 'true' ]; then
+            # The trusted warmer proved this exact dependency graph complete.
+            # Offline mode removes Maven Central from the normal PR path.
+            JSTFU_MVN_FLAGS="${JSTFU_MVN_FLAGS} --offline" make jstfu-test
           else
-            # Merge-order compatibility for MatrixOne revisions before the
-            # repository-owned target exists.
-            cd xtool/jstfu
-            ./mvnw -B --no-transfer-progress \
-              -Dmaven.wagon.http.retryHandler.count=3 verify
-            cd "$GITHUB_WORKSPACE"
+            # A PR that changes the POM or wrapper restores the trusted prefix
+            # and downloads only its new dependency delta. It cannot save it.
+            make jstfu-test
           fi
           test -s xtool/jstfu/target/jstfu.jar
           jar tf xtool/jstfu/target/jstfu.jar >/dev/null
@@ -219,6 +264,14 @@ jobs:
           incompatible = []
           checked = 0
           with zipfile.ZipFile(jar) as archive:
+              required = {"META-INF/MANIFEST.MF", "io/matrixone/jstfu/Main.class"}
+              missing = required.difference(archive.namelist())
+              if missing:
+                  raise SystemExit(f"required jstfu entries missing: {sorted(missing)}")
+              manifest = archive.read("META-INF/MANIFEST.MF").decode("utf-8", "replace")
+              manifest_lines = {line.rstrip("\r") for line in manifest.splitlines()}
+              if "Main-Class: io.matrixone.jstfu.Main" not in manifest_lines:
+                  raise SystemExit("jstfu.jar has no expected Main-Class")
               for entry in archive.infolist():
                   if not entry.filename.endswith(".class"):
                       continue
@@ -226,13 +279,16 @@ jobs:
                   # path must remain fully loadable by the BVT sidecar's JRE 8.
                   if entry.filename.startswith("META-INF/versions/"):
                       continue
-                  header = archive.read(entry)[:8]
+                  with archive.open(entry) as class_file:
+                      header = class_file.read(8)
                   if len(header) != 8 or header[:4] != b"\xca\xfe\xba\xbe":
                       raise SystemExit(f"invalid class file: {entry.filename}")
                   major = struct.unpack(">H", header[6:8])[0]
                   checked += 1
                   if major > 52:
                       incompatible.append((entry.filename, major))
+          if checked == 0:
+              raise SystemExit("jstfu.jar contains no Java 8-reachable classes")
           if incompatible:
               sample = ", ".join(f"{name}={major}" for name, major in incompatible[:10])
               raise SystemExit(f"Java 8-incompatible classes in jstfu.jar: {sample}")
@@ -247,7 +303,7 @@ jobs:
           git rev-parse --short HEAD
           jstfu_sha256=""
           jstfu_artifacts=()
-          if [ -f xtool/jstfu/pom.xml ]; then
+          if [ '${{ steps.jstfu-contract.outputs.enabled }}' = 'true' ]; then
             test -s xtool/jstfu/target/jstfu.jar
             jstfu_sha256=$(sha256sum xtool/jstfu/target/jstfu.jar | awk '{print $1}')
             jstfu_artifacts+=(xtool/jstfu/target/jstfu.jar)
