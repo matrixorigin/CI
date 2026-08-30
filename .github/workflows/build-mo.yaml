@@ -38,7 +38,9 @@ jobs:
     # anonymous), and the checkout does not persist its token.
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-22.04' }}
     name: Build MatrixOne (shared)
-    timeout-minutes: 40
+    # A cold jstfu dependency cache can add about two minutes after the Go
+    # build. Keep bounded headroom without changing the normal critical path.
+    timeout-minutes: 45
     outputs:
       artifact_name: ${{ steps.package.outputs.artifact_name }}
     steps:
@@ -176,15 +178,84 @@ jobs:
           # make clean also clears any partial cached-build outputs.
           make clean && make GOBUILD_OPT='${{ inputs.gobuild_opt }}' build
 
+      # Compose BVT needs the Java datastream reference server. Build and test
+      # it once at the same untrusted PR head as mo-service, then publish both
+      # in the run-scoped artifact. Consumers verify the recorded digest before
+      # bypassing their local Maven build.
+      - name: Set up JDK 17 for jstfu
+        if: ${{ hashFiles('xtool/jstfu/pom.xml') != '' }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+          cache-dependency-path: |
+            xtool/jstfu/pom.xml
+            xtool/jstfu/.mvn/wrapper/maven-wrapper.properties
+
+      - name: Test and build jstfu
+        if: ${{ hashFiles('xtool/jstfu/pom.xml') != '' }}
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          if grep -q '^jstfu-test:' Makefile; then
+            make jstfu-test
+          else
+            # Merge-order compatibility for MatrixOne revisions before the
+            # repository-owned target exists.
+            cd xtool/jstfu
+            ./mvnw -B --no-transfer-progress \
+              -Dmaven.wagon.http.retryHandler.count=3 verify
+            cd "$GITHUB_WORKSPACE"
+          fi
+          test -s xtool/jstfu/target/jstfu.jar
+          jar tf xtool/jstfu/target/jstfu.jar >/dev/null
+          python3 - <<'PY'
+          import struct
+          import zipfile
+
+          jar = "xtool/jstfu/target/jstfu.jar"
+          incompatible = []
+          checked = 0
+          with zipfile.ZipFile(jar) as archive:
+              for entry in archive.infolist():
+                  if not entry.filename.endswith(".class"):
+                      continue
+                  # Java 8 ignores multi-release alternatives. The base class
+                  # path must remain fully loadable by the BVT sidecar's JRE 8.
+                  if entry.filename.startswith("META-INF/versions/"):
+                      continue
+                  header = archive.read(entry)[:8]
+                  if len(header) != 8 or header[:4] != b"\xca\xfe\xba\xbe":
+                      raise SystemExit(f"invalid class file: {entry.filename}")
+                  major = struct.unpack(">H", header[6:8])[0]
+                  checked += 1
+                  if major > 52:
+                      incompatible.append((entry.filename, major))
+          if incompatible:
+              sample = ", ".join(f"{name}={major}" for name, major in incompatible[:10])
+              raise SystemExit(f"Java 8-incompatible classes in jstfu.jar: {sample}")
+          print(f"validated {checked} Java 8-compatible classes in jstfu.jar")
+          PY
+
       - name: Package build artifact
         id: package
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
           git rev-parse --short HEAD
+          jstfu_sha256=""
+          jstfu_artifacts=()
+          if [ -f xtool/jstfu/pom.xml ]; then
+            test -s xtool/jstfu/target/jstfu.jar
+            jstfu_sha256=$(sha256sum xtool/jstfu/target/jstfu.jar | awk '{print $1}')
+            jstfu_artifacts+=(xtool/jstfu/target/jstfu.jar)
+          fi
           {
             echo 'head_sha=${{ github.event.pull_request.head.sha }}'
             echo 'gobuild_opt=${{ inputs.gobuild_opt }}'
+            echo "jstfu_sha256=${jstfu_sha256}"
           } > BUILD_INFO
           # Consolidate every runtime DSO under lib/, the binary'"'"'s
           # $ORIGIN/lib rpath: make build already put the thirdparties
@@ -200,7 +271,7 @@ jobs:
           pack_dir="${RUNNER_TEMP}/mo-build"
           mkdir -p "${pack_dir}"
           tar --exclude='*.a' -czf "${pack_dir}/mo-build.tar.gz" \
-            BUILD_INFO mo-service lib dict
+            BUILD_INFO mo-service lib dict "${jstfu_artifacts[@]}"
           ls -lh "${pack_dir}/mo-build.tar.gz"
           echo "artifact_name=mo-shared-build-attempt-${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
 

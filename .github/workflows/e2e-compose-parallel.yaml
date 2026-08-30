@@ -264,6 +264,9 @@ jobs:
           # run provides one; otherwise (or on any mismatch/failure) fall back
           # to the full in-docker build.
           image_built=0
+          jstfu_prebuilt=0
+          shared_jstfu=""
+          jstfu_expected_sha256=""
           prebuilt_tar="${RUNNER_TEMP}/mo-prebuilt/mo-build.tar.gz"
           if [ -s "${prebuilt_tar}" ] && [ -f ./optools/images/Dockerfile.prebuilt ]; then
             ctx="${RUNNER_TEMP}/mo-image-ctx"
@@ -276,6 +279,15 @@ jobs:
             prebuilt_opt=$(sed -n 's/^gobuild_opt=//p' "${ctx}/BUILD_INFO" 2>/dev/null || true)
             if [ "${prebuilt_sha}" = '${{ github.event.pull_request.head.sha }}' ] \
               && [ "${prebuilt_opt}" = '-cover' ]; then
+              shared_jstfu="${ctx}/xtool/jstfu/target/jstfu.jar"
+              jstfu_expected_sha256=$(sed -n 's/^jstfu_sha256=//p' "${ctx}/BUILD_INFO" 2>/dev/null || true)
+              if printf '%s\n' "${jstfu_expected_sha256}" | grep -Eq '^[0-9a-f]{64}$' \
+                && [ -s "${shared_jstfu}" ] \
+                && printf '%s  %s\n' "${jstfu_expected_sha256}" "${shared_jstfu}" | sha256sum -c -; then
+                jstfu_prebuilt=1
+              else
+                echo "::warning::shared jstfu artifact is unavailable or invalid; falling back to the compose source build"
+              fi
               cp -r ./etc "${ctx}/etc"
               if docker build -t matrixorigin/matrixone:latest \
                 -f ./optools/images/Dockerfile.prebuilt "${ctx}"; then
@@ -294,7 +306,21 @@ jobs:
           fi
 
           mkdir -p ${{ github.workspace }}/docker-compose-log
-          docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn up -d
+          if [ "${jstfu_prebuilt}" = "1" ]; then
+            mkdir -p ./xtool/jstfu/target
+            install -m 0644 "${shared_jstfu}" ./xtool/jstfu/target/jstfu.jar
+            printf '%s  %s\n' "${jstfu_expected_sha256}" ./xtool/jstfu/target/jstfu.jar | sha256sum -c -
+            export JSTFU_USE_PREBUILT=1
+            export JSTFU_EXPECTED_SHA256="${jstfu_expected_sha256}"
+            export JSTFU_BUILDER_IMAGE=matrixorigin/matrixone:latest
+            echo "Using shared exact-head jstfu.jar (${jstfu_expected_sha256})"
+          fi
+          if ! docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn up -d; then
+            docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn ps -a || true
+            docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn \
+              logs --no-color --timestamps jstfu-build || true
+            exit 1
+          fi
 
           # wait for ready
           i=1
