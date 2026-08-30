@@ -155,8 +155,9 @@ jobs:
           token: ${{ secrets.TOKEN_ACTION }}
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
-          sparse-checkout: scripts/prepare_coverage_cgo.sh
-          sparse-checkout-cone-mode: false
+          # Avoid partial clone here: materializing the sparse file can trigger
+          # a non-retried promisor fetch after checkout's normal fetch retries.
+          fetch-depth: "1"
           path: .ci-workflow
       # Best-effort: seed the Go build/module caches and the prebuilt C
       # thirdparties from the nightly ci-builder image (see
