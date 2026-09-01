@@ -13,6 +13,7 @@ on:
       - 'actions/upload-artifact-with-retry/state-machine.schema.json'
       - 'scripts/select_coverage_artifacts.py'
       - 'scripts/test_select_coverage_artifacts.py'
+      - 'scripts/test_merge_trigger_tke_subject.py'
 
 permissions:
   contents: read
@@ -58,6 +59,8 @@ jobs:
         run: ${{ steps.install-actionlint.outputs.executable }} -shellcheck= -pyflakes= -color
       - name: Test coverage artifact generation selection
         run: python3 scripts/test_select_coverage_artifacts.py -v
+      - name: Test TKE merge subject identity contract
+        run: python3 scripts/test_merge_trigger_tke_subject.py -v
       - name: Guard deliberate workflow disablements
         env:
           ACTIONLINT: ${{ steps.install-actionlint.outputs.executable }}
