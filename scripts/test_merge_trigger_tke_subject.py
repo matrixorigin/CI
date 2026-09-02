@@ -11,7 +11,10 @@ WORKFLOW = ROOT / ".github/workflows/merge-trigger-tke.yaml"
 def validate_subject_contract(source: str) -> None:
     merge_sha = "${{ github.event.pull_request.merge_commit_sha }}"
     verified_sha = "${{ needs.docker_image_build.outputs.full_commit_id }}"
+    unsafe_checkout_opt_in = "allow-unsafe-pr-checkout: true"
 
+    if "if: ${{ github.event.pull_request.merged == true }}" not in source:
+        raise AssertionError("image build is not restricted to merged pull requests")
     if "full_commit_id: ${{ steps.subject.outputs.commit_id }}" not in source:
         raise AssertionError("build job does not publish its verified full commit")
     if f"ref: {merge_sha}" not in source:
@@ -30,6 +33,10 @@ def validate_subject_contract(source: str) -> None:
         raise AssertionError("unexpected MatrixOne checkout inventory")
     if source.count(f"ref: {verified_sha}") != 2:
         raise AssertionError("Setup and BVT are not both bound to the built SHA")
+    if source.count(unsafe_checkout_opt_in) != 3:
+        raise AssertionError(
+            "exact MatrixOne checkouts must be the only unsafe checkout opt-ins"
+        )
 
     # Both CN resource checkouts use an explicit synthetic local ref sourced
     # from the same verified SHA.
@@ -71,6 +78,24 @@ class MergeTriggerTkeSubjectContractTest(unittest.TestCase):
             1,
         )
         with self.assertRaisesRegex(AssertionError, "built SHA"):
+            validate_subject_contract(broken)
+
+    def test_missing_fork_checkout_compatibility_is_rejected(self) -> None:
+        broken = self.source.replace(
+            "          allow-unsafe-pr-checkout: true\n",
+            "",
+            1,
+        )
+        with self.assertRaisesRegex(AssertionError, "unsafe checkout opt-ins"):
+            validate_subject_contract(broken)
+
+    def test_unmerged_pull_requests_are_rejected(self) -> None:
+        broken = self.source.replace(
+            "    if: ${{ github.event.pull_request.merged == true }}\n",
+            "",
+            1,
+        )
+        with self.assertRaisesRegex(AssertionError, "restricted to merged"):
             validate_subject_contract(broken)
 
 
