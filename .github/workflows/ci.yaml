@@ -547,4 +547,8 @@ jobs:
       - name: Static Code Analysis
         run: |
           cd $GITHUB_WORKSPACE
-          make static-check
+          # A cold full-repository golangci-lint run can exceed the 8 GiB ARM
+          # runner when it uses automatic concurrency. Keep every analyzer and
+          # package enabled, but serialize analyzer workers to leave headroom
+          # for the Go toolchain and runner agent.
+          make static-check GOLANGCI_LINT_CONCURRENCY=1
