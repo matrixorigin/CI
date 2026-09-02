@@ -50,6 +50,9 @@ jobs:
           # branch. A merged release-branch PR must build its exact immutable
           # merge result, not whichever main commit is current at dispatch.
           ref: ${{ github.event.pull_request.merge_commit_sha }}
+          # This job only runs after the PR is merged, so this SHA is already
+          # part of the trusted base repository rather than an unmerged fork head.
+          allow-unsafe-pr-checkout: true
       - name: Verify exact merged MatrixOne subject
         id: subject
         env:
@@ -279,6 +282,7 @@ jobs:
           token: ${{ secrets.TOKEN_ACTION }}
           path: ./matrixone
           ref: ${{ needs.docker_image_build.outputs.full_commit_id }}
+          allow-unsafe-pr-checkout: true
       - name: Clean TKE ENV
         run: |
           if [ "$(kubectl -n mo-checkin-regression-${{ github.event.pull_request.number }} get mo | grep -c "mo-checkin-regression")" -ne 0 ];then 
@@ -451,6 +455,7 @@ jobs:
           token: ${{ secrets.TOKEN_ACTION }}
           path: ./matrixone
           ref: ${{ needs.docker_image_build.outputs.full_commit_id }}
+          allow-unsafe-pr-checkout: true
       - name: Set JAVA PATH
         run: |
           echo "$JAVA_HOME/bin" >> $GITHUB_PATH
