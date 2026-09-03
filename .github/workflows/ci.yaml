@@ -395,6 +395,7 @@ jobs:
     # the smaller standard ARM runner. A repository variable remains an
     # explicit escape hatch for a larger runner.
     runs-on: ${{ vars.SCA_RUNNER_LABEL || 'arm64-mo-shanghai-4c8g' }}
+    timeout-minutes: 90
     name: SCA Test on Linux/arm64
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -424,7 +425,7 @@ jobs:
         run: |
           set -euo pipefail
           make clean
-          rm -rf .sca-static-check-tools
+          rm -rf .sca-static-check-tools .sca-golangci-analysis-cache
       - name: Resolve Go module cache metadata
         id: go-module-cache-metadata
         run: |
@@ -456,6 +457,8 @@ jobs:
             mkdir "$runtime_dir"
           fi
           echo "GOMODCACHE=$runtime_dir" >> "$GITHUB_ENV"
+      - name: Restore golangci-lint analysis cache
+        uses: matrixorigin/CI/actions/restore-sca-analysis-cache@main
       # Keep these metadata outputs and the key schema aligned with
       # matrixorigin/matrixone:.github/workflows/sca-go-module-cache.yaml.
       - name: Resolve native cache metadata
@@ -495,7 +498,9 @@ jobs:
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
-          make config
+          # The final static-check target owns the single full package-graph
+          # verification. Running config here as a separate make invocation
+          # duplicated `go list -test ./...` on every successful SCA job.
           if [[ "${{ steps.native-cache.outputs.cache-hit }}" == "true" ]] && \
             [[ -f thirdparties/install/include/xxhash.h ]] && \
             [[ -f thirdparties/install/include/usearch.h ]] && \
@@ -544,7 +549,63 @@ jobs:
           test -x "$runtime_dir/molint"
           test -x "$runtime_dir/license-eye"
           echo "$runtime_dir" >> "$GITHUB_PATH"
+      - name: Resolve PR license scope
+        id: license-scope
+        continue-on-error: true
+        uses: matrixorigin/CI/actions/resolve-sca-license-scope@main
+        with:
+          github-token: ${{ secrets.TOKEN_ACTION || github.token }}
       - name: Static Code Analysis
         run: |
-          cd $GITHUB_WORKSPACE
-          make static-check
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          # Keep the legacy path byte-for-byte equivalent during the two-PR
+          # rollout. The optimized path is enabled only after MatrixOne adds
+          # the companion target.
+          if ! grep -q '^static-check-analysis:' Makefile; then
+            echo "Incremental license target is unavailable; using complete static-check"
+            make static-check
+            exit 0
+          fi
+
+          # API/rate-limit/transient failures above must conservatively become
+          # the original complete checks, never a false green or a red gate.
+          license_header_full="${SCA_LICENSE_HEADER_FULL:-true}"
+          license_dependency_check="${SCA_LICENSE_DEPENDENCY_CHECK:-true}"
+          license_paths_file="${SCA_LICENSE_PATHS_FILE:-}"
+          if [[ "$license_header_full" != "true" ]] && \
+            [[ ! -f "$license_paths_file" ]]; then
+            echo "PR license scope is unavailable; using complete header check"
+            license_header_full="true"
+          fi
+          expected_config_hash="418d840530580d248c2f9471e85db86cc5324fe280cd15284142220f3ae611f9"
+          expected_tool_recipe_hash="16f233e8b83183889fa284d3b354fbf08c2d2b3630e87f93c7c0e9a67d1548f1"
+          config_hash="$(sha256sum .licenserc.yml | awk '{print $1}')"
+          tool_recipe_hash="$(sed -n '/^install-static-check-tools:/,/^$/p' Makefile | sha256sum | awk '{print $1}')"
+          if [[ "$config_hash" != "$expected_config_hash" ]] || \
+            [[ "$tool_recipe_hash" != "$expected_tool_recipe_hash" ]]; then
+            echo "License configuration or tool recipe is newer than the validated incremental contract; using complete license checks"
+            license_header_full="true"
+            license_dependency_check="true"
+          fi
+
+          if [[ "$license_header_full" == "true" ]]; then
+            license-eye -c .licenserc.yml header check
+          else
+            mapfile -d '' -t license_paths < "$license_paths_file"
+            if (( ${#license_paths[@]} > 0 )); then
+              license-eye -c .licenserc.yml header check -- "${license_paths[@]}"
+            else
+              echo "No added, copied, modified, or renamed files require a license header check"
+            fi
+          fi
+
+          if [[ "$license_dependency_check" == "true" ]]; then
+            license-eye -c .licenserc.yml dep check
+          else
+            echo "Dependency manifests and license rules are unchanged"
+          fi
+
+          # Run cheap policy checks before the long analyzers so an invalid PR
+          # fails in seconds rather than consuming the full SCA critical path.
+          make static-check-analysis GOLANGCI_LINT_CONCURRENCY=1

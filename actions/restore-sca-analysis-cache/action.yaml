@@ -1,0 +1,123 @@
+name: Restore MatrixOne SCA analysis cache
+description: Best-effort restore of the trusted golangci-lint cache for MatrixOne SCA
+
+outputs:
+  cache-hit:
+    description: Whether a usable exact current cache generation was restored
+    value: ${{ steps.isolate.outputs.cache-hit }}
+  cache-exact-match:
+    description: Whether the cache service matched the exact primary key, even if its contents were unusable
+    value: ${{ steps.isolate.outputs.cache-exact-match }}
+  cache-primary-key:
+    description: Primary key to use when a trusted producer saves the cache
+    value: ${{ steps.metadata.outputs.cache-primary-key }}
+  cache-matched-key:
+    description: Cache key selected by exact or prefix restore
+    value: ${{ steps.analysis-cache.outputs.cache-matched-key }}
+  cache-usable:
+    description: Whether the restored archive contained analysis files
+    value: ${{ steps.isolate.outputs.cache-usable }}
+  cache-restore-seconds:
+    description: Wall-clock seconds spent restoring and isolating the analysis cache
+    value: ${{ steps.isolate.outputs.cache-restore-seconds }}
+  cache-size-kib:
+    description: Disk usage in KiB of the usable isolated analysis cache, or zero on a miss
+    value: ${{ steps.isolate.outputs.cache-size-kib }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve analysis cache metadata
+      id: metadata
+      shell: bash
+      env:
+        # Golangci-lint salts entries with its binary, relevant configuration,
+        # go.mod, package source, and dependency hashes. Keep the outer input
+        # key narrow so unrelated Makefile/native changes cannot create a new
+        # repository-level cache lineage.
+        SCA_INPUT_HASH: ${{ hashFiles('go.mod', '.golangci.yml') }}
+        SCA_RUNNER_OS: ${{ runner.os }}
+        SCA_RUNNER_ARCH: ${{ runner.arch }}
+      run: |
+        set -euo pipefail
+        go_version="$(go env GOVERSION)"
+        compiler="$(cc -dumpmachine)-$(cc -dumpfullversion -dumpversion)"
+        cxx_compiler="$(c++ -dumpmachine)-$(c++ -dumpfullversion -dumpversion)"
+        cmake_version="$(cmake --version | sed -n '1p')"
+        tool_recipe="$(sed -n '/^install-static-check-tools:/,/^$/p' Makefile | sha256sum | awk '{print $1}')"
+        environment_hash="$({
+          printf '%s\n' "$go_version" "$compiler" "$cxx_compiler" "$cmake_version" "$tool_recipe"
+        } | sha256sum | awk '{print $1}')"
+        test -n "$environment_hash"
+        test -n "$SCA_INPUT_HASH"
+        generation=$(($(date -u +%s) / 604800))
+        environment_prefix="matrixone-sca-golangci-v2-${SCA_RUNNER_OS}-${SCA_RUNNER_ARCH}-${environment_hash}-"
+        generation_prefix="${environment_prefix}${generation}-"
+        echo "cache-primary-key=${generation_prefix}${SCA_INPUT_HASH}" >> "$GITHUB_OUTPUT"
+        echo "generation-prefix=$generation_prefix" >> "$GITHUB_OUTPUT"
+        echo "environment-prefix=$environment_prefix" >> "$GITHUB_OUTPUT"
+    - name: Prepare analysis cache restore
+      id: prepare
+      shell: bash
+      run: |
+        set -euo pipefail
+        rm -rf "$GITHUB_WORKSPACE/.sca-golangci-analysis-cache"
+        echo "restore-start-epoch=$(date -u +%s)" >> "$GITHUB_OUTPUT"
+    - name: Restore trusted analysis cache
+      id: analysis-cache
+      continue-on-error: true
+      uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+      with:
+        path: .sca-golangci-analysis-cache
+        key: ${{ steps.metadata.outputs.cache-primary-key }}
+        restore-keys: |
+          ${{ steps.metadata.outputs.generation-prefix }}
+          ${{ steps.metadata.outputs.environment-prefix }}
+    - name: Isolate analysis cache from repository scans
+      id: isolate
+      shell: bash
+      env:
+        CACHE_EXACT_MATCH: ${{ steps.analysis-cache.outputs.cache-hit }}
+        CACHE_MATCHED_KEY: ${{ steps.analysis-cache.outputs.cache-matched-key }}
+        CACHE_RESTORE_OUTCOME: ${{ steps.analysis-cache.outcome }}
+        RESTORE_START_EPOCH: ${{ steps.prepare.outputs.restore-start-epoch }}
+      run: |
+        set -euo pipefail
+        staging_dir="$GITHUB_WORKSPACE/.sca-golangci-analysis-cache"
+        # An unavailable cache service is an optimization miss, not an SCA
+        # failure. Never consume a partially downloaded archive.
+        if [[ "$CACHE_RESTORE_OUTCOME" != "success" ]]; then
+          rm -rf "$staging_dir"
+        fi
+        runtime_root="$(mktemp -d "${RUNNER_TEMP%/}/matrixone-sca-analysis.XXXXXX")"
+        usable="false"
+        if [[ -d "$staging_dir/golangci-lint" ]] && \
+          [[ -n "$(find "$staging_dir/golangci-lint" -type f -print -quit)" ]]; then
+          mv "$staging_dir/golangci-lint" "$runtime_root/golangci-lint"
+          usable="true"
+        else
+          mkdir "$runtime_root/golangci-lint"
+        fi
+        rm -rf "$staging_dir"
+        IFS=$'\t' read -r exact_match cache_hit state < <(
+          bash "$GITHUB_ACTION_PATH/cache-state.sh" \
+            "$CACHE_EXACT_MATCH" "$usable" "$CACHE_MATCHED_KEY"
+        )
+        cache_kib="0"
+        if [[ "$usable" == "true" ]]; then
+          cache_kib="$(du -sk "$runtime_root/golangci-lint" | awk '{print $1}')"
+        fi
+        restore_finished_epoch="$(date -u +%s)"
+        restore_seconds="0"
+        if (( restore_finished_epoch >= RESTORE_START_EPOCH )); then
+          restore_seconds=$((restore_finished_epoch - RESTORE_START_EPOCH))
+        fi
+        echo "cache-hit=$cache_hit" >> "$GITHUB_OUTPUT"
+        echo "cache-exact-match=$exact_match" >> "$GITHUB_OUTPUT"
+        echo "cache-usable=$usable" >> "$GITHUB_OUTPUT"
+        echo "cache-restore-seconds=$restore_seconds" >> "$GITHUB_OUTPUT"
+        echo "cache-size-kib=$cache_kib" >> "$GITHUB_OUTPUT"
+        echo "GOLANGCI_LINT_CACHE=$runtime_root/golangci-lint" >> "$GITHUB_ENV"
+        printf '### golangci-lint analysis cache\n\nState: %s\n\nMatched key: %s\n\nRestored disk size: %s MiB\n\nRestore path: %s seconds\n' \
+          "$state" "${CACHE_MATCHED_KEY:-none}" "$((cache_kib / 1024))" "$restore_seconds" \
+          >> "$GITHUB_STEP_SUMMARY"

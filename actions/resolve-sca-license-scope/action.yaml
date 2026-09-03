@@ -1,0 +1,18 @@
+name: Resolve MatrixOne SCA license scope
+description: Select changed license inputs and conservatively fall back to complete checks
+
+inputs:
+  github-token:
+    description: Token used to list pull-request files
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve pull-request files
+      uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const scope = require('${{ github.action_path }}/scope.js');
+          await scope.run({ github, context, core });
