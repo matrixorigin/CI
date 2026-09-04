@@ -488,6 +488,18 @@ jobs:
           echo "compiler=${compiler// /_}" >> "$GITHUB_OUTPUT"
           echo "cxx-compiler=${cxx_compiler// /_}" >> "$GITHUB_OUTPUT"
           echo "cmake=${cmake_version// /_}" >> "$GITHUB_OUTPUT"
+      - name: Resolve native SCA requirements
+        id: native-requirements
+        run: |
+          set -euo pipefail
+          # CI@main also serves maintenance branches that predate ONNX support.
+          # Make the restored/built artifact contract follow the checked-out
+          # MatrixOne generation instead of imposing main's dependency set.
+          onnx_required=false
+          if grep -Eq '^onnxruntime[[:space:]]*:' thirdparties/Makefile; then
+            onnx_required=true
+          fi
+          echo "onnx-required=$onnx_required" >> "$GITHUB_OUTPUT"
       - name: Restore native SCA prerequisites
         id: native-cache
         uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
@@ -503,12 +515,17 @@ jobs:
         run: |
           set -euo pipefail
           usable=false
+          onnx_usable=true
+          if [[ "${{ steps.native-requirements.outputs.onnx-required }}" == "true" ]] && \
+            [[ -z "$(find thirdparties/install/lib -maxdepth 1 -type f -name 'onnxruntime*.so' -print -quit)" ]]; then
+            onnx_usable=false
+          fi
           if [[ "${{ steps.native-cache.outputs.cache-hit }}" == "true" ]] && \
             [[ -f thirdparties/install/include/xxhash.h ]] && \
             [[ -f thirdparties/install/include/usearch.h ]] && \
             [[ -f thirdparties/install/lib/libroaring.a ]] && \
             [[ -f thirdparties/install/lib/libusearch_c.a ]] && \
-            [[ -n "$(find thirdparties/install/lib -maxdepth 1 -type f -name 'onnxruntime*.so' -print -quit)" ]] && \
+            [[ "$onnx_usable" == "true" ]] && \
             [[ -f cgo/libmo.a ]] && \
             [[ -f cgo/libmo.so ]]; then
             usable=true
@@ -518,14 +535,14 @@ jobs:
           echo "usable=$usable" >> "$GITHUB_OUTPUT"
       - name: Restore ONNX Runtime fallback
         id: onnx-cache
-        if: steps.native-cache-state.outputs.usable != 'true'
+        if: steps.native-cache-state.outputs.usable != 'true' && steps.native-requirements.outputs.onnx-required == 'true'
         uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
           path: .sca-onnx-runtime
           key: matrixone-sca-onnx-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('thirdparties/Makefile', 'thirdparties/download') }}
       - name: Validate restored ONNX Runtime fallback
         id: onnx-cache-state
-        if: steps.native-cache-state.outputs.usable != 'true'
+        if: steps.native-cache-state.outputs.usable != 'true' && steps.native-requirements.outputs.onnx-required == 'true'
         run: |
           set -euo pipefail
           usable=false
@@ -577,7 +594,9 @@ jobs:
           test -f thirdparties/install/include/usearch.h
           test -f thirdparties/install/lib/libroaring.a
           test -f thirdparties/install/lib/libusearch_c.a
-          find thirdparties/install/lib -maxdepth 1 -type f -name 'onnxruntime*.so' -print -quit | grep -q .
+          if [[ "${{ steps.native-requirements.outputs.onnx-required }}" == "true" ]]; then
+            find thirdparties/install/lib -maxdepth 1 -type f -name 'onnxruntime*.so' -print -quit | grep -q .
+          fi
           test -f cgo/libmo.a
           test -f cgo/libmo.so
           rm -rf "$GITHUB_WORKSPACE/lib"
@@ -616,6 +635,7 @@ jobs:
           echo "$runtime_dir" >> "$GITHUB_PATH"
       - name: Resolve PR license scope
         id: license-scope
+        if: steps.go-module-cache-layout.outputs.analysis-compatible == 'true'
         continue-on-error: true
         uses: matrixorigin/CI/actions/resolve-sca-license-scope@main
         with:
