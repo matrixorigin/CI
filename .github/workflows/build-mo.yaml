@@ -217,7 +217,7 @@ jobs:
           # One cache segment is larger than this 73MB cache. Bound a stalled
           # cache service well below the job timeout, then use online Maven.
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"
-        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .jstfu-maven-cache
           key: matrixone-jstfu-maven-v1-${{ runner.os }}-${{ runner.arch }}-jdk17-${{ hashFiles('xtool/jstfu/pom.xml', 'xtool/jstfu/.mvn/wrapper/maven-wrapper.properties', 'xtool/jstfu/mvnw') }}
