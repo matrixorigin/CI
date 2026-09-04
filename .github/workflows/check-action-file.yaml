@@ -9,6 +9,8 @@ on:
       - '.github/workflows/*.yaml'
       - '.github/workflows/*.yml'
       - '.github/actionlint.yaml'
+      - 'actions/resolve-sca-license-scope/**'
+      - 'actions/restore-sca-analysis-cache/**'
       - 'actions/upload-artifact-with-retry/action.yaml'
       - 'actions/upload-artifact-with-retry/state-machine.schema.json'
       - 'scripts/select_coverage_artifacts.py'
@@ -61,6 +63,19 @@ jobs:
         run: python3 scripts/test_select_coverage_artifacts.py -v
       - name: Test TKE merge subject identity contract
         run: python3 scripts/test_merge_trigger_tke_subject.py -v
+      - name: Test SCA license scope selection
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const { execFileSync } = require('node:child_process');
+            execFileSync(process.execPath, [
+              '--test',
+              `${process.env.GITHUB_WORKSPACE}/actions/resolve-sca-license-scope/scope.test.js`,
+            ], { stdio: 'inherit' });
+      - name: Test SCA analysis cache contracts
+        run: |
+          bash actions/restore-sca-analysis-cache/cache-state.test.sh
+          bash actions/restore-sca-analysis-cache/environment-hash.test.sh
       - name: Guard deliberate workflow disablements
         env:
           ACTIONLINT: ${{ steps.install-actionlint.outputs.executable }}
@@ -115,11 +130,14 @@ jobs:
               awk -F '\t' '$4 == "if-cond" { print $1 ":" $2 ":" $3 ": " $5 }'
             exit 1
           fi
-      - name: Validate artifact retry action metadata
+      - name: Validate action metadata
         uses: dsanders11/json-schema-validate-action@eddf079f55830cc9a916a3c512ba9086240d2fea # v2.0.0
         with:
           schema: https://json.schemastore.org/github-action.json
-          files: actions/upload-artifact-with-retry/action.yaml
+          files: |
+            actions/resolve-sca-license-scope/action.yaml
+            actions/restore-sca-analysis-cache/action.yaml
+            actions/upload-artifact-with-retry/action.yaml
       - name: Validate artifact retry state machine
         uses: dsanders11/json-schema-validate-action@eddf079f55830cc9a916a3c512ba9086240d2fea # v2.0.0
         with:

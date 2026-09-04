@@ -395,6 +395,7 @@ jobs:
     # the smaller standard ARM runner. A repository variable remains an
     # explicit escape hatch for a larger runner.
     runs-on: ${{ vars.SCA_RUNNER_LABEL || 'arm64-mo-shanghai-4c8g' }}
+    timeout-minutes: 90
     name: SCA Test on Linux/arm64
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -424,7 +425,7 @@ jobs:
         run: |
           set -euo pipefail
           make clean
-          rm -rf .sca-static-check-tools
+          rm -rf .sca-static-check-tools .sca-golangci-analysis-cache .sca-onnx-runtime
       - name: Resolve Go module cache metadata
         id: go-module-cache-metadata
         run: |
@@ -444,18 +445,37 @@ jobs:
           key: matrixone-go-mod-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-module-cache-metadata.outputs.version }}-${{ hashFiles('go.mod', 'go.sum') }}
           restore-keys: |
             matrixone-go-mod-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-module-cache-metadata.outputs.version }}-
-      - name: Move Go module cache out of the source tree
+      - name: Resolve Go module cache runtime layout
+        id: go-module-cache-layout
         run: |
           set -euo pipefail
+          # golangci-lint includes absolute compiled-file paths in its package
+          # action IDs. The optimized MatrixOne contract explicitly excludes
+          # this stable repository-local module cache from license scans.
+          if grep -q '^static-check-analysis:' Makefile && \
+            grep -Fqx "    - '.sca-go-module-cache/'" .licenserc.yml; then
+            test "$(go env GOMODCACHE)" = "$GITHUB_WORKSPACE/.sca-go-module-cache"
+            echo "analysis-compatible=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Preserve the original out-of-tree behavior for MatrixOne branches
+          # that predate the split SCA/cache contract. Their license config
+          # does not ignore the module cache, so leaving it in the checkout
+          # would make a complete header scan traverse third-party modules.
           staging_dir="$GOMODCACHE"
           runtime_root=$(mktemp -d "${RUNNER_TEMP%/}/matrixone-go-mod.XXXXXX")
           runtime_dir="$runtime_root/cache"
-          if [ -d "$staging_dir" ]; then
+          if [[ -d "$staging_dir" ]]; then
             mv "$staging_dir" "$runtime_dir"
           else
             mkdir "$runtime_dir"
           fi
           echo "GOMODCACHE=$runtime_dir" >> "$GITHUB_ENV"
+          echo "analysis-compatible=false" >> "$GITHUB_OUTPUT"
+      - name: Restore golangci-lint analysis cache
+        if: steps.go-module-cache-layout.outputs.analysis-compatible == 'true'
+        uses: matrixorigin/CI/actions/restore-sca-analysis-cache@main
       # Keep these metadata outputs and the key schema aligned with
       # matrixorigin/matrixone:.github/workflows/sca-go-module-cache.yaml.
       - name: Resolve native cache metadata
@@ -478,6 +498,49 @@ jobs:
             cgo/libmo.a
             cgo/libmo.so
           key: matrixone-sca-native-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.native-cache-metadata.outputs.compiler }}-${{ steps.native-cache-metadata.outputs.cxx-compiler }}-${{ steps.native-cache-metadata.outputs.cmake }}-${{ hashFiles('Makefile', 'cgo/*.c', 'cgo/*.h', 'cgo/Makefile', 'thirdparties/Makefile', 'thirdparties/*.tar.gz', 'thirdparties/download') }}
+      - name: Validate restored native SCA prerequisites
+        id: native-cache-state
+        run: |
+          set -euo pipefail
+          usable=false
+          if [[ "${{ steps.native-cache.outputs.cache-hit }}" == "true" ]] && \
+            [[ -f thirdparties/install/include/xxhash.h ]] && \
+            [[ -f thirdparties/install/include/usearch.h ]] && \
+            [[ -f thirdparties/install/lib/libroaring.a ]] && \
+            [[ -f thirdparties/install/lib/libusearch_c.a ]] && \
+            [[ -n "$(find thirdparties/install/lib -maxdepth 1 -type f -name 'onnxruntime*.so' -print -quit)" ]] && \
+            [[ -f cgo/libmo.a ]] && \
+            [[ -f cgo/libmo.so ]]; then
+            usable=true
+          elif [[ "${{ steps.native-cache.outputs.cache-hit }}" == "true" ]]; then
+            echo "::warning::The exact native SCA cache is incomplete; rebuilding from verified inputs"
+          fi
+          echo "usable=$usable" >> "$GITHUB_OUTPUT"
+      - name: Restore ONNX Runtime fallback
+        id: onnx-cache
+        if: steps.native-cache-state.outputs.usable != 'true'
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: .sca-onnx-runtime
+          key: matrixone-sca-onnx-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('thirdparties/Makefile', 'thirdparties/download') }}
+      - name: Validate restored ONNX Runtime fallback
+        id: onnx-cache-state
+        if: steps.native-cache-state.outputs.usable != 'true'
+        run: |
+          set -euo pipefail
+          usable=false
+          if [[ "${{ steps.onnx-cache.outputs.cache-hit }}" == "true" ]]; then
+            mapfile -t onnx_files < <(find .sca-onnx-runtime -maxdepth 1 -type f -name 'onnxruntime*.so' -print)
+            if [[ "${#onnx_files[@]}" -eq 1 ]] && \
+              [[ -f .sca-onnx-runtime/SHA256SUMS ]] && \
+              (cd .sca-onnx-runtime && sha256sum --check --strict SHA256SUMS); then
+              usable=true
+            else
+              echo "::warning::The ONNX Runtime fallback cache is incomplete or corrupt; using the normal verified download path"
+              rm -rf .sca-onnx-runtime
+            fi
+          fi
+          echo "usable=$usable" >> "$GITHUB_OUTPUT"
       - name: Resolve static-check tool cache metadata
         id: static-check-tool-cache-metadata
         run: |
@@ -495,24 +558,31 @@ jobs:
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
-          make config
-          if [[ "${{ steps.native-cache.outputs.cache-hit }}" == "true" ]] && \
-            [[ -f thirdparties/install/include/xxhash.h ]] && \
-            [[ -f thirdparties/install/include/usearch.h ]] && \
-            [[ -f thirdparties/install/lib/libroaring.a ]] && \
-            [[ -f thirdparties/install/lib/libusearch_c.a ]] && \
-            [[ -n "$(find thirdparties/install/lib -maxdepth 1 -type f -name 'onnxruntime*.so' -print -quit)" ]] && \
-            [[ -f cgo/libmo.a ]] && \
-            [[ -f cgo/libmo.so ]]; then
-            rm -rf "$GITHUB_WORKSPACE/lib"
-            cp -r thirdparties/install/lib "$GITHUB_WORKSPACE/lib"
+          # The final static-check target owns the single full package-graph
+          # verification. Running config here as a separate make invocation
+          # duplicated `go list -test ./...` on every successful SCA job.
+          if [[ "${{ steps.native-cache-state.outputs.usable }}" == "true" ]]; then
+            echo "Using verified native SCA cache"
           else
-            make thirdparties
-            test -f thirdparties/install/include/xxhash.h
-            test -f thirdparties/install/include/usearch.h
-            make cgo
-            test -f cgo/libmo.so
+            # Top-level cgo owns one complete native generation. Running
+            # thirdparties separately is both redundant and unsafe: cgo can
+            # discard that unstamped generation and download ONNX again.
+            if [[ "${{ steps.onnx-cache-state.outputs.usable }}" == "true" ]]; then
+              make ONNX_PREBUILT_DIR="$GITHUB_WORKSPACE/.sca-onnx-runtime" cgo
+            else
+              make cgo
+            fi
           fi
+          test -f thirdparties/install/include/xxhash.h
+          test -f thirdparties/install/include/usearch.h
+          test -f thirdparties/install/lib/libroaring.a
+          test -f thirdparties/install/lib/libusearch_c.a
+          find thirdparties/install/lib -maxdepth 1 -type f -name 'onnxruntime*.so' -print -quit | grep -q .
+          test -f cgo/libmo.a
+          test -f cgo/libmo.so
+          rm -rf "$GITHUB_WORKSPACE/lib"
+          cp -r thirdparties/install/lib "$GITHUB_WORKSPACE/lib"
+          rm -rf .sca-onnx-runtime
       - name: Prepare static-check tools
         run: |
           set -euo pipefail
@@ -544,7 +614,63 @@ jobs:
           test -x "$runtime_dir/molint"
           test -x "$runtime_dir/license-eye"
           echo "$runtime_dir" >> "$GITHUB_PATH"
+      - name: Resolve PR license scope
+        id: license-scope
+        continue-on-error: true
+        uses: matrixorigin/CI/actions/resolve-sca-license-scope@main
+        with:
+          github-token: ${{ secrets.TOKEN_ACTION || github.token }}
       - name: Static Code Analysis
         run: |
-          cd $GITHUB_WORKSPACE
-          make static-check
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          # Keep the legacy path byte-for-byte equivalent during the two-PR
+          # rollout. The optimized path is enabled only after MatrixOne adds
+          # the companion target.
+          if ! grep -q '^static-check-analysis:' Makefile; then
+            echo "Incremental license target is unavailable; using complete static-check"
+            make static-check
+            exit 0
+          fi
+
+          # API/rate-limit/transient failures above must conservatively become
+          # the original complete checks, never a false green or a red gate.
+          license_header_full="${SCA_LICENSE_HEADER_FULL:-true}"
+          license_dependency_check="${SCA_LICENSE_DEPENDENCY_CHECK:-true}"
+          license_paths_file="${SCA_LICENSE_PATHS_FILE:-}"
+          if [[ "$license_header_full" != "true" ]] && \
+            [[ ! -f "$license_paths_file" ]]; then
+            echo "PR license scope is unavailable; using complete header check"
+            license_header_full="true"
+          fi
+          expected_config_hash="96ac6e17a14a0a93177a965dd842f3311fd4a62a0a2d4efa252c6bb78281e9f7"
+          expected_tool_recipe_hash="16f233e8b83183889fa284d3b354fbf08c2d2b3630e87f93c7c0e9a67d1548f1"
+          config_hash="$(sha256sum .licenserc.yml | awk '{print $1}')"
+          tool_recipe_hash="$(sed -n '/^install-static-check-tools:/,/^$/p' Makefile | sha256sum | awk '{print $1}')"
+          if [[ "$config_hash" != "$expected_config_hash" ]] || \
+            [[ "$tool_recipe_hash" != "$expected_tool_recipe_hash" ]]; then
+            echo "License configuration or tool recipe is newer than the validated incremental contract; using complete license checks"
+            license_header_full="true"
+            license_dependency_check="true"
+          fi
+
+          if [[ "$license_header_full" == "true" ]]; then
+            license-eye -c .licenserc.yml header check
+          else
+            mapfile -d '' -t license_paths < "$license_paths_file"
+            if (( ${#license_paths[@]} > 0 )); then
+              license-eye -c .licenserc.yml header check -- "${license_paths[@]}"
+            else
+              echo "No added, copied, modified, or renamed files require a license header check"
+            fi
+          fi
+
+          if [[ "$license_dependency_check" == "true" ]]; then
+            license-eye -c .licenserc.yml dep check
+          else
+            echo "Dependency manifests and license rules are unchanged"
+          fi
+
+          # Run cheap policy checks before the long analyzers so an invalid PR
+          # fails in seconds rather than consuming the full SCA critical path.
+          make static-check-analysis GOLANGCI_LINT_CONCURRENCY=1
