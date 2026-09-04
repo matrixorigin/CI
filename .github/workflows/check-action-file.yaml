@@ -72,8 +72,10 @@ jobs:
               '--test',
               `${process.env.GITHUB_WORKSPACE}/actions/resolve-sca-license-scope/scope.test.js`,
             ], { stdio: 'inherit' });
-      - name: Test SCA analysis cache state
-        run: bash actions/restore-sca-analysis-cache/cache-state.test.sh
+      - name: Test SCA analysis cache contracts
+        run: |
+          bash actions/restore-sca-analysis-cache/cache-state.test.sh
+          bash actions/restore-sca-analysis-cache/environment-hash.test.sh
       - name: Guard deliberate workflow disablements
         env:
           ACTIONLINT: ${{ steps.install-actionlint.outputs.executable }}

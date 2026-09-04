@@ -445,19 +445,36 @@ jobs:
           key: matrixone-go-mod-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-module-cache-metadata.outputs.version }}-${{ hashFiles('go.mod', 'go.sum') }}
           restore-keys: |
             matrixone-go-mod-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-module-cache-metadata.outputs.version }}-
-      - name: Move Go module cache out of the source tree
+      - name: Resolve Go module cache runtime layout
+        id: go-module-cache-layout
         run: |
           set -euo pipefail
+          # golangci-lint includes absolute compiled-file paths in its package
+          # action IDs. The optimized MatrixOne contract explicitly excludes
+          # this stable repository-local module cache from license scans.
+          if grep -q '^static-check-analysis:' Makefile && \
+            grep -Fqx "    - '.sca-go-module-cache/'" .licenserc.yml; then
+            test "$(go env GOMODCACHE)" = "$GITHUB_WORKSPACE/.sca-go-module-cache"
+            echo "analysis-compatible=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Preserve the original out-of-tree behavior for MatrixOne branches
+          # that predate the split SCA/cache contract. Their license config
+          # does not ignore the module cache, so leaving it in the checkout
+          # would make a complete header scan traverse third-party modules.
           staging_dir="$GOMODCACHE"
           runtime_root=$(mktemp -d "${RUNNER_TEMP%/}/matrixone-go-mod.XXXXXX")
           runtime_dir="$runtime_root/cache"
-          if [ -d "$staging_dir" ]; then
+          if [[ -d "$staging_dir" ]]; then
             mv "$staging_dir" "$runtime_dir"
           else
             mkdir "$runtime_dir"
           fi
           echo "GOMODCACHE=$runtime_dir" >> "$GITHUB_ENV"
+          echo "analysis-compatible=false" >> "$GITHUB_OUTPUT"
       - name: Restore golangci-lint analysis cache
+        if: steps.go-module-cache-layout.outputs.analysis-compatible == 'true'
         uses: matrixorigin/CI/actions/restore-sca-analysis-cache@main
       # Keep these metadata outputs and the key schema aligned with
       # matrixorigin/matrixone:.github/workflows/sca-go-module-cache.yaml.
@@ -578,7 +595,7 @@ jobs:
             echo "PR license scope is unavailable; using complete header check"
             license_header_full="true"
           fi
-          expected_config_hash="418d840530580d248c2f9471e85db86cc5324fe280cd15284142220f3ae611f9"
+          expected_config_hash="96ac6e17a14a0a93177a965dd842f3311fd4a62a0a2d4efa252c6bb78281e9f7"
           expected_tool_recipe_hash="16f233e8b83183889fa284d3b354fbf08c2d2b3630e87f93c7c0e9a67d1548f1"
           config_hash="$(sha256sum .licenserc.yml | awk '{print $1}')"
           tool_recipe_hash="$(sed -n '/^install-static-check-tools:/,/^$/p' Makefile | sha256sum | awk '{print $1}')"

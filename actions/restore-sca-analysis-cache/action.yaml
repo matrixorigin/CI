@@ -45,13 +45,20 @@ runs:
         cxx_compiler="$(c++ -dumpmachine)-$(c++ -dumpfullversion -dumpversion)"
         cmake_version="$(cmake --version | sed -n '1p')"
         tool_recipe="$(sed -n '/^install-static-check-tools:/,/^$/p' Makefile | sha256sum | awk '{print $1}')"
-        environment_hash="$({
-          printf '%s\n' "$go_version" "$compiler" "$cxx_compiler" "$cmake_version" "$tool_recipe"
-        } | sha256sum | awk '{print $1}')"
+        module_root="$(GOWORK=off go list -m -f '{{.Dir}}')"
+        gomodcache="$(go env GOMODCACHE)"
+        goroot="$(go env GOROOT)"
+        gocache="$(go env GOCACHE)"
+        # golangci-lint hashes absolute source, module, and toolchain file
+        # paths into its package action IDs. Path-incompatible archives are
+        # not real cache hits even when GitHub matches the outer key.
+        environment_hash="$(bash "$GITHUB_ACTION_PATH/environment-hash.sh" \
+          "$go_version" "$compiler" "$cxx_compiler" "$cmake_version" \
+          "$tool_recipe" "$module_root" "$gomodcache" "$goroot" "$gocache")"
         test -n "$environment_hash"
         test -n "$SCA_INPUT_HASH"
         generation=$(($(date -u +%s) / 604800))
-        environment_prefix="matrixone-sca-golangci-v2-${SCA_RUNNER_OS}-${SCA_RUNNER_ARCH}-${environment_hash}-"
+        environment_prefix="matrixone-sca-golangci-v3-${SCA_RUNNER_OS}-${SCA_RUNNER_ARCH}-${environment_hash}-"
         generation_prefix="${environment_prefix}${generation}-"
         echo "cache-primary-key=${generation_prefix}${SCA_INPUT_HASH}" >> "$GITHUB_OUTPUT"
         echo "generation-prefix=$generation_prefix" >> "$GITHUB_OUTPUT"
