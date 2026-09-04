@@ -425,7 +425,7 @@ jobs:
         run: |
           set -euo pipefail
           make clean
-          rm -rf .sca-static-check-tools .sca-golangci-analysis-cache
+          rm -rf .sca-static-check-tools .sca-golangci-analysis-cache .sca-onnx-runtime
       - name: Resolve Go module cache metadata
         id: go-module-cache-metadata
         run: |
@@ -498,6 +498,49 @@ jobs:
             cgo/libmo.a
             cgo/libmo.so
           key: matrixone-sca-native-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.native-cache-metadata.outputs.compiler }}-${{ steps.native-cache-metadata.outputs.cxx-compiler }}-${{ steps.native-cache-metadata.outputs.cmake }}-${{ hashFiles('Makefile', 'cgo/*.c', 'cgo/*.h', 'cgo/Makefile', 'thirdparties/Makefile', 'thirdparties/*.tar.gz', 'thirdparties/download') }}
+      - name: Validate restored native SCA prerequisites
+        id: native-cache-state
+        run: |
+          set -euo pipefail
+          usable=false
+          if [[ "${{ steps.native-cache.outputs.cache-hit }}" == "true" ]] && \
+            [[ -f thirdparties/install/include/xxhash.h ]] && \
+            [[ -f thirdparties/install/include/usearch.h ]] && \
+            [[ -f thirdparties/install/lib/libroaring.a ]] && \
+            [[ -f thirdparties/install/lib/libusearch_c.a ]] && \
+            [[ -n "$(find thirdparties/install/lib -maxdepth 1 -type f -name 'onnxruntime*.so' -print -quit)" ]] && \
+            [[ -f cgo/libmo.a ]] && \
+            [[ -f cgo/libmo.so ]]; then
+            usable=true
+          elif [[ "${{ steps.native-cache.outputs.cache-hit }}" == "true" ]]; then
+            echo "::warning::The exact native SCA cache is incomplete; rebuilding from verified inputs"
+          fi
+          echo "usable=$usable" >> "$GITHUB_OUTPUT"
+      - name: Restore ONNX Runtime fallback
+        id: onnx-cache
+        if: steps.native-cache-state.outputs.usable != 'true'
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: .sca-onnx-runtime
+          key: matrixone-sca-onnx-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('thirdparties/Makefile', 'thirdparties/download') }}
+      - name: Validate restored ONNX Runtime fallback
+        id: onnx-cache-state
+        if: steps.native-cache-state.outputs.usable != 'true'
+        run: |
+          set -euo pipefail
+          usable=false
+          if [[ "${{ steps.onnx-cache.outputs.cache-hit }}" == "true" ]]; then
+            mapfile -t onnx_files < <(find .sca-onnx-runtime -maxdepth 1 -type f -name 'onnxruntime*.so' -print)
+            if [[ "${#onnx_files[@]}" -eq 1 ]] && \
+              [[ -f .sca-onnx-runtime/SHA256SUMS ]] && \
+              (cd .sca-onnx-runtime && sha256sum --check --strict SHA256SUMS); then
+              usable=true
+            else
+              echo "::warning::The ONNX Runtime fallback cache is incomplete or corrupt; using the normal verified download path"
+              rm -rf .sca-onnx-runtime
+            fi
+          fi
+          echo "usable=$usable" >> "$GITHUB_OUTPUT"
       - name: Resolve static-check tool cache metadata
         id: static-check-tool-cache-metadata
         run: |
@@ -518,23 +561,28 @@ jobs:
           # The final static-check target owns the single full package-graph
           # verification. Running config here as a separate make invocation
           # duplicated `go list -test ./...` on every successful SCA job.
-          if [[ "${{ steps.native-cache.outputs.cache-hit }}" == "true" ]] && \
-            [[ -f thirdparties/install/include/xxhash.h ]] && \
-            [[ -f thirdparties/install/include/usearch.h ]] && \
-            [[ -f thirdparties/install/lib/libroaring.a ]] && \
-            [[ -f thirdparties/install/lib/libusearch_c.a ]] && \
-            [[ -n "$(find thirdparties/install/lib -maxdepth 1 -type f -name 'onnxruntime*.so' -print -quit)" ]] && \
-            [[ -f cgo/libmo.a ]] && \
-            [[ -f cgo/libmo.so ]]; then
-            rm -rf "$GITHUB_WORKSPACE/lib"
-            cp -r thirdparties/install/lib "$GITHUB_WORKSPACE/lib"
+          if [[ "${{ steps.native-cache-state.outputs.usable }}" == "true" ]]; then
+            echo "Using verified native SCA cache"
           else
-            make thirdparties
-            test -f thirdparties/install/include/xxhash.h
-            test -f thirdparties/install/include/usearch.h
-            make cgo
-            test -f cgo/libmo.so
+            # Top-level cgo owns one complete native generation. Running
+            # thirdparties separately is both redundant and unsafe: cgo can
+            # discard that unstamped generation and download ONNX again.
+            if [[ "${{ steps.onnx-cache-state.outputs.usable }}" == "true" ]]; then
+              make ONNX_PREBUILT_DIR="$GITHUB_WORKSPACE/.sca-onnx-runtime" cgo
+            else
+              make cgo
+            fi
           fi
+          test -f thirdparties/install/include/xxhash.h
+          test -f thirdparties/install/include/usearch.h
+          test -f thirdparties/install/lib/libroaring.a
+          test -f thirdparties/install/lib/libusearch_c.a
+          find thirdparties/install/lib -maxdepth 1 -type f -name 'onnxruntime*.so' -print -quit | grep -q .
+          test -f cgo/libmo.a
+          test -f cgo/libmo.so
+          rm -rf "$GITHUB_WORKSPACE/lib"
+          cp -r thirdparties/install/lib "$GITHUB_WORKSPACE/lib"
+          rm -rf .sca-onnx-runtime
       - name: Prepare static-check tools
         run: |
           set -euo pipefail
