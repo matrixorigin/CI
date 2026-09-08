@@ -35,7 +35,14 @@ jobs:
           PREREQUISITES_READY: ${{ inputs.prerequisites_ready }}
         run: |
           if [ "${PREREQUISITES_READY}" != 'true' ]; then
-            echo '::error::coverage merge skipped because at least one required producer was skipped or failed'
+            message='coverage merge blocked: a required producer did not publish a complete coverage profile; no coverage verdict was calculated'
+            echo "::error::${message}"
+            {
+              echo '### Coverage merge blocked'
+              echo ''
+              echo "- ${message}."
+              echo '- Inspect the upstream producer summary and diagnostics artifact for its terminal status, phase timing, progress heartbeat, and timeout reason.'
+            } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
