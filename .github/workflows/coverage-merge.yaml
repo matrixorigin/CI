@@ -41,7 +41,7 @@ jobs:
               echo '### Coverage merge blocked'
               echo ''
               echo "- ${message}."
-              echo '- Inspect the upstream producer summary and diagnostics artifact for its terminal status, phase timing, progress heartbeat, and timeout reason.'
+              echo '- Inspect the upstream producer summary and readable incident report for its terminal status, phase timing, progress heartbeat, and timeout reason; use the raw JSON artifact for detail.'
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi

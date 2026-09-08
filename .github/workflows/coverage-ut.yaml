@@ -141,25 +141,33 @@ jobs:
     # external Aliyun/QCloud coverage UT. This is intentionally larger than
     # the UT-only minimum while we validate the external-storage timeout fix.
     runs-on: amd64-mo-guangzhou-2xlarge16
-    # Budget the whole producer: 20m cache seeding, a 150m coverage step
+    # Budget the whole producer: 20m cache seeding, a 190m coverage step
     # (15m package discovery, 30m native preparation, a 60m controlled test
-    # deadline, and cleanup), plus enough time for summaries and artifacts.
+    # deadline or 70m fallback, and bounded cleanup), plus enough time for
+    # summaries and artifacts.
     # The wrapper below enforces the test deadline before this job-level last
     # resort.
-    timeout-minutes: 210
+    # The bounded setup/cache/coverage/report paths fit below this limit with
+    # roughly 20m of job-level cushion; the job timeout is never the diagnostic
+    # mechanism for a stuck test.
+    timeout-minutes: 310
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Checkout MatrixOne source
+        timeout-minutes: 5
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
       - name: Set up Go
+        timeout-minutes: 10
         uses: matrixorigin/CI/actions/setup-env@main
         with:
           setup-java: true
           go-version-file: "${{ github.workspace }}/go.mod"
       - name: Checkout CI coverage helper
+        timeout-minutes: 5
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           token: ${{ secrets.TOKEN_ACTION }}
@@ -168,6 +176,7 @@ jobs:
           sparse-checkout: |
             scripts/prepare_coverage_cgo.sh
             scripts/run_coverage_ut.py
+            scripts/summarize_coverage_ut.py
           sparse-checkout-cone-mode: false
           path: .ci-workflow
       # Best-effort: seed the Go build/module caches and the prebuilt C
@@ -253,20 +262,29 @@ jobs:
           # keep building from source here.
       - name: Record cache seed outcome
         if: ${{ always() && !cancelled() }}
+        timeout-minutes: 5
         run: |
           echo "- Go cache seed outcome: \`${{ steps.seed_caches.outcome }}\`." >> "$GITHUB_STEP_SUMMARY"
       - id: coverage_ut
         name: Run coverage unit tests
         # This step includes bounded package discovery and native preparation
-        # before the wrapper's 60-minute test deadline. Keep the step limit
-        # above their 15m + 30m budgets and leave room for signal cleanup,
-        # compaction, and status publication.
-        timeout-minutes: 150
+        # before the wrapper's 60-minute test deadline or 70-minute fallback.
+        # Keep the step limit above their 15m + 30m budgets and leave room for
+        # signal cleanup, compaction, and status publication.
+        # The worst controlled path is 15m discovery + 30m CGo + 70m fallback
+        # plus under two minutes of signal/cleanup polling. The extra margin
+        # keeps profile compaction and status publication inside this step even
+        # when the fallback path is exercised.
+        timeout-minutes: 190
         continue-on-error: true
         env:
           GOPROXY: http://goproxy.goproxy.svc.cluster.local,https://goproxy.cn,https://proxy.golang.org
           COVERAGE_UT_TEST_TIMEOUT_SECONDS: "3600"
           COVERAGE_UT_HEARTBEAT_SECONDS: "15"
+          COVERAGE_UT_CONSOLE_HEARTBEAT_SECONDS: "60"
+          # Parent-shell fallback if the Python runner itself stops making
+          # progress after its controlled 60-minute deadline.
+          COVERAGE_UT_FALLBACK_TIMEOUT_SECONDS: "4200"
           COVERAGE_UT_PACKAGE_PARALLELISM: "8"
           COVERAGE_UT_DISCOVERY_TIMEOUT_SECONDS: "900"
           COVERAGE_UT_CGO_TIMEOUT_SECONDS: "1800"
@@ -286,7 +304,13 @@ jobs:
           coverage_status="${RUNNER_TEMP}/ut-coverage-status.json"
           timeout_diagnostics="${RUNNER_TEMP}/ut-coverage-timeout.txt"
           phase_timing="${RUNNER_TEMP}/ut-coverage-phase-timing.txt"
+          runner_pid_file="${RUNNER_TEMP}/ut-coverage-runner.pid.json"
+          phase_failure="${RUNNER_TEMP}/ut-coverage-phase-failure.txt"
+          package_error="${RUNNER_TEMP}/ut-coverage-package-error.txt"
+          cgo_log="${RUNNER_TEMP}/ut-coverage-cgo.log"
           rm -f "${coverage_profile}" "${coverage_report}"
+          rm -f "${coverage_progress}" "${coverage_status}" "${timeout_diagnostics}" "${runner_pid_file}" "${phase_failure}"
+          rm -f "${package_error}" "${cgo_log}"
           : > "${phase_timing}"
 
           phase_start() {
@@ -295,15 +319,55 @@ jobs:
             echo "phase=${phase_name} status=started" >> "${phase_timing}"
           }
           phase_end() {
+            raw_phase_status="$1"
             phase_status="$1"
             phase_timeout_seconds="${2:-}"
             phase_finished_at=$(date +%s)
-            echo "phase=${phase_name} status=${phase_status} elapsed_seconds=$((phase_finished_at - phase_started_at))" >> "${phase_timing}"
+            phase_elapsed_seconds=$((phase_finished_at - phase_started_at))
+            # GNU timeout returns 137 when its hard KILL is required. Treat
+            # that as a deadline only when the phase actually ran through its
+            # configured budget; a fast OOM/SIGKILL remains an ordinary
+            # preparation failure.
+            if [ "${phase_status}" = '137' ] && [ -n "${phase_timeout_seconds}" ] && \
+              (( phase_elapsed_seconds >= phase_timeout_seconds )); then
+              phase_status=124
+            fi
+            phase_status_suffix=''
+            if [ "${raw_phase_status}" != "${phase_status}" ]; then
+              phase_status_suffix=" raw_status=${raw_phase_status}"
+            fi
+            echo "phase=${phase_name} status=${phase_status} elapsed_seconds=${phase_elapsed_seconds}${phase_status_suffix}" >> "${phase_timing}"
             if [ "${phase_status}" = '124' ]; then
               {
                 echo "Coverage UT phase exceeded its internal deadline: ${phase_name}"
                 echo "phase=${phase_name} timeout_seconds=${phase_timeout_seconds:-unknown}"
+                if [ "${phase_name}" = 'discover_packages' ] && [ -s "${package_error}" ]; then
+                  echo
+                  echo 'Package discovery stderr (last 100 lines):'
+                  tail -n 100 "${package_error}"
+                fi
+                if [ "${phase_name}" = 'prepare_cgo' ] && [ -s "${cgo_log}" ]; then
+                  echo
+                  echo 'CGo preparation log (last 100 lines):'
+                  tail -n 100 "${cgo_log}"
+                fi
               } > "${timeout_diagnostics}"
+            elif { [ "${phase_name}" = 'discover_packages' ] && [ "${phase_status}" != '0' ]; } || \
+              { [ "${phase_name}" = 'prepare_cgo' ] && [ "${phase_status}" != '0' ]; }; then
+              {
+                echo "Coverage UT phase failed: ${phase_name}"
+                echo "phase=${phase_name} status=${phase_status}"
+                if [ "${phase_name}" = 'discover_packages' ] && [ -s "${package_error}" ]; then
+                  echo
+                  echo 'Package discovery stderr (last 100 lines):'
+                  tail -n 100 "${package_error}"
+                fi
+                if [ "${phase_name}" = 'prepare_cgo' ] && [ -s "${cgo_log}" ]; then
+                  echo
+                  echo 'CGo preparation log (last 100 lines):'
+                  tail -n 100 "${cgo_log}"
+                fi
+              } > "${phase_failure}"
             fi
           }
 
@@ -311,7 +375,7 @@ jobs:
           package_list="${RUNNER_TEMP}/ut-coverage-packages.txt"
           set +e
           timeout --kill-after=30s "${COVERAGE_UT_DISCOVERY_TIMEOUT_SECONDS}s" \
-            go list -mod=readonly ./... > "${package_list}"
+            go list -mod=readonly ./... > "${package_list}" 2> "${package_error}"
           list_status=$?
           test_scope=''
           filter_status=0
@@ -327,14 +391,18 @@ jobs:
           phase_end "${phase_status}" "${COVERAGE_UT_DISCOVERY_TIMEOUT_SECONDS}"
           (( phase_status == 0 )) || exit "${phase_status}"
           cover_pkgs=$(printf '%s\n' "${test_scope}" | paste -sd, -)
-          test -n "${cover_pkgs}"
+          if [ -z "${cover_pkgs}" ]; then
+            echo 'Coverage UT package scope is empty after exclusions.' > "${phase_failure}"
+            echo 'phase=build_scope status=1 elapsed_seconds=0' >> "${phase_timing}"
+            exit 1
+          fi
           package_count=$(printf '%s\n' "${test_scope}" | awk 'NF { count++ } END { print count + 0 }')
           echo "coverage_ut package_count=${package_count} package_parallelism=${COVERAGE_UT_PACKAGE_PARALLELISM}" | tee -a "${phase_timing}"
 
           phase_start prepare_cgo
           set +e
           timeout --kill-after=30s "${COVERAGE_UT_CGO_TIMEOUT_SECONDS}s" \
-            "$GITHUB_WORKSPACE/.ci-workflow/scripts/prepare_coverage_cgo.sh"
+            "$GITHUB_WORKSPACE/.ci-workflow/scripts/prepare_coverage_cgo.sh" > "${cgo_log}" 2>&1
           phase_status=$?
           set -e
           phase_end "${phase_status}" "${COVERAGE_UT_CGO_TIMEOUT_SECONDS}"
@@ -348,21 +416,155 @@ jobs:
           # rather than flooding the Actions console; the next step prints a
           # concise parsed failure summary when this command fails.
           set +e
+          coverage_runner_pid=''
+          fallback_triggered=0
+          runner_alive() {
+            local pid="$1"
+            local state
+            kill -0 "${pid}" 2>/dev/null || return 1
+            state=$(ps -o stat= -p "${pid}" 2>/dev/null | awk '{print $1}')
+            # If ps is temporarily unavailable, keep treating the PID as
+            # alive. Falling through to an unbounded wait would defeat the
+            # independent 70-minute fallback.
+            [ -z "${state}" ] && return 0
+            [[ "${state}" != Z* ]]
+          }
+          coverage_group_alive() {
+            local pgid="$1"
+            [[ "${pgid}" =~ ^[0-9]+$ ]] && [ "${pgid}" -gt 1 ] && kill -0 -- "-${pgid}" 2>/dev/null
+          }
+          cleanup_coverage_group() {
+            local signal_name="$1"
+            local grace_seconds="${2:-5}"
+            local pgid
+            local shell_pgid
+            pgid=$(jq -r '.process_group_id // empty' "${runner_pid_file}" 2>/dev/null || true)
+            shell_pgid=$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')
+            if [[ "${pgid}" =~ ^[0-9]+$ ]] && [ "${pgid}" -gt 1 ] && [ "${pgid}" != "${shell_pgid}" ]; then
+              kill -"${signal_name}" -- "-${pgid}" 2>/dev/null || true
+              local cleanup_deadline=$((SECONDS + grace_seconds))
+              while coverage_group_alive "${pgid}" && (( SECONDS < cleanup_deadline )); do
+                sleep 1
+              done
+              if coverage_group_alive "${pgid}"; then
+                kill -KILL -- "-${pgid}" 2>/dev/null || true
+              fi
+            fi
+          }
+          wait_runner_bounded() {
+            local pid="$1"
+            local wait_deadline=$((SECONDS + 10))
+            while runner_alive "${pid}" && (( SECONDS < wait_deadline )); do
+              sleep 1
+            done
+            if runner_alive "${pid}"; then
+              return 125
+            fi
+            wait "${pid}"
+          }
           python "$GITHUB_WORKSPACE/.ci-workflow/scripts/run_coverage_ut.py" \
             --report "${coverage_report}" \
             --progress "${coverage_progress}" \
             --status "${coverage_status}" \
             --timeout-diagnostics "${timeout_diagnostics}" \
             --phase-timing "${phase_timing}" \
+            --pid-file "${runner_pid_file}" \
             --cwd "$GITHUB_WORKSPACE" \
             --timeout-seconds "${COVERAGE_UT_TEST_TIMEOUT_SECONDS}" \
             --heartbeat-seconds "${COVERAGE_UT_HEARTBEAT_SECONDS}" \
+            --console-heartbeat-seconds "${COVERAGE_UT_CONSOLE_HEARTBEAT_SECONDS}" \
             -- env CGO_CFLAGS="${cgo_cflags}" CGO_LDFLAGS="${cgo_ldflags}" \
             go test -mod=readonly -json -short -v -tags matrixone_test \
             -p "${COVERAGE_UT_PACKAGE_PARALLELISM}" \
             -covermode=set -coverprofile="${coverage_profile}" -coverpkg="${cover_pkgs}" \
-            ${test_scope}
-          test_status=$?
+            ${test_scope} &
+          coverage_runner_pid=$!
+          fallback_deadline=$((SECONDS + COVERAGE_UT_FALLBACK_TIMEOUT_SECONDS))
+          while runner_alive "${coverage_runner_pid}"; do
+            if (( SECONDS >= fallback_deadline )); then
+              fallback_triggered=1
+              echo "::error title=Coverage UT fallback timeout::runner exceeded ${COVERAGE_UT_FALLBACK_TIMEOUT_SECONDS}s; collecting fallback diagnostics" >&2
+              cleanup_coverage_group QUIT 20
+              kill -TERM "${coverage_runner_pid}" 2>/dev/null || true
+              runner_cleanup_deadline=$((SECONDS + 30))
+              while runner_alive "${coverage_runner_pid}" && (( SECONDS < runner_cleanup_deadline )); do
+                sleep 1
+              done
+              if runner_alive "${coverage_runner_pid}"; then
+                kill -KILL "${coverage_runner_pid}" 2>/dev/null || true
+              fi
+              cleanup_coverage_group TERM 5
+              break
+            fi
+            sleep 5
+          done
+          if (( fallback_triggered )); then
+            wait_runner_bounded "${coverage_runner_pid}" 2>/dev/null || true
+            fallback_elapsed="${COVERAGE_UT_FALLBACK_TIMEOUT_SECONDS}"
+            last_progress=$(tail -n 1 "${coverage_progress}" 2>/dev/null || echo unavailable)
+            {
+              echo 'Coverage UT fallback deadline exceeded before the runner completed.'
+              echo "fallback_deadline_seconds=${COVERAGE_UT_FALLBACK_TIMEOUT_SECONDS}"
+              echo 'reason=runner_or_diagnostics_unresponsive'
+              echo "runner_pid=${coverage_runner_pid}"
+              echo "last_progress=${last_progress}"
+              echo
+              echo 'Process snapshot:'
+              ps -eo pid,ppid,pgid,stat,etime,rss,cmd --sort=-rss || true
+              echo
+              echo 'Recent progress:'
+              tail -n 20 "${coverage_progress}" 2>/dev/null || true
+            } > "${timeout_diagnostics}"
+            jq -n \
+              --arg result timeout \
+              --arg reason fallback_deadline \
+              --arg progress "${last_progress}" \
+              --argjson elapsed_seconds "${fallback_elapsed}" \
+              '{result: $result, exit_code: 124, reason: $reason, elapsed_seconds: $elapsed_seconds, progress: $progress}' \
+              > "${coverage_status}"
+            echo "phase=coverage_ut status=fallback_timeout elapsed_seconds=${fallback_elapsed}" >> "${phase_timing}"
+            test_status=124
+          else
+            wait_runner_bounded "${coverage_runner_pid}"
+            test_status=$?
+            if (( test_status == 125 )) && runner_alive "${coverage_runner_pid}"; then
+              cleanup_coverage_group TERM 5
+              last_progress=$(tail -n 1 "${coverage_progress}" 2>/dev/null || echo unavailable)
+              {
+                echo 'Coverage UT runner became unresponsive before its fallback deadline.'
+                echo 'reason=runner_unresponsive'
+                echo "runner_pid=${coverage_runner_pid}"
+                echo "last_progress=${last_progress}"
+              } > "${phase_failure}"
+              jq -n \
+                --arg result failed \
+                --arg reason runner_unresponsive \
+                --arg progress "${last_progress}" \
+                '{result: $result, exit_code: 125, reason: $reason, progress: $progress}' \
+                > "${coverage_status}"
+              echo 'phase=coverage_ut status=runner_unresponsive' >> "${phase_timing}"
+            elif [ "${test_status}" != '0' ]; then
+              cleanup_coverage_group TERM 5
+            fi
+            if [ ! -s "${coverage_status}" ]; then
+              cleanup_coverage_group TERM 5
+              last_progress=$(tail -n 1 "${coverage_progress}" 2>/dev/null || echo unavailable)
+              {
+                echo 'Coverage UT runner exited without publishing a status file.'
+                echo "exit_code=${test_status}"
+                echo "runner_pid=${coverage_runner_pid}"
+                echo "last_progress=${last_progress}"
+              } > "${phase_failure}"
+              jq -n \
+                --arg result failed \
+                --arg reason runner_exit_without_status \
+                --arg progress "${last_progress}" \
+                --argjson exit_code "${test_status}" \
+                '{result: $result, exit_code: $exit_code, reason: $reason, progress: $progress}' \
+                > "${coverage_status}"
+              echo "phase=coverage_ut status=runner_exit_without_status exit_code=${test_status}" >> "${phase_timing}"
+            fi
+          fi
           set -e
           echo "test_status=${test_status}" >> "$GITHUB_OUTPUT"
           if (( test_status != 0 )); then
@@ -406,77 +608,19 @@ jobs:
           phase_end "${phase_status}"
           (( phase_status == 0 )) || exit "${phase_status}"
           echo "UT coverage profile compacted from ${raw_coverage_bytes} to ${compacted_coverage_bytes} bytes"
-      - name: Summarize 30 slowest coverage UT tests
-        if: ${{ always() && !cancelled() }}
-        run: |
-          set -euo pipefail
-          report="${RUNNER_TEMP}/ut-coverage-report.json"
-          timing="${RUNNER_TEMP}/ut-coverage-top30.txt"
-          {
-            echo '### Coverage UT timing'
-          if [ "${{ steps.coverage_ut.outcome }}" = 'failure' ]; then
-              echo '- Partial result: the failed run did not complete every test.'
-          fi
-          status_file="${RUNNER_TEMP}/ut-coverage-status.json"
-          if [ -s "${status_file}" ]; then
-              status_result=$(jq -r '.result // "unknown"' "${status_file}")
-              status_reason=$(jq -r '.reason // "unknown"' "${status_file}")
-              if [ "${{ steps.coverage_ut.outcome }}" = 'failure' ] && [ "${status_result}" = 'passed' ]; then
-                  status_result=failed
-                  status_reason=post_test_phase_failure
-              fi
-              echo "- Producer status: \`${status_result}\` (reason: \`${status_reason}\`)"
-              echo '- Last progress:'
-              jq -r '.progress // "unavailable"' "${status_file}" | sed 's/^/  /'
-          else
-              echo '- Producer status: unavailable; the Actions step may have been externally cancelled.'
-          fi
-          phase_timing="${RUNNER_TEMP}/ut-coverage-phase-timing.txt"
-          if [ -s "${phase_timing}" ]; then
-              echo ''
-              echo '#### Phase timing'
-              echo ''
-              echo '```text'
-              cat "${phase_timing}"
-              echo '```'
-          fi
-          progress="${RUNNER_TEMP}/ut-coverage-progress.txt"
-          if [ -s "${progress}" ]; then
-              echo ''
-              echo '#### Recent progress heartbeats'
-              echo ''
-              echo '```text'
-              tail -n 20 "${progress}"
-              echo '```'
-          fi
-          if [ ! -s "${report}" ]; then
-              echo '- No Go JSON report was produced.'
-              exit 0
-          fi
-          if ! jq -r 'select(.Action == "pass" and (.Test | type == "string") and .Elapsed != null) | [(.Elapsed | tonumber), .Package, .Test] | @tsv' "${report}" \
-            | sort -nr -k1,1 | awk 'NR <= 30 { print }' > "${timing}"; then
-              echo '::warning::failed to generate the UT timing summary'
-              exit 0
-          fi
-          echo ''
-          echo '#### Top 30 slowest completed tests'
-          echo ''
-          echo '```text'
-          cat "${timing}"
-          echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Print failed coverage UT packages and tests
         if: ${{ always() && !cancelled() && steps.coverage_ut.outcome == 'failure' }}
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           report="${RUNNER_TEMP}/ut-coverage-report.json"
           echo '::group::Failed coverage UT packages'
           if [ -s "${report}" ]; then
-            jq -r 'select(.Action == "fail" and .Package != null) | "FAIL \(.Package) (\(.Elapsed // 0)s)"' "${report}" | sort -u || true
+            jq -r 'select(.Action == "fail" and .Package != null) | "FAIL \(.Package) (\(.Elapsed // 0)s)"' "${report}" | sort -u | head -n 50 || true
             echo '::endgroup::'
             echo '::group::Failure details'
             jq -r 'select(.Action == "output" and (.Output | test("panic: test timed out|--- FAIL:|^FAIL\\t"))) | "\(.Package // "unknown") / \(.Test // "package"): \(.Output | gsub("\\n$"; ""))"' "${report}" \
-              | tail -n 100 | cut -c 1-1000 || true
+              | head -n 50 | cut -c 1-800 || true
           else
             echo 'No JSON test report was produced; inspect the failed test step.'
           fi
@@ -485,6 +629,7 @@ jobs:
       # the large JSON stream out of successful coverage artifacts.
       - name: Checkout CI repository for UT failure summary
         if: ${{ always() && !cancelled() && steps.coverage_ut.outcome == 'failure' }}
+        timeout-minutes: 5
         uses: actions/checkout@v6
         with:
           token: ${{ secrets.TOKEN_ACTION }}
@@ -493,6 +638,7 @@ jobs:
           path: CI
       - name: Analyze and summarize failed coverage UT
         if: ${{ always() && !cancelled() && steps.coverage_ut.outcome == 'failure' }}
+        timeout-minutes: 10
         continue-on-error: true
         run: |
           set -uo pipefail
@@ -517,10 +663,15 @@ jobs:
             python "$GITHUB_WORKSPACE/CI/scripts/summarize_ut_report.py" "${report}" | tee -a "${summary}" || true
           fi
           if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-            cat "${summary}" >> "$GITHUB_STEP_SUMMARY"
+            {
+              echo '### Detailed UT analysis (first 64 KiB)'
+              head -c 65536 "${summary}"
+              echo
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Collect coverage UT runner diagnostics
         if: ${{ always() && !cancelled() && steps.coverage_ut.outcome == 'failure' }}
+        timeout-minutes: 5
         continue-on-error: true
         run: |
           set +e
@@ -563,34 +714,17 @@ jobs:
       - id: upload_coverage_profile
         name: Upload UT coverage profile
         if: ${{ always() && !cancelled() && steps.coverage_ut.outcome == 'success' }}
+        timeout-minutes: 15
         uses: matrixorigin/CI/actions/upload-artifact-with-retry@main
         with:
           name: ut-coverage-generation-${{ inputs.bvt_generation || format('{0}-{1}', github.run_id, github.run_attempt) }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ut-coverage.out
           if-no-files-found: error
           retention-days: 7
-      - id: upload_coverage_diagnostics
-        name: Upload failed UT diagnostics
-        if: ${{ always() && !cancelled() && steps.coverage_ut.outcome == 'failure' }}
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: ut-coverage-diagnostics-attempt-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/ut-coverage-report.json
-            ${{ runner.temp }}/ut-failure-summary.md
-            ${{ runner.temp }}/ut-report
-            ${{ runner.temp }}/ut-runner-diagnostics.txt
-            ${{ runner.temp }}/ut-coverage-progress.txt
-            ${{ runner.temp }}/ut-coverage-packages.txt
-            ${{ runner.temp }}/ut-coverage-status.json
-            ${{ runner.temp }}/ut-coverage-timeout.txt
-            ${{ runner.temp }}/ut-coverage-phase-timing.txt
-          if-no-files-found: warn
-          retention-days: 7
       - id: coverage_status
         name: Record final UT coverage producer status
         if: ${{ always() && !cancelled() }}
+        timeout-minutes: 5
         continue-on-error: true
         run: |
           set -euo pipefail
@@ -605,6 +739,9 @@ jobs:
           elif [ -s "${RUNNER_TEMP}/ut-coverage-timeout.txt" ]; then
             result=timeout
             reason=coverage_phase_deadline
+          elif [ -s "${RUNNER_TEMP}/ut-coverage-phase-failure.txt" ]; then
+            result=failed
+            reason=coverage_phase_failure
           elif [ -s "${RUNNER_TEMP}/ut-coverage-phase-timing.txt" ] && \
             awk '$2 ~ /^status=[1-9]/ { found=1; exit } END { exit !found }' "${RUNNER_TEMP}/ut-coverage-phase-timing.txt"; then
             result=failed
@@ -612,6 +749,9 @@ jobs:
           elif [ "${{ steps.coverage_ut.outcome }}" = 'success' ]; then
             result=passed
             reason=command_exit
+          elif [ "${{ steps.coverage_ut.outcome }}" = 'failure' ]; then
+            result=failed
+            reason=coverage_step_terminated_without_status
           else
             result=external_timeout_or_cancellation
             reason=producer_status_file_missing
@@ -620,8 +760,76 @@ jobs:
             result=failed
             reason=coverage_profile_artifact_upload_failure
           fi
+          status_tmp="${status_file}.final"
+          if [ -s "${status_file}" ]; then
+            jq --arg result "${result}" --arg reason "${reason}" \
+              '. + {result: $result, reason: $reason}' "${status_file}" > "${status_tmp}"
+          else
+            jq -n --arg result "${result}" --arg reason "${reason}" \
+              '{result: $result, reason: $reason}' > "${status_tmp}"
+          fi
+          mv "${status_tmp}" "${status_file}"
           echo "status=${result}" >> "$GITHUB_OUTPUT"
           echo "- UT coverage producer status: \`${result}\` (reason: \`${reason}\`)." >> "$GITHUB_STEP_SUMMARY"
+      - id: render_coverage_report
+        name: Render readable coverage UT report
+        if: ${{ always() && !cancelled() }}
+        timeout-minutes: 5
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          report="${RUNNER_TEMP}/ut-coverage-report.json"
+          incident="${RUNNER_TEMP}/ut-coverage-incident.md"
+          python "$GITHUB_WORKSPACE/.ci-workflow/scripts/summarize_coverage_ut.py" \
+            --report "${report}" \
+            --status "${RUNNER_TEMP}/ut-coverage-status.json" \
+            --phase-timing "${RUNNER_TEMP}/ut-coverage-phase-timing.txt" \
+            --progress "${RUNNER_TEMP}/ut-coverage-progress.txt" \
+            --timeout-diagnostics "${RUNNER_TEMP}/ut-coverage-timeout.txt" \
+            --phase-failure "${RUNNER_TEMP}/ut-coverage-phase-failure.txt" \
+            --output "${incident}" || true
+          if [ -s "${incident}" ]; then
+            cat "${incident}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '::warning::failed to render the readable coverage UT report'
+          fi
+      - id: upload_coverage_report
+        name: Upload readable coverage UT report
+        if: ${{ always() && !cancelled() && steps.render_coverage_report.outcome == 'success' }}
+        timeout-minutes: 5
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: ut-coverage-report-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ut-coverage-incident.md
+          if-no-files-found: warn
+          retention-days: 7
+      - id: upload_coverage_diagnostics
+        name: Upload failed UT diagnostics
+        if: ${{ always() && !cancelled() && steps.coverage_ut.outcome == 'failure' }}
+        timeout-minutes: 15
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: ut-coverage-diagnostics-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/ut-coverage-report.json
+            ${{ runner.temp }}/ut-failure-summary.md
+            ${{ runner.temp }}/ut-report
+            ${{ runner.temp }}/ut-runner-diagnostics.txt
+            ${{ runner.temp }}/ut-coverage-incident.md
+            ${{ runner.temp }}/ut-coverage-progress.txt
+            ${{ runner.temp }}/ut-coverage-packages.txt
+            ${{ runner.temp }}/ut-coverage-package-error.txt
+            ${{ runner.temp }}/ut-coverage-cgo.log
+            ${{ runner.temp }}/ut-coverage-runner.pid.json
+            ${{ runner.temp }}/ut-coverage-phase-failure.txt
+            ${{ runner.temp }}/ut-coverage-status.json
+            ${{ runner.temp }}/ut-coverage-timeout.txt
+            ${{ runner.temp }}/ut-coverage-phase-timing.txt
+          if-no-files-found: warn
+          retention-days: 7
       - name: Fail on coverage UT failure
         if: ${{ always() && !cancelled() && steps.coverage_ut.outcome == 'failure' }}
+        timeout-minutes: 5
         run: exit 1

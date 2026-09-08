@@ -187,6 +187,8 @@ def run(args: argparse.Namespace) -> int:
     args.progress.unlink(missing_ok=True)
     args.status.unlink(missing_ok=True)
     args.timeout_diagnostics.unlink(missing_ok=True)
+    if args.pid_file:
+        args.pid_file.unlink(missing_ok=True)
     if args.phase_timing:
         append_line(args.phase_timing, "phase=coverage_ut status=started")
 
@@ -211,8 +213,30 @@ def run(args: argparse.Namespace) -> int:
             start_new_session=True,
         )
         process_group_id = process.pid
+        if args.pid_file:
+            try:
+                write_json(
+                    args.pid_file,
+                    {
+                        "wrapper_pid": os.getpid(),
+                        "coverage_pid": process.pid,
+                        "process_group_id": process_group_id,
+                        "started_at_unix": int(time.time()),
+                    },
+                )
+            except BaseException:
+                # The parent watchdog can only clean the child group through
+                # this file. If publishing ownership fails after Popen, clean
+                # the group here before surfacing the I/O error; otherwise a
+                # full disk or permission failure would leak the test tree.
+                try:
+                    stop_process_group(process, process_group_id)
+                finally:
+                    args.pid_file.unlink(missing_ok=True)
+                raise
 
         last_heartbeat = 0.0
+        last_console_heartbeat = 0.0
         timed_out = False
         while process.poll() is None:
             progress.consume(report)
@@ -221,7 +245,9 @@ def run(args: argparse.Namespace) -> int:
             if now - last_heartbeat >= args.heartbeat_seconds:
                 line = progress.snapshot(elapsed, report)
                 append_line(args.progress, line)
-                print(f"::notice title=Coverage UT progress::{line}", flush=True)
+                if now - last_console_heartbeat >= args.console_heartbeat_seconds:
+                    print(f"::notice title=Coverage UT progress::{line}", flush=True)
+                    last_console_heartbeat = now
                 last_heartbeat = now
             if interrupted:
                 reason = f"received_signal={signal.Signals(interrupted[0]).name}"
@@ -241,6 +267,8 @@ def run(args: argparse.Namespace) -> int:
                         args.phase_timing,
                         f"phase=coverage_ut status=cancelled elapsed_seconds={elapsed:.1f} {reason}",
                     )
+                if args.pid_file:
+                    args.pid_file.unlink(missing_ok=True)
                 return 143
             if elapsed >= args.timeout_seconds:
                 timed_out = True
@@ -270,6 +298,17 @@ def run(args: argparse.Namespace) -> int:
         elapsed = time.monotonic() - started
         final_line = progress.snapshot(elapsed, report)
         append_line(args.progress, f"finished {final_line}")
+
+        # Reap the group leader before checking the process group. A command
+        # can report an exit code while a helper it spawned is still alive;
+        # clean that helper before removing the pid file so an ordinary test
+        # failure cannot leak work into later workflow steps.
+        process.wait()
+        if process_group_exists(process_group_id):
+            stop_process_group(process, process_group_id)
+
+    if args.pid_file:
+        args.pid_file.unlink(missing_ok=True)
 
     if timed_out:
         status = {
@@ -306,15 +345,19 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--status", type=Path, required=True)
     parser.add_argument("--timeout-diagnostics", type=Path, required=True)
     parser.add_argument("--phase-timing", type=Path)
+    parser.add_argument("--pid-file", type=Path)
     parser.add_argument("--cwd", type=Path)
     parser.add_argument("--timeout-seconds", type=int, default=3600)
     parser.add_argument("--heartbeat-seconds", type=float, default=15)
+    parser.add_argument("--console-heartbeat-seconds", type=float, default=60)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     if args.timeout_seconds <= 0:
         parser.error("--timeout-seconds must be positive")
     if args.heartbeat_seconds <= 0:
         parser.error("--heartbeat-seconds must be positive")
+    if args.console_heartbeat_seconds <= 0:
+        parser.error("--console-heartbeat-seconds must be positive")
     return args
 
 
