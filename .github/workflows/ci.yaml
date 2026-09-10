@@ -370,7 +370,7 @@ jobs:
             ${{ github.workspace }}/scratch/**/*-plan-race-report.out*
             ${{ github.workspace }}/scratch/**/*-embedded-prebuild.out*
           if-no-files-found: ignore
-          retention-days: 14
+          retention-days: 3
           compression-level: 6
 
   # Preserve the established required-check name and make it an AND gate over
