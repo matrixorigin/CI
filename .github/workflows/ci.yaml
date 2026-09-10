@@ -561,6 +561,21 @@ jobs:
           if-no-files-found: ignore
           retention-days: 1
           compression-level: 6
+      # Successful runs keep only the small performance baseline. Raw JSON
+      # and helper streams remain failure/cancellation diagnostics.
+      - name: Upload UT baseline summary
+        if: ${{ success() }}
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ut-summary-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.ut_shard }}
+          path: |
+            ${{ github.workspace }}/ut-report/top.txt
+            ${{ github.workspace }}/ut-report/ut-checkpoint.log
+          if-no-files-found: ignore
+          retention-days: 1
+          compression-level: 6
 
   # Preserve the established required-check name and make it an AND gate over
   # every shard. fail-fast=false above ensures one failure cannot hide missing
