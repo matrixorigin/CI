@@ -325,6 +325,23 @@ jobs:
         continue-on-error: true
         run: |
           find ./ut-report -name top.txt -exec cat {} \;
+      # A timeout exits before the normal UT analyzer can publish its usual
+      # reports. MatrixOne's runner preserves the partial JSON stream,
+      # checkpoint, stderr, and slow-case summary under this directory. Keep
+      # the raw evidence downloadable while avoiding an artifact on every
+      # successful UT run.
+      - name: Upload UT diagnostics
+        if: ${{ failure() || cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ut-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.ut_shard }}
+          path: |
+            ${{ github.workspace }}/ut-report
+            ${{ github.workspace }}/scratch/*-UT-Report.out
+          if-no-files-found: ignore
+          retention-days: 14
+          compression-level: 6
 
   # Preserve the established required-check name and make it an AND gate over
   # every shard. fail-fast=false above ensures one failure cannot hide missing
