@@ -339,12 +339,12 @@ jobs:
           name: ut-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.ut_shard }}
           path: |
             ${{ github.workspace }}/ut-report
-            ${{ github.workspace }}/scratch/*-UT-Report.out
-            ${{ github.workspace }}/scratch/*-UT.log
-            ${{ github.workspace }}/scratch/*-light-race-report.out*
-            ${{ github.workspace }}/scratch/*-engine-race-report.out*
-            ${{ github.workspace }}/scratch/*-plan-race-report.out*
-            ${{ github.workspace }}/scratch/*-embedded-prebuild.out*
+            ${{ github.workspace }}/scratch/**/*-UT-Report.out
+            ${{ github.workspace }}/scratch/**/*-UT.log
+            ${{ github.workspace }}/scratch/**/*-light-race-report.out*
+            ${{ github.workspace }}/scratch/**/*-engine-race-report.out*
+            ${{ github.workspace }}/scratch/**/*-plan-race-report.out*
+            ${{ github.workspace }}/scratch/**/*-embedded-prebuild.out*
           if-no-files-found: ignore
           retention-days: 14
           compression-level: 6
