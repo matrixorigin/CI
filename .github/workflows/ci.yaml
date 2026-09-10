@@ -325,6 +325,31 @@ jobs:
         continue-on-error: true
         run: |
           find ./ut-report -name top.txt -exec cat {} \;
+      # The runner normally snapshots the main JSON before returning a
+      # failure. If an outer kill reaches cleanup first, recover that one
+      # source from scratch so the artifact still contains the only raw
+      # report, without uploading it twice on the normal failure path.
+      - name: Recover main UT report for diagnostics
+        if: ${{ failure() || cancelled() }}
+        continue-on-error: true
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          set -euo pipefail
+          destination="${GITHUB_WORKSPACE}/ut-report/ut-report.json"
+          if [ -s "${destination}" ]; then
+            exit 0
+          fi
+          report="$(find "${GITHUB_WORKSPACE}/scratch" -type f -name '*-UT-Report.out' -print -quit 2>/dev/null || true)"
+          if [ -z "${report}" ]; then
+            echo "::warning::No raw UT report was available for diagnostic recovery"
+            exit 0
+          fi
+          mkdir -p "$(dirname "${destination}")"
+          if ! ln "${report}" "${destination}" 2>/dev/null; then
+            cp "${report}" "${destination}"
+          fi
+          echo "::notice::Recovered raw UT report into ${destination}"
       # A timeout exits before the normal UT analyzer can publish its usual
       # reports. MatrixOne's runner preserves the partial JSON stream,
       # checkpoint, stderr, and slow-case summary under this directory. Keep
@@ -339,7 +364,6 @@ jobs:
           name: ut-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.ut_shard }}
           path: |
             ${{ github.workspace }}/ut-report
-            ${{ github.workspace }}/scratch/**/*-UT-Report.out
             ${{ github.workspace }}/scratch/**/*-UT.log
             ${{ github.workspace }}/scratch/**/*-light-race-report.out*
             ${{ github.workspace }}/scratch/**/*-engine-race-report.out*
