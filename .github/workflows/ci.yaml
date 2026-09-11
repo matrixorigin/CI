@@ -325,6 +325,257 @@ jobs:
         continue-on-error: true
         run: |
           find ./ut-report -name top.txt -exec cat {} \;
+      # The runner normally snapshots the main JSON before returning a
+      # failure. If an outer kill reaches cleanup first, recover that one
+      # source from scratch so the artifact still contains the only raw
+      # report, without uploading it twice on the normal failure path.
+      - name: Recover main UT report for diagnostics
+        if: ${{ failure() || cancelled() }}
+        continue-on-error: true
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          set -euo pipefail
+          destination="${GITHUB_WORKSPACE}/ut-report/ut-report.json"
+          if [ -s "${destination}" ]; then
+            exit 0
+          fi
+          report="$(find "${GITHUB_WORKSPACE}/scratch" -type f -name '*-UT-Report.out' -print -quit 2>/dev/null || true)"
+          if [ -z "${report}" ]; then
+            echo "::warning::No raw UT report was available for diagnostic recovery"
+            exit 0
+          fi
+          mkdir -p "$(dirname "${destination}")"
+          if ! ln "${report}" "${destination}" 2>/dev/null; then
+            cp "${report}" "${destination}"
+          fi
+          echo "::notice::Recovered raw UT report into ${destination}"
+      # Keep failure diagnostics useful without allowing PR-controlled test
+      # output to consume unbounded artifact storage or runner time. The
+      # source reports remain untouched; oversized files in the upload copy
+      # contain a clear head/tail truncation marker and are listed in the
+      # manifest.
+      - name: Bound UT diagnostic artifact
+        if: ${{ failure() || cancelled() }}
+        continue-on-error: true
+        timeout-minutes: 2
+        shell: bash
+        env:
+          UT_DIAGNOSTIC_MAX_BYTES: 262144000
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import shutil
+          from pathlib import Path
+
+          root = Path(os.environ["GITHUB_WORKSPACE"])
+          stage = Path(os.environ["RUNNER_TEMP"]) / "ut-diagnostics"
+          limit = int(os.environ.get("UT_DIAGNOSTIC_MAX_BYTES", "262144000"))
+          manifest_reserve = 65536
+          payload_limit = max(0, limit - manifest_reserve)
+          if stage.exists():
+              shutil.rmtree(stage)
+          stage.mkdir(parents=True)
+
+          files = set()
+          ut_report = root / "ut-report"
+          if ut_report.is_dir():
+              files.update(p for p in ut_report.rglob("*") if p.is_file())
+
+          scratch = root / "scratch"
+          if scratch.is_dir():
+              patterns = (
+                  "**/*-UT.log",
+                  "**/*-light-race-report.out*",
+                  "**/*-engine-race-report.out*",
+                  "**/*-plan-race-report.out*",
+                  "**/*-embedded-prebuild.out*",
+              )
+              for pattern in patterns:
+                  files.update(p for p in scratch.glob(pattern) if p.is_file())
+              snapshot = ut_report / "ut-report.json"
+              if not snapshot.is_file() or snapshot.stat().st_size == 0:
+                  files.update(
+                      p for p in scratch.glob("**/*-UT-Report.out") if p.is_file()
+                  )
+
+          def is_under(path, directory):
+              try:
+                  path.relative_to(directory)
+                  return True
+              except ValueError:
+                  return False
+
+          def priority(path):
+              name = path.name
+              if is_under(path, ut_report):
+                  return {
+                      "top.txt": 0,
+                      "ut-checkpoint.log": 1,
+                      "ut-report.json": 2,
+                      "ut-stderr.log": 3,
+                  }.get(name, 4)
+              return 5
+
+          ordered = sorted(files, key=lambda path: (priority(path), str(path)))
+          entries = []
+          original_total = 0
+          stored_total = 0
+          remaining = payload_limit
+
+          def remove_if_present(path):
+              try:
+                  path.unlink()
+              except FileNotFoundError:
+                  pass
+
+          def copy_limited(source, destination, allowed):
+              if allowed <= 0:
+                  return 0
+              temporary = destination.with_name(destination.name + ".partial")
+              remove_if_present(temporary)
+              written = 0
+              try:
+                  with source.open("rb") as input_file, temporary.open("wb") as output_file:
+                      while written < allowed:
+                          chunk = input_file.read(min(1024 * 1024, allowed - written))
+                          if not chunk:
+                              break
+                          output_file.write(chunk)
+                          written += len(chunk)
+                  temporary.replace(destination)
+                  return written
+              except OSError:
+                  remove_if_present(temporary)
+                  raise
+
+          def copy_head_tail(source, destination, allowed):
+              marker = (
+                  b"\n# UT diagnostic file truncated; "
+                  b"see manifest for original size.\n"
+              )
+              if allowed <= len(marker):
+                  return 0
+              payload = allowed - len(marker)
+              head_limit = payload // 2
+              tail_limit = payload - head_limit
+              temporary = destination.with_name(destination.name + ".partial")
+              remove_if_present(temporary)
+              try:
+                  with source.open("rb") as input_file, temporary.open("wb") as output_file:
+                      output_file.write(marker)
+                      head = input_file.read(head_limit)
+                      output_file.write(head)
+                      tail = b""
+                      if tail_limit:
+                          try:
+                              input_file.seek(-tail_limit, os.SEEK_END)
+                              tail = input_file.read(tail_limit)
+                          except OSError:
+                              tail = b""
+                      output_file.write(tail)
+                  temporary.replace(destination)
+                  return len(marker) + len(head) + len(tail)
+              except OSError:
+                  remove_if_present(temporary)
+                  raise
+
+          for source in ordered:
+              relative = source.relative_to(root)
+              destination = stage / relative
+              try:
+                  size = source.stat().st_size
+                  original_total += size
+                  destination.parent.mkdir(parents=True, exist_ok=True)
+                  if size <= remaining:
+                      stored = copy_limited(source, destination, remaining)
+                      try:
+                          final_size = source.stat().st_size
+                      except OSError:
+                          final_size = size
+                      truncated = stored < final_size
+                  elif remaining >= 128:
+                      stored = copy_head_tail(source, destination, remaining)
+                      truncated = True
+                  else:
+                      stored = 0
+                      truncated = True
+                  stored_total += stored
+                  remaining -= stored
+                  entries.append(
+                      f"{relative}\toriginal_bytes={size}\tstored_bytes={stored}"
+                      f"\ttruncated={str(truncated).lower()}"
+                  )
+              except (OSError, ValueError) as error:
+                  entries.append(f"{relative}\terror={error}")
+
+          manifest = stage / "manifest.txt"
+          truncated_count = sum(
+              1
+              for entry in entries
+              if "truncated=true" in entry or "\terror=" in entry
+          )
+          header = (
+              "UT diagnostic artifact budget\n"
+              f"max_bytes={limit}\n"
+              f"original_bytes={original_total}\n"
+              f"stored_bytes={stored_total}\n"
+              f"truncated_or_skipped={truncated_count}\n"
+          )
+          footer_reserve = 128
+          entry_budget = max(0, manifest_reserve - len(header.encode()) - footer_reserve)
+          included = []
+          omitted = 0
+          used = 0
+          for entry in entries:
+              encoded = (entry + "\n").encode("utf-8", "replace")
+              if used + len(encoded) <= entry_budget:
+                  included.append(entry)
+                  used += len(encoded)
+              else:
+                  omitted += 1
+          footer = f"manifest_entries_omitted={omitted}\n"
+          manifest_text = header + "\n".join(included) + "\n" + footer
+          manifest_bytes = manifest_text.encode("utf-8", "replace")
+          manifest.write_bytes(manifest_bytes[:manifest_reserve])
+          print(
+              f"UT diagnostic artifact: original_bytes={original_total} "
+              f"stored_bytes={stored_total} max_bytes={limit} "
+              f"files={len(entries)}"
+          )
+          PY
+      # A timeout exits before the normal UT analyzer can publish its usual
+      # reports. MatrixOne's runner preserves the partial JSON stream,
+      # checkpoint, stderr, and slow-case summary under this directory. Keep
+      # the raw evidence downloadable while avoiding an artifact on every
+      # successful UT run.
+      - name: Upload UT diagnostics
+        if: ${{ failure() || cancelled() }}
+        continue-on-error: true
+        timeout-minutes: 5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ut-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.ut_shard }}
+          path: ${{ runner.temp }}/ut-diagnostics
+          if-no-files-found: ignore
+          retention-days: 1
+          compression-level: 6
+      # Successful runs keep only the small performance baseline. Raw JSON
+      # and helper streams remain failure/cancellation diagnostics.
+      - name: Upload UT baseline summary
+        if: ${{ success() }}
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ut-summary-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.ut_shard }}
+          path: |
+            ${{ github.workspace }}/ut-report/top.txt
+            ${{ github.workspace }}/ut-report/ut-checkpoint.log
+          if-no-files-found: ignore
+          retention-days: 1
+          compression-level: 6
 
   # Preserve the established required-check name and make it an AND gate over
   # every shard. fail-fast=false above ensures one failure cannot hide missing
