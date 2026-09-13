@@ -372,17 +372,41 @@ jobs:
               logs --no-color --timestamps jstfu-build || true
             exit 1
           fi
+          readiness_max_attempts=300
+          start_time=$SECONDS
           i=1
-          while [ $(mysql -h 127.0.0.1 -P 6001 -u dump -p111 --execute 'create database if not exists compose_test;use compose_test; create table if not exists compose_test_table(col1 int auto_increment primary key);show tables;' 2>&1 | tee /dev/stderr | grep 'compose_test_table' | wc -l) -lt 1 ]; do
-            echo "wait mo init finished...$i"
-            if [ $i -ge 300 ]; then
-              echo '::error::multi-CN compose did not become ready'
-              docker ps
-              exit 1
+          ready=0
+          last_probe_output=""
+          while [ "$i" -le "$readiness_max_attempts" ]; do
+            if probe_output=$(mysql -h 127.0.0.1 -P 6001 -u dump -p111 --execute 'create database if not exists compose_test;use compose_test; create table if not exists compose_test_table(col1 int auto_increment primary key);show tables;' 2>&1) &&
+              printf '%s\n' "$probe_output" | grep -Fq 'compose_test_table'; then
+              ready=1
+              break
+            fi
+            last_probe_output=$probe_output
+            if [ $((i % 10)) -eq 0 ]; then
+              echo "waiting for multi-CN compose readiness... probe ${i}/${readiness_max_attempts}"
+            fi
+            if [ "$i" -lt "$readiness_max_attempts" ]; then
+              sleep 1
             fi
             i=$((i+1))
-            sleep 1
           done
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::multi-CN compose did not become ready within ${readiness_max_attempts} readiness attempts"
+            echo 'Last MySQL readiness probe output:'
+            if [ -n "$last_probe_output" ]; then
+              printf '%s\n' "$last_probe_output"
+            else
+              echo '(empty)'
+            fi
+            docker ps || true
+            docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn ps -a || true
+            docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn \
+              logs --no-color --timestamps --tail=100 || true
+            exit 1
+          fi
+          echo "multi-CN compose became ready after $((SECONDS - start_time))s (probe ${i}/${readiness_max_attempts})"
           docker ps
 
       - name: Print Disk Usage After Container Start
