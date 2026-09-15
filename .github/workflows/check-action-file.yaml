@@ -16,6 +16,7 @@ on:
       - 'scripts/select_coverage_artifacts.py'
       - 'scripts/test_select_coverage_artifacts.py'
       - 'scripts/test_merge_trigger_tke_subject.py'
+      - 'scripts/test_ut_summary_contract.py'
 
 permissions:
   contents: read
@@ -63,6 +64,8 @@ jobs:
         run: python3 scripts/test_select_coverage_artifacts.py -v
       - name: Test TKE merge subject identity contract
         run: python3 scripts/test_merge_trigger_tke_subject.py -v
+      - name: Test race-UT summary contract
+        run: python3 scripts/test_ut_summary_contract.py -v
       - name: Test SCA license scope selection
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
