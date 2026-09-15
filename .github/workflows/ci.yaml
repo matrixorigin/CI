@@ -35,19 +35,23 @@ on:
         required: true
       EE_DB_ADDR:
         description: "matrixone cloud host"
-        required: true
+        # This reusable CI workflow no longer consumes the EE database
+        # credentials. Keep the names for callers that still pass them, but
+        # do not reject callers that cannot provide an unrelated secret set at
+        # workflow-evaluation time.
+        required: false
       EE_DB_PORT:
         description: "matrixone cloud port"
-        required: true
+        required: false
       EE_DB_USER:
         description: "matrixone cloud user"
-        required: true
+        required: false
       EE_DB_PASSWORD:
         description: "matrixone cloud password"
-        required: true
+        required: false
       EE_DB_DB:
         description: "matrixone cloud db"
-        required: true
+        required: false
 
 jobs:
   ut-linux-x86-shard:
