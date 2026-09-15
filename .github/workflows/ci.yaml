@@ -585,6 +585,7 @@ jobs:
   ut-linux-x86:
     if: ${{ always() && inputs.ut_sharded }}
     needs: ut-linux-x86-shard
+    environment: ci
     runs-on: ubuntu-22.04
     name: ${{ inputs.ut_sharded && 'UT Test on Ubuntu/x86' || 'UT shard summary (disabled)' }}
     steps:
