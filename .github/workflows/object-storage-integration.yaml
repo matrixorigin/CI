@@ -1,0 +1,81 @@
+name: MatrixOne Object Storage Integration
+
+on:
+  workflow_call:
+    inputs:
+      checkout_repository:
+        description: "MatrixOne repository containing the revision to test"
+        required: true
+        type: string
+      checkout_ref:
+        description: "Immutable MatrixOne revision to test"
+        required: true
+        type: string
+    secrets:
+      TEST_S3FS_ALIYUN:
+        description: "Aliyun OSS integration test configuration"
+        required: true
+      TEST_S3FS_QCLOUD:
+        description: "Tencent COS integration test configuration"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  object-storage-integration:
+    name: ${{ matrix.provider }} object storage integration
+    environment: ci
+    runs-on: amd64-mo-guangzhou-2xlarge16
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [aliyun, qcloud]
+    steps:
+      - name: Checkout exact MatrixOne revision
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: "1"
+          repository: ${{ inputs.checkout_repository }}
+          ref: ${{ inputs.checkout_ref }}
+
+      - name: Set up Go
+        uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          setup-java: false
+          go-version-file: "${{ github.workspace }}/go.mod"
+
+      - name: Build MatrixOne native test dependencies
+        run: |
+          set -euo pipefail
+          make config cgo
+
+      - name: Run ${{ matrix.provider }} provider contracts
+        env:
+          PROVIDER: ${{ matrix.provider }}
+          PROVIDER_TEST_SPEC: ${{ matrix.provider == 'aliyun' && secrets.TEST_S3FS_ALIYUN || secrets.TEST_S3FS_QCLOUD }}
+          GOPROXY: http://goproxy.goproxy.svc.cluster.local,https://goproxy.cn,https://proxy.golang.org
+        run: |
+          set -euo pipefail
+          test -n "${PROVIDER_TEST_SPEC}"
+          unset TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD
+
+          case "${PROVIDER}" in
+            aliyun)
+              export TEST_S3FS_ALIYUN="${PROVIDER_TEST_SPEC}"
+              test_pattern='^(TestObjectStoragesExternal|TestS3FSFromExternalSpecs)$'
+              ;;
+            qcloud)
+              export TEST_S3FS_QCLOUD="${PROVIDER_TEST_SPEC}"
+              test_pattern='^(TestObjectStoragesExternal|TestS3FSFromExternalSpecs|TestQCloudSDK)$'
+              ;;
+            *)
+              echo "unknown provider: ${PROVIDER}" >&2
+              exit 2
+              ;;
+          esac
+
+          MO_RUN_EXTERNAL_OBJECT_STORAGE_TESTS=1 \
+            ./.agents/skills/mo-dev/scripts/mo-cgo-test \
+            -v -count=1 -timeout=20m -run "${test_pattern}" ./pkg/fileservice
