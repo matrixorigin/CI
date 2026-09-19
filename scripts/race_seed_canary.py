@@ -82,6 +82,7 @@ def fingerprint():
         'source_sha': command(['git', 'rev-parse', 'HEAD'], SOURCE),
         'ci_sha': command(['git', 'rev-parse', 'HEAD'], ROOT),
         'image': os.environ['SEED_IMAGE'],
+        'transport': os.environ.get('SEED_TRANSPORT', ''),
         'runner_image': [os.environ.get(k, '') for k in ('ImageOS', 'ImageVersion')],
         'runner_label': os.environ['CANARY_RUNNER_LABEL'],
         'cpu_model': sorted(set(re.findall(r'^model name\s*:\s*(.*)', cpu, re.M))),
@@ -213,13 +214,19 @@ def resource_summary(path):
 
 
 def prepare(snapshot):
-    if os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted':
-        raise ValueError('canary requires a fresh GitHub-hosted runner')
-    for path in (SOURCE, CACHE, MODULES):
-        if path.exists() or path.is_symlink():
+    if (os.environ.get('RUNNER_ENVIRONMENT') != 'self-hosted'
+            or not re.fullmatch(r'amd64-mo-shanghai-8c16g-.+-runner-.+', os.environ.get('RUNNER_NAME', ''))
+            or Path(os.environ.get('GITHUB_WORKSPACE', '/')) != SOURCE):
+        raise ValueError('canary requires the audited Shanghai ARC pool and canonical checkout')
+    if (command(['git', 'rev-parse', 'HEAD'], SOURCE) != os.environ['CANARY_SOURCE_SHA']
+            or command(['git', 'rev-parse', 'HEAD'], ROOT) != os.environ['CANARY_CI_SHA']):
+        raise ValueError('checkout identity mismatch')
+    for path in (CACHE, MODULES):
+        if path.is_symlink() or (path.exists() and (not path.is_dir() or any(path.iterdir()))):
             raise ValueError(f'preexisting path; refusing to alter it: {path}')
-    SOURCE.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(ROOT / 'subject'), SOURCE)
+        for parent in path.parents:
+            if parent.is_symlink():
+                raise ValueError('symlink cache parent')
     CACHE.parent.mkdir(parents=True, exist_ok=True)
     MODULES.parent.mkdir(parents=True, exist_ok=True)
     initial = {'cache_state': 'cold', 'snapshot_sha256': None}
@@ -232,15 +239,19 @@ def prepare(snapshot):
         staging.mkdir()
         with tarfile.open(archive) as stream:
             stream.extractall(staging, filter='data')
-        shutil.move(str(staging / 'go-build'), CACHE)
-        shutil.move(str(staging / 'mod'), MODULES)
+        for name, destination in (('go-build', CACHE), ('mod', MODULES)):
+            if destination.exists():
+                destination.rmdir()  # only empty; never remove populated cache contents
+            # ARC emptyDir workspace and container-root cache may be different
+            # filesystems. move copies on EXDEV and avoids nested cache roots.
+            shutil.move(str(staging / name), str(destination))
         if meta['identity'] != fingerprint():
             raise ValueError('snapshot environment mismatch')
         archive.unlink()  # only the task-owned downloaded archive
         initial = {'cache_state': 'warm', 'snapshot_sha256': meta['sha256']}
     else:
-        CACHE.mkdir()
-        MODULES.mkdir()
+        CACHE.mkdir(exist_ok=True)
+        MODULES.mkdir(exist_ok=True)
     if (CACHE / '.matrixone-seed.json').exists():
         raise ValueError('initial compiler cache must not contain a seed marker')
     # Identical test-result invalidation in A/B; compiler cache is preserved.
@@ -268,13 +279,11 @@ def run(args):
             raise ValueError('CI S3 test credentials must be configured; no secret values are logged')
         report['initial'] = prepare(args.snapshot)
         report['identity'] = fingerprint()
-        before_images = command(['docker', 'image', 'ls', '-q', '--no-trunc'])
-        report['initial_images'] = sorted(before_images.splitlines())
-        # The pinned builder cannot already be local, even for warm Go caches.
-        if subprocess.run(['docker', 'image', 'inspect', os.environ['SEED_IMAGE']],
-                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                          timeout=30).returncode == 0:
-            raise ValueError('builder image already present')
+        # Registry export has no shared local image store. Both arms start
+        # without task-owned tool/export staging; B pays all acquisition costs.
+        report['initial_images'] = []
+        if os.environ.get('SEED_TRANSPORT') != 'registry':
+            raise ValueError('Shanghai canary requires registry transport')
         report['disk_before'] = command(['df', '-Pk', str(SOURCE), str(CACHE), str(MODULES)])
         measured_start = time.monotonic()
         monitor_thread = threading.Thread(target=monitor)
@@ -302,8 +311,9 @@ def run(args):
             with (out / 'resources.jsonl').open('a') as log:
                 log.write(json.dumps(sample()) + '\n')
             report['resources'] = resource_summary(out / 'resources.jsonl')
+            if not report['resources']['cgroup']['available']:
+                raise ValueError('missing runner cgroup resource evidence')
         report['disk_after'] = command(['df', '-Pk', str(SOURCE), str(CACHE), str(MODULES)])
-        report['docker_disk'] = command(['docker', 'system', 'df'])
         reports = list((SOURCE / 'scratch').rglob('*-UT-Report.out'))
         if len(reports) != 1:
             raise ValueError('expected exactly one complete raw UT report')

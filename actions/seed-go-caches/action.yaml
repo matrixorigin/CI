@@ -1,6 +1,9 @@
 name: Seed Go caches
 description: Best-effort additive import from the trusted CI builder, preserving existing caches
 inputs:
+  transport:
+    description: Acquisition backend; registry is opt-in and requires a pinned image
+    default: docker
   image:
     description: Optional trusted repository at an immutable sha256 digest for paired measurements
     default: ''
@@ -16,6 +19,7 @@ runs:
     - name: Import trusted Go cache entries
       shell: bash
       env:
+        SEED_TRANSPORT: ${{ inputs.transport }}
         SEED_IMAGE: ${{ inputs.image }}
         SEED_FLAVOR: ${{ inputs.flavor }}
         SEED_GENERATION: ${{ inputs.generation }}

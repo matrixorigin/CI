@@ -36,5 +36,13 @@ if __name__ == '__main__':
         text=True, timeout=60).strip()
     if status not in ('ahead', 'identical'):
         raise ValueError('source SHA is not reachable from official main')
+    ci_sha = os.environ['CI_SHA']
+    if not re.fullmatch('[0-9a-f]{40}', ci_sha):
+        raise ValueError('full CI SHA required')
+    # The trusted main-branch caller pins BOTH workflow and checkout to this
+    # reviewed commit. CI squash merges do not preserve reviewed-head ancestry.
+    actual = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True, timeout=10).strip()
+    if actual != ci_sha:
+        raise ValueError('harness checkout identity mismatch')
     with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
         output.write('matrix=' + json.dumps(matrix(int(os.environ['REPETITIONS']))) + '\n')

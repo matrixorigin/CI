@@ -139,6 +139,84 @@ class FakeSeeder(seed.Seeder):
 
 
 class SeederTests(unittest.TestCase):
+    def test_registry_diff_id_and_truncated_gzip_reject_before_publication(self):
+        import registry
+        import gzip
+        for damage in ('diff-id', 'truncated', 'deflate'):
+            instance = self.make()
+            instance.env.update(SEED_TRANSPORT='registry', SEED_IMAGE='matrixorigin/matrixone@sha256:' + '1' * 64)
+            raw = tar_bytes([('root/.cache/go-build/' + MISSING, b'unpublished')])
+            def blob(image, source):
+                compressed = gzip.compress(raw)
+                if damage == 'truncated':
+                    compressed = compressed[:-4]
+                elif damage == 'deflate':
+                    compressed = compressed[:10] + b'\x07' + compressed[11:]
+                path = image.stage / 'layer.tar.gz'
+                path.write_bytes(compressed)
+                return path, 'sha256:' + '0' * 64 if damage == 'diff-id' else registry.digest(raw)
+            with self.subTest(damage=damage), \
+                    mock.patch.object(registry.RegistryImage, 'acquire', return_value=instance.image), \
+                    mock.patch.object(registry.RegistryImage, 'manifest', return_value=instance.manifest), \
+                    mock.patch.object(registry.RegistryImage, 'blob', blob):
+                report = self.run_seed(instance)
+            self.assertEqual(report['state'], 'failed')
+            self.assertEqual(report['cleanup'], 'complete')
+            self.assertFalse((instance.cache / MISSING).exists())
+            self.assert_no_marker(instance)
+
+    def test_registry_partial_acquisition_cleans_without_completion(self):
+        import registry
+        instance = self.make()
+        instance.env.update(SEED_TRANSPORT='registry', SEED_IMAGE='matrixorigin/matrixone@sha256:' + '1' * 64)
+        def acquire(image, reference):
+            (image.stage / 'partial').write_bytes(b'partial')
+            raise TimeoutError('bounded export timeout')
+        with mock.patch.object(registry.RegistryImage, 'acquire', acquire):
+            report = self.run_seed(instance)
+        self.assertEqual(report['state'], 'failed')
+        self.assertEqual(report['cleanup'], 'complete')
+        self.assert_no_marker(instance)
+        self.assertEqual(instance.calls, [])
+
+    def test_registry_import_preserves_cache_and_cleans_without_docker(self):
+        import registry
+        import gzip
+        instance = self.make()
+        instance.env.update(SEED_TRANSPORT='registry', SEED_IMAGE='matrixorigin/matrixone@sha256:' + '1' * 64)
+        def acquire(image, reference):
+            return dict(Id=reference, Os='linux', Architecture='amd64', Size=registry.PAYLOAD_LIMIT)
+        fetched = []
+        def blob(image, source):
+            fetched.append(source)
+            entries = {
+                '/mo-prebuilt/go-cache-manifest.json': [('mo-prebuilt/go-cache-manifest.json', json.dumps(instance.manifest).encode())],
+                '/root/.cache/go-build': [('root/.cache/go-build/' + EXISTING, b'collision'),
+                                         ('root/.cache/go-build/' + MISSING, b'new')],
+                '/go/pkg/mod': [('go/pkg/mod/example.test/m@v1/m.go', b'package m')],
+            }[source]
+            raw = tar_bytes(entries)
+            path = image.stage / 'layer.tar.gz'
+            path.write_bytes(gzip.compress(raw))
+            return path, registry.digest(raw)
+        with mock.patch.object(registry.RegistryImage, 'acquire', acquire), \
+                mock.patch.object(registry.RegistryImage, 'blob', blob):
+            report = self.run_seed(instance)
+            self.assertIn('/go/pkg/mod', fetched)
+            fetched.clear()
+            # A later generation still imports build entries additively, but
+            # must not acquire the already-populated module layer at all.
+            second = self.make(generation='2')
+            second.env.update(instance.env)
+            second_report = self.run_seed(second)
+            self.assertEqual(second_report['state'], 'seeded')
+            self.assertNotIn('/go/pkg/mod', fetched)
+        self.assertEqual(report['state'], 'seeded')
+        self.assertEqual(report['cleanup'], 'complete')
+        self.assertEqual((instance.cache / EXISTING).read_bytes(), b'local probe')
+        self.assertEqual((instance.cache / MISSING).read_bytes(), b'new')
+        self.assertEqual(instance.calls, [])
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)

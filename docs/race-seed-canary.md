@@ -1,110 +1,76 @@
 # Race cache seed measurement
 
-**Draft / not ready for the production runner experiment.** Read-only inspection
-on 2026-09-20 confirmed job 105924102623 uses `amd64-mo-shanghai-8c16g`,
-canonical checkout/module paths, CPU quota `800000/100000` (8 cores), and
-memory limit `17179869184` (16 GiB), while its visible cpuset is `0-95`.
-Consequently host CPU utilization is only context, not runner utilization.
-Reports now separately calculate visible-cgroup CPU seconds/quota utilization,
-throttling, sampled memory peak and OOM counter deltas. They do not attribute
-an external Docker daemon's CPU to the test container, nor claim hidden ancestor
-limits are known.
+CI #456 supplies the reusable measurement workflow; a thin MatrixOne manual
+workflow supplies caller context and existing CI-environment UT credentials.
+No existing PR check, production default, coverage workflow or runner deployment
+is changed. Implementation design: [daemonless design](race-seed-daemonless-design.md).
 
-Subsequent read-only inspection through the `idc` environment resolved the
-earlier access blocker. The pool template and a running pod confirm one runner
-container, requests/limits of 8 CPU / 16 GiB, an `EphemeralRunner` owner and an
-`emptyDir` mounted at `/home/runner/_work`. There are no cache PVC/hostPath mounts,
-Docker socket mounts or Docker sidecars in the observed pod.
+## Why daemonless acquisition
 
-**The actual execution blocker is Docker availability.** A read-only probe in
-that runner found `/usr/bin/docker`, but `docker info` exited 1 because
-`/var/run/docker.sock` does not exist. Neither `DOCKER_HOST` nor `DOCKER_CONTEXT`
-was set. The current importer requires `docker info`, pull, create and cp; an
-available builder image therefore does not make seeding usable on this pool.
-This observation covers the inspected template/pod, not all possible runner
-configurations. Enabling seed here without addressing acquisition would produce
-a failed import/fallback, not a valid B arm or evidence of speedup.
+Read-only inspection on 2026-09-20 established the Shanghai 8c16g pool uses
+ephemeral ARC pods with an emptyDir workspace, 8 CPU and 16 GiB. The observed
+container has no Docker socket/sidecar/remote Docker configuration; docker info
+fails. Registry transport therefore reads dedicated COPY layers using checksum-pinned
+crane v0.22.1 without executing the image. An explicit empty credential configuration
+prevents runner registry-auth reuse. Existing Docker transport stays unchanged.
 
-Before replacing the hosted guard, choose and review either daemonless image
-extraction or a runner infrastructure change providing an isolated Docker daemon.
-The latter changes the resource envelope and is not authorized by a measurement
-PR alone. Also resolve a MatrixOne-side caller that inherits existing UT
-credentials; do not copy credentials into CI merely to make this draft runnable.
-No runner configuration, production defaults or cache contents were changed.
+The importer validates producer schema 2 / host-ut-v1 and Go/platform/path/flavor
+contracts, imports regular cache files additively and cleans all owned blob,
+tool and payload staging before publishing completion. Registry mode requires
+a trusted immutable image and the known producer layer layout. Compressed blob
+digests and complete uncompressed diff_ids are checked before publication. Only
+metadata and build-cache layers are always acquired; module cache is fetched only
+when empty. Base/native-image layers and whole-filesystem export are unnecessary.
+Even these remaining transfer costs can outweigh compilation savings.
 
-The canary compares the complete race suite with seed disabled/enabled, on a
-fixed MatrixOne main commit and builder digest. Production defaults stay off.
-The manually dispatched workflow runs only from CI main. All harness code comes
-from its immutable workflow commit. MatrixOne must be an ancestor of main,
-because the suite uses the existing CI test credentials.
+## Paired contract
 
-Each arm gets a fresh GitHub-hosted Linux x64 runner. Cold arms start without
-Go caches or the builder image. Warm arms restore the **same immutable artifact**
-produced by one successful full race run without seeding. This snapshot has no
-seed completion marker: warm means an existing compiler/module cache, not a
-previous seed import. The already-seeded marker fast path is a separate future
-experiment. The matrix requests alternating AB/BA order and runs one arm at a
-time; matrix scheduling is not proof of execution order. Check job timestamps.
+- One source SHA reachable from official MatrixOne main and one immutable,
+  reviewed CI harness SHA. The trusted main-branch caller pins both the reusable
+  workflow and harness input to the same CI commit. CI squash merges do not
+  preserve head ancestry, so admission checks checkout identity, not CI ancestry.
+- Both arms use `amd64-mo-shanghai-8c16g`, canonical checkout and module paths,
+  the existing Go/Java/CMake and Shanghai proxy policy, no actions Go cache restore,
+  full unsharded race UT, parallelism 6 unless the existing repository variable
+  overrides it, and the same UT timeout.
+- A disables seeding; B uses registry seeding. No daemon or shared image cache.
+  The first measured operation includes B's crane bootstrap, image transfer,
+  validation, direct streaming extraction, import and cleanup, followed by
+  clean/config/full UT. Per-import phase times include their cache blob downloads.
+- Cold arms refuse preexisting populated Go caches. Warm arms restore the exact
+  same artifact from one successful seed-off full UT. The snapshot contains no
+  seed marker. Both arms invalidate test-result cache, preserving compile cache.
+- CPU quota, cgroup CPU seconds/utilization/throttling, sampled memory and OOM
+  deltas, host counters, disk occupancy and UT logs are retained. Host counters
+  are context only: visible cpuset can be 96 CPUs while quota is 8 cores.
+- Exact nonempty test and package outcome multisets must match. Empty, failed,
+  truncated, skipped-import, partial-import or mismatched arms are invalid.
 
-The comparison rejects different source/harness/image identities, snapshot
-hashes, runner image versions, CPU/memory/toolchains or UT settings. OS page
-cache and network conditions remain noise; pair repetition measures that noise.
-This initial canary supports ephemeral GitHub-hosted runners only. Use a matching
-larger hosted runner via RACE_CANARY_RUNNER_LABEL if the standard runner fails
-the importer space gate. It does not claim measurements for self-hosted pools.
+The matrix requests AB/BA alternation with max-parallel 1; actual scheduler order
+must be checked from timestamps. Page-cache state, colocated workloads and network
+conditions remain noise. First run: one warm preparation plus four measured arms.
+Three repetitions: one preparation plus twelve arms. No automatic rollout decision.
 
-Measured wall time starts before seed acquisition and ends after make clean,
-config, full make ut and importer-owned cleanup. It includes seeder failures.
-Checkout/toolchain setup, warm snapshot production/transfer/restoration, report
-parsing and artifact upload are separately visible workflow preparation costs,
-not part of the paired UT interval. Docker image layers remain daemon-owned,
-as in the production importer; they are charged to disk occupancy and reclaimed
-by ephemeral runner destruction, not by an invented image-prune step.
-Host CPU counters, disk counters, memory availability, cgroup counters and disk
-free space are sampled throughout the measured interval. Raw samples and UT
-logs are retained. Imported entries are not reported as compiler cache hits.
+Checkout/toolchain setup, snapshot production/transfer/restore, parsing and
+artifact upload are outside paired UT time and visible separately in job duration.
+Importer-owned cleanup is inside the measurement. No image-prune cost is deferred
+to pod destruction in registry mode. Hard-kill leftovers belong only to the
+ephemeral pod. Sampled peaks can miss short spikes; OOM counters supplement them.
 
-A successful workflow is a **valid experiment**, not rollout approval. Both
-arms must complete the same nonempty test execution multiset with identical
-pass/skip/package outcomes. B must report seeded, producer race ok, imported
-files > 0 and complete cleanup; any skip/fallback/partial seed is invalid. Warm
-cache identity is checked before running. Cold/warm are reported independently;
-one smoke pair is insufficient to establish a stable gain. No coverage result
-is inferred. Keep rollout off until repeated net gains and acceptable memory,
-disk and CPU costs have been reviewed.
+## Publication and operation
 
-## Initial verified image
+Verified builder run 35443952690 / job 105925505882 produced source
+`3ac87c30625fc082391e5384a4c94e50a2916cf6`, manifest
+`sha256:8137d222d3a3b29d119173639cea98931168ab7d886bf882894391f7804d5d88`,
+published to Docker Hub and the Shanghai ACR mirror. Registry metadata was checked
+independently: Go 1.26.4, linux/amd64/v1, race=ok and coverage=ok. Publication and
+import success are not compiler-hit evidence or end-to-end speedup evidence.
 
-2026-09-20: builder job 105925505882 in MatrixOne run 35443952690 published
-`matrixorigin/matrixone@sha256:8137d222d3a3b29d119173639cea98931168ab7d886bf882894391f7804d5d88`
-from source `3ac87c30625fc082391e5384a4c94e50a2916cf6`.
-The registry metadata layer was downloaded independently and its SHA256
-verified. Manifest schema 2 / host-ut-v1, canonical checkout/modules, Go 1.26.4,
-linux/amd64/v1, both contract IDs, race=ok and coverage=ok match the consumer.
-This proves publication/compatibility, not cache-hit rate or end-to-end speedup.
+Merge order (human authorization required): CI #456 first, then the MatrixOne
+manual caller pinned to the reviewed CI commit. Dispatch only on MatrixOne main
+with repetitions=1. Review complete cold/warm outcomes and resource deltas before
+increasing repetitions. Do not copy S3 credentials to the CI repository.
 
-## Invocation
-
-The sample requires the five existing S3 UT credentials (S3ENDPOINT, S3REGION,
-S3APIKEY, S3APISECRET, S3BUCKET). The existing CI-repository dispatch does not
-establish that credential path; replace it with a reviewed MatrixOne caller
-before execution. Missing credentials reject the run; values are never printed.
-The currently configured MatrixOne UT pool is `amd64-mo-shanghai-8c16g`;
-this hosted-only first measurement does not establish performance on that pool.
-Rollout to that pool additionally requires a matching ephemeral runner experiment.
-
-Only after the image-acquisition and caller blockers above are resolved and the updated
-workflow is reviewed and merged, dispatch Race seed canary on main with a full
-40-character MatrixOne SHA and the immutable image reference above. Start with
-repetitions=1 (four measured arms plus one warm preparation run); repetitions=3
-gives twelve measured arms and the same one preparation run. Review the report
-artifact and job summaries before requesting a separate rollout change.
-
-## Design scope
-
-R2 measurement contract: isolate compiler caches, preserve full race execution,
-keep fixed inputs, and fail closed on incomplete evidence. No suite selection,
-timeouts, scheduling or production activation changes. The importer gets one
-optional digest input restricted to its two existing trusted repositories;
-ordinary callers retain their current behavior. Tests cover input rejection,
-empty/truncated execution evidence, mismatched outcomes and mismatched pairing.
+Keep ordinary seed off unless repeated measurements show stable net wall-time
+benefit without correctness, memory, CPU or disk regression. No benefit or a
+slowdown means no rollout. Coverage requires its own later experiment.

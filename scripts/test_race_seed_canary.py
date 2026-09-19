@@ -1,16 +1,81 @@
 import copy
+import errno
+import io
 import json
 import os
+import runpy
 from pathlib import Path
 import tempfile
+import tarfile
 import unittest
 from unittest import mock
+import race_seed_canary as canary
 
 from race_seed_canary import compare, execution, summarize, resource_summary, cgroup_summary
 from race_seed_plan import matrix
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_plan_checks_trusted_source_and_exact_harness_without_squash_ancestry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'output'
+            env = dict(SOURCE_SHA='1' * 40, CI_SHA='2' * 40,
+                       SEED_IMAGE='matrixorigin/matrixone@sha256:' + '3' * 64,
+                       REPETITIONS='1', GITHUB_OUTPUT=str(output))
+            script = str(Path(__file__).with_name('race_seed_plan.py'))
+            with mock.patch.dict(os.environ, env), \
+                    mock.patch('subprocess.check_output', side_effect=['ahead', '2' * 40]) as command:
+                runpy.run_path(script, run_name='__main__')
+                self.assertEqual(len(json.loads(output.read_text().split('=', 1)[1])['include']), 4)
+                self.assertEqual(command.call_count, 2)
+            with mock.patch.dict(os.environ, env), \
+                    mock.patch('subprocess.check_output', side_effect=['ahead', '4' * 40]):
+                with self.assertRaisesRegex(ValueError, 'checkout identity'):
+                    runpy.run_path(script, run_name='__main__')
+            with mock.patch.dict(os.environ, env), \
+                    mock.patch('subprocess.check_output', return_value='diverged'):
+                with self.assertRaisesRegex(ValueError, 'official main'):
+                    runpy.run_path(script, run_name='__main__')
+
+    def test_audited_runner_preparation_preserves_preexisting_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            source, cache, modules = (root / n for n in ('source', 'cache', 'modules'))
+            source.mkdir()
+            environment = dict(RUNNER_ENVIRONMENT='self-hosted',
+                               RUNNER_NAME='amd64-mo-shanghai-8c16g-abc-runner-def',
+                               GITHUB_WORKSPACE=str(source), CANARY_SOURCE_SHA='s', CANARY_CI_SHA='c')
+            def command(args, cwd=None):
+                return ('s' if cwd == source else 'c') if args[0] == 'git' else ''
+            with mock.patch.multiple(canary, SOURCE=source, CACHE=cache, MODULES=modules), \
+                    mock.patch.object(canary, 'command', side_effect=command), \
+                    mock.patch.dict(os.environ, environment):
+                self.assertEqual(canary.prepare(None)['cache_state'], 'cold')
+                (cache / 'existing').write_text('retain')
+                with self.assertRaisesRegex(ValueError, 'preexisting'):
+                    canary.prepare(None)
+                self.assertEqual((cache / 'existing').read_text(), 'retain')
+                (cache / 'existing').unlink()
+                snapshot = root / 'snapshot'
+                snapshot.mkdir()
+                archive = snapshot / 'cache.tar'
+                with tarfile.open(archive, 'w') as stream:
+                    for name in ('go-build/cache-hit', 'mod/example.test/m.go'):
+                        member = tarfile.TarInfo(name)
+                        member.size = 4
+                        stream.addfile(member, io.BytesIO(b'data'))
+                (snapshot / 'snapshot.json').write_text(json.dumps({
+                    'sha256': canary.sha256(archive), 'identity': {'fixture': 'same'}}))
+                with mock.patch.object(canary, 'fingerprint', return_value={'fixture': 'same'}), \
+                        mock.patch('shutil.os.rename', side_effect=OSError(errno.EXDEV, 'cross-device')):
+                    self.assertEqual(canary.prepare(snapshot)['cache_state'], 'warm')
+                self.assertEqual((cache / 'cache-hit').read_bytes(), b'data')
+                self.assertEqual((modules / 'example.test/m.go').read_bytes(), b'data')
+                self.assertFalse((cache / 'go-build').exists())
+                with mock.patch.dict(os.environ, RUNNER_NAME='unknown-runner'):
+                    with self.assertRaisesRegex(ValueError, 'audited'):
+                        canary.prepare(None)
+
     def test_cgroup_metrics_use_quota_not_host_cpu_count(self):
         rows = [dict(monotonic=i * 10, cgroup_cpu=f'usage_usec {i * 40000000}\nthrottled_usec {i * 1000000}',
                      cgroup_cpu_limit='800000 100000', cgroup_memory_limit='17179869184',

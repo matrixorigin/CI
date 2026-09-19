@@ -1,5 +1,6 @@
 self-hosted-runner:
   labels:
+    - amd64-mo-shanghai-8c16g
     - amd64-mo-guangzhou-2xlarge16
     - amd64-mo-guangzhou-2xlarge32
     - amd64-mo-guangzhou-medium8
