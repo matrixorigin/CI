@@ -1,0 +1,18 @@
+name: Seed Go caches
+description: Best-effort additive import from the trusted CI builder, preserving existing caches
+inputs:
+  flavor:
+    description: Producer warm flavor (race or coverage)
+    required: true
+  generation:
+    description: Explicit import policy generation; bump to refresh persistent runners
+    default: '1'
+runs:
+  using: composite
+  steps:
+    - name: Import trusted Go cache entries
+      shell: bash
+      env:
+        SEED_FLAVOR: ${{ inputs.flavor }}
+        SEED_GENERATION: ${{ inputs.generation }}
+      run: python3 "$GITHUB_ACTION_PATH/seed.py"
