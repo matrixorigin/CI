@@ -11,6 +11,7 @@ on:
       - '.github/actionlint.yaml'
       - 'actions/resolve-sca-license-scope/**'
       - 'actions/restore-sca-analysis-cache/**'
+      - 'actions/seed-go-caches/**'
       - 'actions/upload-artifact-with-retry/action.yaml'
       - 'actions/upload-artifact-with-retry/state-machine.schema.json'
       - 'scripts/select_coverage_artifacts.py'
@@ -76,6 +77,8 @@ jobs:
         run: |
           bash actions/restore-sca-analysis-cache/cache-state.test.sh
           bash actions/restore-sca-analysis-cache/environment-hash.test.sh
+      - name: Test Go cache import contracts
+        run: python3 -m unittest discover -s actions/seed-go-caches -p 'test_*.py' -v
       - name: Guard deliberate workflow disablements
         env:
           ACTIONLINT: ${{ steps.install-actionlint.outputs.executable }}
@@ -137,6 +140,7 @@ jobs:
           files: |
             actions/resolve-sca-license-scope/action.yaml
             actions/restore-sca-analysis-cache/action.yaml
+            actions/seed-go-caches/action.yaml
             actions/upload-artifact-with-retry/action.yaml
       - name: Validate artifact retry state machine
         uses: dsanders11/json-schema-validate-action@eddf079f55830cc9a916a3c512ba9086240d2fea # v2.0.0
