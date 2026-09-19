@@ -10,12 +10,21 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
 import uuid
 
-SCHEMA = 1
+SCHEMA = 2
+PROFILE = "host-ut-v1"
+CHECKOUT = "/home/runner/_work/matrixone/matrixone"
+MODULES = "/home/runner/go/pkg/mod"
+GO_FIELDS = ("GOMODCACHE", "GOVERSION", "GOOS", "GOARCH", "GOAMD64", "GOEXPERIMENT")
+CONTRACTS = {
+    "race_contract": "readonly-short-matrixone_test-vetoff-race-v1",
+    "coverage_contract": "short-matrixone_test-vetoff-covermode-set-filter-driver-aoe-memEngine-catalog-v1",
+}
 FLOOR = 30 * 1024**3
 RESERVE = 4 * 1024**3
 ENTRY = re.compile(r"[0-9a-f]{64}-[ad]")
@@ -126,14 +135,21 @@ def publish_build(stage, cache):
     return count, size
 
 
-def write_marker(cache, record):
-    fd, name = tempfile.mkstemp(prefix=".seed-record-", dir=cache)
+def remove_owned(name, device, inode):
+    """Child-only deletion, limited to a registered creation identity."""
+    path = Path(name)
+    if not path.is_absolute() or not path.name.startswith((".mo-seed-", "mo-docker-config-", ".seed-record-")):
+        raise ValueError("not an owned temporary resource")
     try:
-        with os.fdopen(fd, "w") as output:
-            json.dump(record, output, sort_keys=True)
-        os.replace(name, cache / MARKER)
-    finally:
-        Path(name).unlink(missing_ok=True)
+        stat = path.lstat()
+    except FileNotFoundError:
+        return
+    if path.is_symlink() or (stat.st_dev, stat.st_ino) != (int(device), int(inode)):
+        raise ValueError("owned directory identity changed")
+    if path.name.startswith(".seed-record-") and path.is_file():
+        path.unlink()
+    else:
+        shutil.rmtree(path)
 
 
 class Seeder:
@@ -146,24 +162,149 @@ class Seeder:
         self.deadline = self.started + 1080
         self.env = os.environ.copy()
         self.container = ""
+        self.container_removed = False
+        self.owned = {}
+        self.deferred = 0
+        self.cancelled = None
+        self.cleanup_remaining = 45.0
+        self.cleanup_each = 15.0
+        self.pending_marker = None
         self.report = {"state": "failed", "flavor": flavor,
                        "module_state": "not-attempted", "imported_bytes": 0,
                        "producer_go_version": "unknown"}
 
-    def command(self, args, *, output=None, timeout=60):
+    def interrupt(self, signum, _frame):
+        self.cancelled = self.cancelled or f"seed interrupted by signal {signum}"
+        if not self.deferred:
+            raise TimeoutError(self.cancelled)
+
+    def checkpoint(self):
+        if self.cancelled:
+            raise TimeoutError(self.cancelled)
+
+    @contextlib.contextmanager
+    def ownership_transition(self):
+        self.deferred += 1
+        try:
+            yield
+        finally:
+            self.deferred -= 1
+
+    def temporary(self, parent=None, prefix=".mo-seed-"):
+        with self.ownership_transition():
+            path = Path(tempfile.mkdtemp(dir=parent, prefix=prefix)).resolve()
+            stat = path.lstat()
+            self.owned[path] = (stat.st_dev, stat.st_ino)
+        self.checkpoint()
+        return path
+
+    def stop_process(self, process, deadline):
+        # No communicate()/wait() without a timeout, including exception paths.
+        for sig, grace in ((signal.SIGTERM, 0.3), (signal.SIGKILL, 0.7)):
+            try:
+                os.killpg(process.pid, sig)
+            except ProcessLookupError:
+                pass
+            until = min(deadline, time.monotonic() + grace)
+            while process.poll() is None and time.monotonic() < until:
+                time.sleep(min(0.02, max(0, until - time.monotonic())))
+        if process.poll() is None:
+            self.report.setdefault("leftover_pids", []).append(process.pid)
+
+    def execute(self, args, *, output=None, timeout=60, cleanup=False, max_bytes=None):
+        # Keep ownership across the Popen-return/try-finally gap. Cancellation
+        # is checked by the polling loop, never thrown before its reaper exists.
+        with self.ownership_transition():
+            result = self._execute(args, output=output, timeout=timeout,
+                                   cleanup=cleanup, max_bytes=max_bytes)
+            if not cleanup:
+                self.checkpoint()
+            return result
+
+    def _execute(self, args, *, output, timeout, cleanup, max_bytes):
+        deadline = time.monotonic() + timeout
+        # Disk-backed capture avoids pipe deadlocks and unbounded memory capture.
+        with tempfile.TemporaryFile() as capture:
+            destination = output if output is not None else capture
+            with self.ownership_transition():
+                process = subprocess.Popen(args, env=self.env, stdout=destination,
+                                           stderr=subprocess.DEVNULL if cleanup else None,
+                                           start_new_session=True)
+            try:
+                while process.poll() is None:
+                    if not cleanup:
+                        self.checkpoint()
+                    if max_bytes is not None and os.fstat(destination.fileno()).st_size > max_bytes:
+                        raise ValueError("metadata transfer exceeds byte limit")
+                    # Reserve the last second for TERM/KILL and bounded reaping.
+                    if time.monotonic() >= deadline - 1:
+                        raise subprocess.TimeoutExpired(args, timeout)
+                    time.sleep(0.02)
+                if max_bytes is not None and os.fstat(destination.fileno()).st_size > max_bytes:
+                    raise ValueError("metadata transfer exceeds byte limit")
+                if process.returncode:
+                    raise subprocess.CalledProcessError(process.returncode, args)
+                if output is None:
+                    capture.seek(0)
+                    return capture.read()
+            finally:
+                if process.poll() is None:
+                    with self.ownership_transition():
+                        self.stop_process(process, min(deadline, time.monotonic() + 1))
+
+    def cleanup_command(self, args, timeout):
+        return self.execute(args, timeout=timeout, cleanup=True)
+
+    def cleanup_path(self, path):
+        if path not in self.owned:
+            return True
+        started = time.monotonic()
+        allowance = min(self.cleanup_each, self.cleanup_remaining)
+        if allowance <= 1:
+            return False
+        with self.ownership_transition():
+            try:
+                device, inode = self.owned[path]
+                self.cleanup_command([sys.executable, str(Path(__file__).resolve()),
+                                      "--remove-owned", str(path), str(device), str(inode)], allowance)
+                if path.exists() or path.is_symlink():
+                    raise OSError("cleanup did not remove owned directory")
+                del self.owned[path]
+                return True
+            except (OSError, subprocess.SubprocessError, ValueError) as error:
+                self.report.setdefault("cleanup_errors", []).append(f"{path}: {error}")
+                return False
+            finally:
+                self.cleanup_remaining -= time.monotonic() - started
+
+    def clean_container(self):
+        if not self.container or self.container_removed:
+            return
+        started = time.monotonic()
+        allowance = min(self.cleanup_each, self.cleanup_remaining)
+        if allowance <= 1:
+            return
+        with self.ownership_transition():
+            try:
+                self.cleanup_command(["docker", "rm", "-f", self.container], allowance)
+                self.container_removed = True
+            except (OSError, subprocess.SubprocessError) as error:
+                self.report.setdefault("cleanup_errors", []).append(f"{self.container}: {error}")
+            finally:
+                self.cleanup_remaining -= time.monotonic() - started
+
+    def command(self, args, *, output=None, timeout=60, max_bytes=None):
         remaining = self.deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError("seed deadline expired")
-        return subprocess.run(args, check=True, env=self.env,
-                              stdout=output if output is not None else subprocess.PIPE,
-                              timeout=min(timeout, remaining)).stdout
+        self.checkpoint()
+        return self.execute(args, output=output, timeout=min(timeout, remaining), max_bytes=max_bytes)
 
     def docker(self, *args, **kwargs):
         return self.command(["docker", *args], **kwargs)
 
-    def payload(self, stack, cache, source, root, budget, build=False):
-        stage = Path(stack.enter_context(tempfile.TemporaryDirectory(
-            prefix=".mo-seed-", dir=cache if build else cache.parent)))
+    def payload(self, cache, source, root, budget, build=False):
+        stage = self.temporary(cache if build else cache.parent)
         archive = stage / "payload.tar"
         data = stage / "data"
         data.mkdir()
@@ -179,10 +320,13 @@ class Seeder:
     def seed(self, stack):
         values = json.loads(self.command([
             "go", "env", "-json", "GOCACHE", "GOMODCACHE", "GOVERSION",
-            "GOOS", "GOARCH", "GOAMD64", "GOEXPERIMENT", "GOCACHEPROG"]))
+            "GOOS", "GOARCH", "GOAMD64", "GOEXPERIMENT", "GOCACHEPROG", "GOMOD"]))
         if (values["GOCACHE"] == "off" or values.get("GOCACHEPROG")
                 or values["GOOS"] != "linux" or values["GOARCH"] != "amd64"):
             self.report["state"] = "unsupported"
+            return
+        if values.get("GOMOD") != CHECKOUT + "/go.mod" or values["GOMODCACHE"] != MODULES:
+            self.report["state"] = "incompatible-paths"
             return
         cache = directory(values["GOCACHE"])
         modules = directory(values["GOMODCACHE"])
@@ -197,7 +341,8 @@ class Seeder:
             self.report["state"] = "busy"
             return
         key = {"schema": SCHEMA, "generation": self.generation,
-               "consumer": values, "flavor": self.flavor}
+               "consumer": values, "flavor": self.flavor,
+               "profile": PROFILE, "contracts": CONTRACTS, "checkout": CHECKOUT}
         marker = cache / MARKER
         if marker.is_symlink():
             raise ValueError("symlink completion record")
@@ -205,14 +350,17 @@ class Seeder:
             prior = json.loads(marker.read_text())
         except (FileNotFoundError, ValueError):
             prior = {}
+        if not isinstance(prior, dict):
+            prior = {}
         if prior.get("key") == key and prior.get("state") in ("seeded", "seeded-partial"):
             self.report.update(prior)
             self.report.update(state="already-seeded", previous_imported_bytes=prior.get("imported_bytes", 0),
-                               imported_bytes=0, imported_files=0, module_state="previous-import")
+                               imported_bytes=0, imported_files=0, module_state="previous-import",
+                               acquisition_seconds=0, build_import_seconds=0, module_import_seconds=0)
             return
         # An empty config prevents reuse of runner registry credentials.
-        config = stack.enter_context(tempfile.TemporaryDirectory(prefix="mo-docker-config-"))
-        self.env["DOCKER_CONFIG"] = config
+        config = self.temporary(prefix="mo-docker-config-")
+        self.env["DOCKER_CONFIG"] = str(config)
         docker_root = Path(self.docker("info", "--format", "{{.DockerRootDir}}").decode().strip())
         if not docker_root.is_absolute() or not docker_root.is_dir():
             self.report["state"] = "storage-unavailable"
@@ -255,27 +403,41 @@ class Seeder:
         identity = self.docker("create", "--name", self.container, image["Id"]).decode().strip()
         if not re.fullmatch(r"[0-9a-f]{12,64}", identity):
             raise ValueError("unexpected container identity")
-        status = "unknown"
         try:
-            # A tiny metadata archive only; never execute image commands.
+            # Reject legacy/incompatible producers BEFORE large cache payloads.
             with tempfile.TemporaryFile() as metadata:
-                self.docker("cp", f"{self.container}:/mo-prebuilt/warm-status", "-", output=metadata)
+                self.docker("cp", f"{self.container}:/mo-prebuilt/go-cache-manifest.json", "-",
+                            output=metadata, timeout=15, max_bytes=65536)
+                if metadata.tell() > 65536:
+                    raise ValueError("oversize metadata archive")
                 metadata.seek(0)
-                with tarfile.open(fileobj=metadata) as archive:
-                    member = archive.getmember("warm-status")
-                    if member.isfile() and member.size <= 4096:
-                        lines = archive.extractfile(member).read().decode().splitlines()
-                        if f"warm-{self.flavor}=ok" in lines:
-                            status = "ok"
-                        elif f"warm-{self.flavor}=FAILED" in lines:
-                            status = "FAILED"
-        except (subprocess.CalledProcessError, tarfile.TarError, KeyError, UnicodeError):
-            pass
+                with tarfile.open(fileobj=metadata, mode="r:") as archive:
+                    member = archive.getmember("go-cache-manifest.json")
+                    if not member.isfile() or member.size > 8192:
+                        raise ValueError("invalid manifest member")
+                    manifest = json.load(archive.extractfile(member))
+            expected = {"schema": SCHEMA, "profile": PROFILE, "checkout": CHECKOUT,
+                        "go_env": {field: values[field] for field in GO_FIELDS}, **CONTRACTS}
+            if not isinstance(manifest, dict) or any(manifest.get(k) != v for k, v in expected.items()):
+                raise ValueError("producer manifest does not match host UT contract")
+            status = manifest.get("flavors", {}).get(self.flavor)
+            if status not in ("ok", "FAILED"):
+                raise ValueError("missing producer flavor status")
+        except (subprocess.SubprocessError, tarfile.TarError, KeyError, UnicodeError,
+                ValueError, AttributeError, TypeError) as error:
+            self.report.update(state="incompatible-producer", error=str(error))
+            return
+        self.report["producer_go_version"] = manifest["go_env"]["GOVERSION"]
         self.report["producer_flavor_status"] = status
-        with contextlib.ExitStack() as build_stack:
-            data = self.payload(build_stack, cache, "/root/.cache/go-build", "go-build", size, True)
-            count, imported = publish_build(data, cache)
-            self.report.update(imported_files=count, imported_bytes=imported)
+        self.report["acquisition_seconds"] = round(time.monotonic() - self.started, 3)
+        phase_started = time.monotonic()
+        data = self.payload(cache, "/root/.cache/go-build", "go-build", size, True)
+        count, imported = publish_build(data, cache)
+        self.report.update(imported_files=count, imported_bytes=imported)
+        if not self.cleanup_path(data.parent):
+            raise OSError("build staging cleanup failed; module import not started")
+        self.checkpoint()
+        self.report["build_import_seconds"] = round(time.monotonic() - phase_started, 3)
         self.report["module_state"] = "preserved-mountpoint" if module_mount else "preserved-populated"
         # Recheck after releasing build staging. Do not budget two archives
         # simultaneously or allocate the module payload only to discard it.
@@ -283,8 +445,9 @@ class Seeder:
             self.report["module_state"] = "insufficient-space"
             need_modules = False
         if need_modules:
-            with contextlib.ExitStack() as module_stack:
-                data = self.payload(module_stack, modules, "/go/pkg/mod", "mod", size)
+            phase_started = time.monotonic()
+            data = self.payload(modules, "/go/pkg/mod", "mod", size)
+            with self.ownership_transition():
                 try:
                     # POSIX atomically replaces an empty directory; a populated
                     # destination fails without removing it. Never rmdir first.
@@ -295,41 +458,102 @@ class Seeder:
                     self.report["module_state"] = "preserved-populated"
                 else:
                     self.report["module_state"] = "seeded"
+            self.checkpoint()
+            if not self.cleanup_path(data.parent):
+                raise OSError("module staging cleanup failed")
+            self.checkpoint()
+            self.report["module_import_seconds"] = round(time.monotonic() - phase_started, 3)
         self.report.update(key=key, state="seeded" if status == "ok" else "seeded-partial",
                            completed_at=int(time.time()))
-        write_marker(cache, self.report)
+        self.pending_marker = cache
+
+    def commit_marker(self):
+        # File creation, publication and cleanup form one short ownership
+        # transition. Signals are remembered; a cancelled commit is removed.
+        cache = self.pending_marker
+        self.checkpoint()
+        with self.ownership_transition():
+            fd, name = tempfile.mkstemp(prefix=".seed-record-", dir=cache)
+            path = Path(name)
+            stat = os.fstat(fd)
+            self.owned[path] = (stat.st_dev, stat.st_ino)
+            published = False
+            try:
+                with os.fdopen(fd, "w") as output:
+                    json.dump(self.report, output, sort_keys=True)
+                if not self.cancelled:
+                    os.replace(name, cache / MARKER)
+                    published = True
+                    del self.owned[path]
+                # This is the final cancellation checkpoint for the commit.
+                # It must be inside the rollback scope: detecting cancellation
+                # outside finally could leave a seeded marker on a failed run.
+                self.checkpoint()
+            except BaseException:
+                # Cancellation detected at/before the final checkpoint aborts
+                # publication. Signals after it belong to a completed commit:
+                # do not turn seeded into a marker-less apparent success.
+                if published:
+                    (cache / MARKER).unlink(missing_ok=True)
+                raise
+            finally:
+                if path in self.owned:
+                    self.cleanup_path(path)
 
     def run(self):
+        cleanup_budget = self.cleanup_remaining
+        handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGALRM)}
+        for sig in handlers:
+            signal.signal(sig, self.interrupt)
         with contextlib.ExitStack() as stack:
             try:
+                signal.alarm(1080)
                 self.seed(stack)
             except (OSError, ValueError, tarfile.TarError, subprocess.SubprocessError,
                     TimeoutError) as error:
                 self.report.update(state="failed", error=str(error))
             finally:
-                if self.container:
-                    # Keep the anonymous client config alive through cleanup.
-                    # Cleanup has a short budget even after the work deadline.
+                # Cover the entire finalization interval, including gaps between
+                # cleanup calls and marker publication, against repeated signals.
+                self.deferred += 1
+                with self.ownership_transition():
+                    signal.alarm(0)
+                    # Last container-removal attempt precedes config release.
+                    self.clean_container()
+                    for path in list(self.owned):
+                        self.cleanup_path(path)
+                    leftovers = [str(path) for path in self.owned]
+                    if self.container and not self.container_removed:
+                        leftovers.append("container:" + self.container)
+                    self.report["cleanup"] = "incomplete" if leftovers or self.report.get("leftover_pids") else "complete"
+                    if leftovers:
+                        self.report["leftover_resources"] = leftovers
+                    if self.cancelled:
+                        self.report.update(state="cancelled", error=self.cancelled)
+                    elif self.report["cleanup"] != "complete":
+                        self.report.update(state="failed", error="owned resource cleanup incomplete")
+                if self.pending_marker and self.report["state"] in ("seeded", "seeded-partial"):
                     try:
-                        subprocess.run(["docker", "rm", "-f", self.container],
-                                       env=self.env, check=True, timeout=15,
-                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    except (OSError, subprocess.SubprocessError):
-                        self.report["cleanup"] = "container-removal-failed"
+                        self.commit_marker()
+                    except (OSError, TimeoutError) as error:
+                        self.report.update(state="cancelled" if self.cancelled else "failed", error=str(error))
+                if self.owned:
+                    self.report.update(state="cancelled" if self.cancelled else "failed", cleanup="incomplete",
+                                       leftover_resources=[str(path) for path in self.owned] +
+                                       (["container:" + self.container] if self.container and not self.container_removed else []))
+                for sig, handler in handlers.items():
+                    signal.signal(sig, handler)
+                self.deferred -= 1
         self.report["elapsed_seconds"] = round(time.monotonic() - self.started, 3)
+        self.report["cleanup_seconds"] = round(cleanup_budget - self.cleanup_remaining, 3)
         return self.report
 
 
-def interrupted(signum, _frame):
-    raise TimeoutError(f"seed interrupted by signal {signum}")
-
-
 if __name__ == "__main__":
-    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGALRM):
-        signal.signal(sig, interrupted)
-    signal.alarm(1100)
+    if len(sys.argv) == 5 and sys.argv[1] == "--remove-owned":
+        remove_owned(*sys.argv[2:])
+        sys.exit(0)
     result = Seeder(os.environ["SEED_FLAVOR"], os.environ.get("SEED_GENERATION", "1")).run()
-    signal.alarm(0)
     print(json.dumps(result, sort_keys=True))
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:

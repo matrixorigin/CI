@@ -53,7 +53,7 @@ class FakeSeeder(seed.Seeder):
         self.docker_root.mkdir(exist_ok=True)
         self.values = dict(GOCACHE=str(self.cache), GOMODCACHE=str(self.modules),
                            GOVERSION="go1.26.4", GOOS="linux", GOARCH="amd64",
-                           GOAMD64="v1", GOEXPERIMENT="", GOCACHEPROG="")
+                           GOAMD64="v1", GOEXPERIMENT="", GOCACHEPROG="", GOMOD=str(root / "go.mod"))
         self.image = dict(Id="sha256:" + "d" * 64, Os="linux",
                           Architecture="amd64", Size=1024)
         self.calls = []
@@ -70,10 +70,18 @@ class FakeSeeder(seed.Seeder):
                 ("go-build/" + MISSING, b"imported build")]),
             "/go/pkg/mod": tar_bytes([("mod/example.test/m@v1/m.go", b"package m\n")]),
         }
+        self.manifest = dict(schema=seed.SCHEMA, profile=seed.PROFILE, checkout=str(root),
+                             go_env={k: self.values[k] for k in seed.GO_FIELDS},
+                             flavors={"race": "ok", "coverage": "ok"}, **seed.CONTRACTS)
+        self.refresh_manifest()
+
+    def refresh_manifest(self):
+        self.payloads["/mo-prebuilt/go-cache-manifest.json"] = tar_bytes([
+            ("go-cache-manifest.json", json.dumps(self.manifest).encode())])
 
     def command(self, args, *, output=None, timeout=60):
         if args != ["go", "env", "-json", "GOCACHE", "GOMODCACHE", "GOVERSION",
-                    "GOOS", "GOARCH", "GOAMD64", "GOEXPERIMENT", "GOCACHEPROG"]:
+                    "GOOS", "GOARCH", "GOAMD64", "GOEXPERIMENT", "GOCACHEPROG", "GOMOD"]:
             raise AssertionError(f"unexpected external command: {args}")
         # go env can initialize a cache without compiling the workload.
         for number in range(256):
@@ -127,16 +135,21 @@ class SeederTests(unittest.TestCase):
         self.addCleanup(mock.patch.stopall)
         self.cleanup_calls = []
 
-        def cleanup(args, **kwargs):
+        original_cleanup = seed.Seeder.cleanup_command
+
+        def cleanup(instance, args, timeout):
+            if args[0] != "docker":
+                return original_cleanup(instance, args, timeout)
             self.assertEqual(args[:3], ["docker", "rm", "-f"])
             self.assertRegex(args[3], r"^mo-go-seed-[0-9a-f]{32}$")
-            self.assertTrue(Path(kwargs["env"]["DOCKER_CONFIG"]).is_dir())
-            self.assertTrue(kwargs["check"])
-            self.assertLessEqual(kwargs["timeout"], 15)
+            self.assertTrue(Path(instance.env["DOCKER_CONFIG"]).is_dir())
+            self.assertLessEqual(timeout, 15)
             self.cleanup_calls.append(args)
             return SimpleNamespace(returncode=0)
 
-        self.external = mock.patch.object(seed.subprocess, "run", side_effect=cleanup).start()
+        self.external = mock.patch.object(seed.Seeder, "cleanup_command", cleanup).start()
+        mock.patch.object(seed, "CHECKOUT", str(self.root)).start()
+        mock.patch.object(seed, "MODULES", str(self.root / "modules")).start()
 
     def make(self, **kwargs):
         instance = FakeSeeder(self.root, **kwargs)
@@ -247,6 +260,8 @@ class SeederTests(unittest.TestCase):
                 changed = self.make(**{field: value} if field in ("flavor", "generation") else {})
                 if field in changed.values:
                     changed.values[field] = value
+                    changed.manifest["go_env"][field] = value
+                    changed.refresh_manifest()
                 report = self.run_seed(changed)
                 self.assertEqual(report["state"], "seeded")
                 self.assertTrue(any(call[0] == "pull" for call in changed.calls))
@@ -343,11 +358,11 @@ class SeederTests(unittest.TestCase):
         self.assertEqual(self.run_seed(self.make())["state"], "seeded")
 
     def test_partial_producer_record_reused_with_accurate_health_and_counts(self):
-        for health in ("FAILED", "unknown"):
+        for health in ("FAILED",):
             with self.subTest(health=health):
                 instance = self.make(generation=health)
-                instance.payloads["/mo-prebuilt/warm-status"] = tar_bytes([
-                    ("warm-status", f"warm-race={health}\n".encode())])
+                instance.manifest["flavors"]["race"] = health
+                instance.refresh_manifest()
                 first = self.run_seed(instance)
                 self.assertEqual(first["state"], "seeded-partial")
                 self.assertEqual(first["producer_flavor_status"], health)
@@ -377,6 +392,55 @@ class SeederTests(unittest.TestCase):
         pulls = [call[1] for call in fallback.calls if call[0] == "pull"]
         self.assertEqual(pulls, ["registry.cn-shanghai.aliyuncs.com/matrixorigin/matrixone:ci-builder",
                                  "matrixorigin/matrixone:ci-builder"])
+
+    def test_consumer_path_mismatch_rejects_before_any_docker_call(self):
+        for field in ("GOMOD", "GOMODCACHE"):
+            with self.subTest(field=field):
+                instance = self.make()
+                instance.values[field] = "/different/path"
+                self.assertEqual(self.run_seed(instance)["state"], "incompatible-paths")
+                self.assertEqual(instance.calls, [])
+                self.assert_no_marker(instance)
+
+    def test_manifest_failures_reject_before_payload_and_marker(self):
+        cases = [None, [], {"schema": 1}, {"profile": "other"},
+                 {"checkout": "/old/checkout"}, {"go_env": {}},
+                 {"race_contract": "changed"}, {"coverage_contract": "changed"},
+                 {"flavors": {"race": "unknown"}}, {"flavors": []}]
+        for patch in cases:
+            with self.subTest(patch=patch):
+                instance = self.make()
+                if isinstance(patch, dict):
+                    instance.manifest.update(patch)
+                    instance.refresh_manifest()
+                else:
+                    instance.payloads["/mo-prebuilt/go-cache-manifest.json"] = tar_bytes([
+                        ("go-cache-manifest.json", json.dumps(patch).encode())])
+                self.assertEqual(self.run_seed(instance)["state"], "incompatible-producer")
+                self.assert_no_marker(instance)
+                self.assertFalse(any("/root/.cache/go-build" in " ".join(c) or
+                                     "/go/pkg/mod" in " ".join(c) for c in instance.calls))
+        for payload in (b"invalid tar", tar_bytes([]),
+                        tar_bytes([("go-cache-manifest.json", b"x" * 8193)]), b"x" * 65537):
+            instance = self.make()
+            instance.payloads["/mo-prebuilt/go-cache-manifest.json"] = payload
+            self.assertEqual(self.run_seed(instance)["state"], "incompatible-producer")
+            self.assert_no_marker(instance)
+        instance = self.make()
+        instance.failed_source = "/mo-prebuilt/go-cache-manifest.json"
+        self.assertEqual(self.run_seed(instance)["state"], "incompatible-producer")
+        self.assert_no_marker(instance)
+
+    def test_old_marker_cannot_bypass_manifest_validation(self):
+        instance = self.make()
+        first = self.run_seed(instance)
+        first["key"]["schema"] = 1
+        (instance.cache / seed.MARKER).write_text(json.dumps(first))
+        second = self.make()
+        second.manifest["schema"] = 1
+        second.refresh_manifest()
+        self.assertEqual(self.run_seed(second)["state"], "incompatible-producer")
+        self.assertTrue(any(c[0] == "pull" for c in second.calls))
 
     def test_image_platform_mismatch_never_creates_container(self):
         for field, value in (("Os", "windows"), ("Architecture", "arm64")):

@@ -4,6 +4,11 @@ name: MatrixOne CI
 on:
   workflow_call:
     inputs:
+      ut_cache_seed:
+        description: "Opt-in host-ut-v1 cache canary; keep disabled until end-to-end cost is measured"
+        required: false
+        type: boolean
+        default: false
       ut_parallel:
         description: "Maximum number of UT packages built and tested concurrently"
         required: false
@@ -193,6 +198,7 @@ jobs:
       # Import completed seed entries, not a directory-emptiness heuristic.
       # The trusted action records cost/provenance; Go still validates cache keys.
       - id: seed_caches
+        if: ${{ inputs.ut_cache_seed }}
         name: Seed Go caches from CI builder image
         timeout-minutes: 20
         continue-on-error: true

@@ -3,6 +3,11 @@ name: MatrixOne UT Coverage
 on:
   workflow_call:
     inputs:
+      cache_seed:
+        description: "Opt-in host-ut-v1 cache canary; keep disabled until end-to-end cost is measured"
+        required: false
+        type: boolean
+        default: false
       bvt_generation:
         description: "Shared CI generation used to select this run's coverage artifacts"
         required: false
@@ -182,6 +187,7 @@ jobs:
       # Import completed seed entries, not a directory-emptiness heuristic.
       # The trusted action records cost/provenance; Go still validates cache keys.
       - id: seed_caches
+        if: ${{ inputs.cache_seed }}
         name: Seed Go caches from CI builder image
         timeout-minutes: 20
         continue-on-error: true
