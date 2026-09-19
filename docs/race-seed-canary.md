@@ -10,13 +10,27 @@ throttling, sampled memory peak and OOM counter deltas. They do not attribute
 an external Docker daemon's CPU to the test container, nor claim hidden ancestor
 limits are known.
 
-Pool isolation remains **unverified**: the organization runners API and the
-configured Kubernetes autoscaling-runner-set listing both reject access (403).
-Before replacing the hosted guard, obtain a sanitized runner template confirming
-per-job lifecycle and volume ownership for checkout, Go caches and Docker storage.
-Also resolve a MatrixOne-side caller that inherits existing UT credentials;
-do not copy credentials into CI merely to make this draft runnable. No runner
-configuration, production defaults or cache contents were changed by inspection.
+Subsequent read-only inspection through the `idc` environment resolved the
+earlier access blocker. The pool template and a running pod confirm one runner
+container, requests/limits of 8 CPU / 16 GiB, an `EphemeralRunner` owner and an
+`emptyDir` mounted at `/home/runner/_work`. There are no cache PVC/hostPath mounts,
+Docker socket mounts or Docker sidecars in the observed pod.
+
+**The actual execution blocker is Docker availability.** A read-only probe in
+that runner found `/usr/bin/docker`, but `docker info` exited 1 because
+`/var/run/docker.sock` does not exist. Neither `DOCKER_HOST` nor `DOCKER_CONTEXT`
+was set. The current importer requires `docker info`, pull, create and cp; an
+available builder image therefore does not make seeding usable on this pool.
+This observation covers the inspected template/pod, not all possible runner
+configurations. Enabling seed here without addressing acquisition would produce
+a failed import/fallback, not a valid B arm or evidence of speedup.
+
+Before replacing the hosted guard, choose and review either daemonless image
+extraction or a runner infrastructure change providing an isolated Docker daemon.
+The latter changes the resource envelope and is not authorized by a measurement
+PR alone. Also resolve a MatrixOne-side caller that inherits existing UT
+credentials; do not copy credentials into CI merely to make this draft runnable.
+No runner configuration, production defaults or cache contents were changed.
 
 The canary compares the complete race suite with seed disabled/enabled, on a
 fixed MatrixOne main commit and builder digest. Production defaults stay off.
@@ -79,7 +93,7 @@ The currently configured MatrixOne UT pool is `amd64-mo-shanghai-8c16g`;
 this hosted-only first measurement does not establish performance on that pool.
 Rollout to that pool additionally requires a matching ephemeral runner experiment.
 
-Only after the isolation and caller blockers above are resolved and the updated
+Only after the image-acquisition and caller blockers above are resolved and the updated
 workflow is reviewed and merged, dispatch Race seed canary on main with a full
 40-character MatrixOne SHA and the immutable image reference above. Start with
 repetitions=1 (four measured arms plus one warm preparation run); repetitions=3
