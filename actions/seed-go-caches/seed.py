@@ -31,6 +31,20 @@ ENTRY = re.compile(r"[0-9a-f]{64}-[ad]")
 MARKER = ".matrixone-seed.json"
 
 
+def image_candidates(pinned, hosted=False):
+    """A canary may pin a digest, but may not change the trusted repository."""
+    repositories = ["registry.cn-shanghai.aliyuncs.com/matrixorigin/matrixone",
+                    "matrixorigin/matrixone"]
+    if pinned:
+        if not any(re.fullmatch(re.escape(repo) + r"@sha256:[0-9a-f]{64}", pinned)
+                   for repo in repositories):
+            raise ValueError("seed image must be a trusted repository at a sha256 digest")
+        return [pinned]
+    if hosted:
+        repositories.reverse()
+    return [repo + ":ci-builder" for repo in repositories]
+
+
 def directory(value):
     path = Path(value)
     if not path.is_absolute() or path == Path("/"):
@@ -318,6 +332,8 @@ class Seeder:
         return data
 
     def seed(self, stack):
+        pinned = self.env.get("SEED_IMAGE", "")
+        images = image_candidates(pinned, self.env.get("RUNNER_ENVIRONMENT") == "github-hosted")
         values = json.loads(self.command([
             "go", "env", "-json", "GOCACHE", "GOMODCACHE", "GOVERSION",
             "GOOS", "GOARCH", "GOAMD64", "GOEXPERIMENT", "GOCACHEPROG", "GOMOD"]))
@@ -343,6 +359,8 @@ class Seeder:
         key = {"schema": SCHEMA, "generation": self.generation,
                "consumer": values, "flavor": self.flavor,
                "profile": PROFILE, "contracts": CONTRACTS, "checkout": CHECKOUT}
+        if pinned:
+            key["image"] = pinned
         marker = cache / MARKER
         if marker.is_symlink():
             raise ValueError("symlink completion record")
@@ -368,10 +386,6 @@ class Seeder:
         if not space_available([(docker_root, 0), (cache, 0), (modules, 0)]):
             self.report["state"] = "insufficient-space"
             return
-        images = ["registry.cn-shanghai.aliyuncs.com/matrixorigin/matrixone:ci-builder",
-                  "matrixorigin/matrixone:ci-builder"]
-        if self.env.get("RUNNER_ENVIRONMENT") == "github-hosted":
-            images.reverse()
         image = None
         for candidate in images:
             try:

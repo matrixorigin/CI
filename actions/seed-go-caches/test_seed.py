@@ -23,6 +23,21 @@ EXECUTABLE = "ee/" + "e" * 64 + "-d"
 CONTAINER = "c" * 64
 
 
+class ImageSelectionTests(unittest.TestCase):
+    def test_default_locality_and_immutable_override(self):
+        self.assertTrue(seed.image_candidates('', True)[0].startswith('matrixorigin/'))
+        self.assertTrue(seed.image_candidates('', False)[0].startswith('registry.cn-shanghai.'))
+        image = 'matrixorigin/matrixone@sha256:' + '1' * 64
+        self.assertEqual(seed.image_candidates(image), [image])
+
+    def test_untrusted_or_mutable_override_rejected(self):
+        for image in ('evil/matrixone@sha256:' + '1' * 64,
+                      'matrixorigin/matrixone:ci-builder',
+                      'matrixorigin/matrixone@sha256:abc', '--help'):
+            with self.subTest(image=image), self.assertRaises(ValueError):
+                seed.image_candidates(image)
+
+
 def tar_bytes(entries):
     """Entries are (name, bytes[, mode]) or explicit TarInfo objects."""
     output = io.BytesIO()
@@ -201,6 +216,26 @@ class SeederTests(unittest.TestCase):
         self.assertEqual(report["imported_bytes"], 0)
         self.assertEqual(report["imported_files"], 0)
         self.assertEqual(report["module_state"], "previous-import")
+
+    def test_pinned_digest_participates_in_marker_identity(self):
+        image = 'matrixorigin/matrixone@sha256:' + '1' * 64
+        first = self.make()
+        first.env['SEED_IMAGE'] = image
+        self.assertEqual(self.run_seed(first)['state'], 'seeded')
+        same = self.make()
+        same.env['SEED_IMAGE'] = image
+        self.assertEqual(self.run_seed(same)['state'], 'already-seeded')
+        self.assertEqual(same.calls, [])
+        changed = self.make()
+        changed.env['SEED_IMAGE'] = 'matrixorigin/matrixone@sha256:' + '2' * 64
+        self.assertEqual(self.run_seed(changed)['state'], 'seeded')
+        self.assertIn(('pull', changed.env['SEED_IMAGE']), changed.calls)
+
+    def test_invalid_pin_fails_before_any_docker_call(self):
+        instance = self.make()
+        instance.env['SEED_IMAGE'] = 'untrusted/image:latest'
+        self.assertEqual(self.run_seed(instance)['state'], 'failed')
+        self.assertEqual(instance.calls, [])
 
     def executable_payload(self):
         directory = tarfile.TarInfo("go-build/" + EXECUTABLE)
