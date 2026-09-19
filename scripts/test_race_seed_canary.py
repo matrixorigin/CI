@@ -6,11 +6,32 @@ import tempfile
 import unittest
 from unittest import mock
 
-from race_seed_canary import compare, execution, summarize, resource_summary
+from race_seed_canary import compare, execution, summarize, resource_summary, cgroup_summary
 from race_seed_plan import matrix
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_cgroup_metrics_use_quota_not_host_cpu_count(self):
+        rows = [dict(monotonic=i * 10, cgroup_cpu=f'usage_usec {i * 40000000}\nthrottled_usec {i * 1000000}',
+                     cgroup_cpu_limit='800000 100000', cgroup_memory_limit='17179869184',
+                     cgroup_memory=str(100 + i * 50), cgroup_memory_events=f'oom {i}\noom_kill 0')
+                for i in range(2)]
+        result = cgroup_summary(rows)
+        self.assertEqual(result['cpu_quota_utilization_percent'], 50)
+        self.assertEqual(result['cpu_seconds'], 40)
+        self.assertEqual(result['cpu_throttled_seconds'], 1)
+        self.assertEqual(result['sampled_peak_memory_bytes'], 150)
+        self.assertEqual(result['oom_events'], 1)
+        self.assertFalse(cgroup_summary([{}, {}])['available'])
+        unlimited = [dict(r, cgroup_cpu_limit='max 100000', cgroup_memory_limit='max') for r in rows]
+        self.assertIsNone(cgroup_summary(unlimited)['cpu_quota_utilization_percent'])
+        for key, value in [('cgroup_cpu_limit', '400000 100000'),
+                           ('monotonic', 0), ('cgroup_cpu', 'usage_usec -1\nthrottled_usec 0')]:
+            changed = copy.deepcopy(rows)
+            changed[1][key] = value
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                cgroup_summary(changed)
+
     def read(self, events):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'raw.json'

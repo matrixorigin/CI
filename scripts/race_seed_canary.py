@@ -86,6 +86,9 @@ def fingerprint():
         'runner_label': os.environ['CANARY_RUNNER_LABEL'],
         'cpu_model': sorted(set(re.findall(r'^model name\s*:\s*(.*)', cpu, re.M))),
         'cpu_count': os.cpu_count(),
+        'cgroup_limits': {name: Path('/sys/fs/cgroup', name).read_text().strip()
+                          for name in ('cpu.max', 'memory.max', 'cpuset.cpus.effective')
+                          if Path('/sys/fs/cgroup', name).exists()},
         'mem_total': re.search(r'^MemTotal:.*', mem, re.M)[0],
         'go': json.loads(command(['go', 'env', '-json', 'GOVERSION', 'GOOS', 'GOARCH',
                                   'GOAMD64', 'GOEXPERIMENT', 'CGO_ENABLED', 'GOFLAGS',
@@ -104,6 +107,8 @@ def sample():
         'cpu': '/proc/stat', 'memory': '/proc/meminfo', 'disk': '/proc/diskstats',
         'pressure_io': '/proc/pressure/io', 'pressure_cpu': '/proc/pressure/cpu',
         'cgroup_cpu': '/sys/fs/cgroup/cpu.stat',
+        'cgroup_cpu_limit': '/sys/fs/cgroup/cpu.max',
+        'cgroup_memory_limit': '/sys/fs/cgroup/memory.max',
         'cgroup_memory': '/sys/fs/cgroup/memory.current',
         'cgroup_memory_events': '/sys/fs/cgroup/memory.events',
         'cgroup_io': '/sys/fs/cgroup/io.stat',
@@ -139,6 +144,47 @@ def measured_command(args, log, timeout):
     return result
 
 
+def cgroup_summary(samples):
+    """Container-scope evidence; never substitute host counters for missing data.
+
+    Scope is the visible cgroup root, not a claim about hidden ancestors or a
+    Docker daemon running in another container.
+    """
+    keys = ('cgroup_cpu', 'cgroup_cpu_limit', 'cgroup_memory',
+            'cgroup_memory_limit', 'cgroup_memory_events', 'monotonic')
+    if any(any(row.get(key) is None for key in keys) for row in samples):
+        return {'available': False, 'reason': 'incomplete cgroup v2 samples'}
+    def counters(text):
+        return {key: int(value) for key, value in (line.split() for line in text.splitlines())}
+    limits = {(r['cgroup_cpu_limit'].strip(), r['cgroup_memory_limit'].strip()) for r in samples}
+    if len(limits) != 1:
+        raise ValueError('cgroup limits changed during measurement')
+    cpu_limit, memory_limit = next(iter(limits))
+    quota, period = cpu_limit.split()
+    if int(period) <= 0 or (quota != 'max' and int(quota) <= 0):
+        raise ValueError('invalid cgroup CPU quota')
+    cpus = None if quota == 'max' else int(quota) / int(period)
+    elapsed = samples[-1]['monotonic'] - samples[0]['monotonic']
+    if elapsed <= 0:
+        raise ValueError('nonpositive measurement interval')
+    cpu_rows = [counters(r['cgroup_cpu']) for r in samples]
+    event_rows = [counters(r['cgroup_memory_events']) for r in samples]
+    def delta(rows, key):
+        values = [r[key] for r in rows]
+        if any(b < a for a, b in zip(values, values[1:])):
+            raise ValueError('cgroup counter reset: ' + key)
+        return values[-1] - values[0]
+    used = delta(cpu_rows, 'usage_usec') / 1e6
+    return {'available': True, 'scope': 'visible cgroup root; external daemon excluded',
+            'cpu_quota_cores': cpus, 'cpu_seconds': used,
+            'cpu_quota_utilization_percent': 100 * used / elapsed / cpus if cpus else None,
+            'cpu_throttled_seconds': delta(cpu_rows, 'throttled_usec') / 1e6,
+            'memory_limit_bytes': None if memory_limit == 'max' else int(memory_limit),
+            'sampled_peak_memory_bytes': max(int(r['cgroup_memory']) for r in samples),
+            'oom_events': delta(event_rows, 'oom'),
+            'oom_kill_events': delta(event_rows, 'oom_kill')}
+
+
 def resource_summary(path):
     with path.open() as stream:
         samples = [json.loads(line) for line in stream]
@@ -156,7 +202,8 @@ def resource_summary(path):
             busy.append(100 * (1 - (d[3] + d[4]) / sum(d)))
     mem = [int(re.search(r'^MemAvailable:\s+(\d+)', r['memory'], re.M)[1]) * 1024
            for r in samples]
-    return {'host_cpu_busy_percent': 100 * (1 - (delta[3] + delta[4]) / ticks) if ticks else 0,
+    return {'cgroup': cgroup_summary(samples),
+            'host_cpu_busy_percent': 100 * (1 - (delta[3] + delta[4]) / ticks) if ticks else 0,
             'host_cpu_peak_interval_percent': max(busy, default=0),
             'host_cpu_seconds': (ticks - delta[3] - delta[4]) / os.sysconf('SC_CLK_TCK'),
             'min_memory_available_bytes': min(mem),
