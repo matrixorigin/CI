@@ -5,9 +5,11 @@ daemonless adaptation against prior head `6da76ff`, plus the MatrixOne manual
 caller. Production seed remains off. No kernel/SQL behavior changes, so kernel
 UT/BVT is not a substitute for these importer and workflow checks.
 
-Design-first review: GPT-6 medium approved daemonless design revision 1 before
-implementation, requiring explicit empty Docker config rather than merely an
-empty directory. Final caller pins will use the exact reviewed CI commit.
+Design-first review: GPT-6 medium approved both daemonless design revisions
+before implementation. The review required an explicit empty Docker config,
+strict trusted COPY-layer admission, full compressed and uncompressed digest
+verification, and a regression for malformed DEFLATE input. The MatrixOne
+caller pins the exact reviewed CI commit.
 
 | Closure | Risk / invariant | Evidence |
 |---|---|---|
@@ -39,8 +41,17 @@ and cleanup), with 18.4GB partial output, zero imported bytes and complete owned
 cleanup. The diagnostic-only retained hardlink was explicitly removed. No OOM
 was recorded, but cgroup memory.max reclaim events occurred. This negative result
 led to reviewed design revision 2: direct cache-layer acquisition/extraction.
-Final-backend live outcome is recorded before delivery; no passing claim is made
-here for an in-progress probe.
+The final direct-layer backend completed on the same runner class with
+`state=seeded`, `cleanup=complete`, producer status `ok`, and module state
+`seeded`. It imported 64,500 files / 15,819,961,352 bytes: acquisition took
+2.912s, build-cache download/verification/import took 825.284s, module import
+took 201.134s, cleanup took 1.047s, and end-to-end seeding took 1,029.392s.
+A forced `go test -race -count=1` smoke then executed its test body and passed
+in 1.012s. There was no OOM or OOM kill, but memory reached approximately
+16.4GB and generated 64 cgroup `memory.max` events. The task-owned pod was
+deleted after collection. These results prove capability, not net performance:
+the 1,080s work budget has only about 51s of margin and the 16GiB runner has
+little memory headroom.
 
 Missing by design before merge/dispatch: complete cold/warm A/B race UT and
 net-speedup evidence. Successful import or local tests cannot justify rollout.
