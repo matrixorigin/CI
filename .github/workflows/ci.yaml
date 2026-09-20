@@ -205,6 +205,10 @@ jobs:
         uses: matrixorigin/CI/actions/seed-go-caches@main
         with:
           flavor: race
+      - name: Prepare Python UDF contract tests
+        if: ${{ hashFiles('pkg/udf/python/worker/requirements.txt') != '' }}
+        timeout-minutes: 5
+        uses: matrixorigin/CI/actions/setup-python-udf@main
       - name: Unit Testing
         id: ut
         run: |
@@ -565,6 +569,10 @@ jobs:
           echo "bucket=${{ secrets.S3BUCKET }}" >> $GITHUB_ENV
           # set ut workdir
           echo "UT_WORKDIR=${{ github.workspace }}" >> $GITHUB_ENV
+      - name: Prepare Python UDF contract tests
+        if: ${{ hashFiles('pkg/udf/python/worker/requirements.txt') != '' }}
+        timeout-minutes: 5
+        uses: matrixorigin/CI/actions/setup-python-udf@main
       - name: Unit Testing
         run: |
           cd $GITHUB_WORKSPACE && make clean && make config
