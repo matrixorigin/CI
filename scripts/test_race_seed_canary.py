@@ -16,6 +16,30 @@ from race_seed_plan import matrix
 
 
 class EvidenceTests(unittest.TestCase):
+    def seed_report(self, state):
+        return dict(state='seeded', producer_flavor_status='ok', cleanup='complete',
+                    imported_files=1, module_state=('seeded' if state == 'cold' else 'preserved-populated'))
+
+    def test_module_state_required_even_when_build_seed_and_ut_succeed(self):
+        for state in ('cold', 'warm'):
+            a = dict(valid=True, seed_enabled=False, identity={}, initial={'cache_state': state},
+                     initial_images=[], execution=self.read(self.events()), total_seconds=10)
+            b = dict(copy.deepcopy(a), seed_enabled=True, seed=self.seed_report(state))
+            self.assertEqual(compare(a, b)['saved_seconds'], 0)
+            for module_state in (None, 'insufficient-space', 'not-attempted',
+                                 'preserved-mountpoint', 'previous-import',
+                                 'preserved-populated' if state == 'cold' else 'seeded'):
+                changed = copy.deepcopy(b)
+                if module_state is None:
+                    changed['seed'].pop('module_state')
+                else:
+                    changed['seed']['module_state'] = module_state
+                with self.subTest(state=state, module_state=module_state):
+                    with self.assertRaisesRegex(ValueError, 'module_state'):
+                        canary.validate_seed(changed)
+                    with self.assertRaisesRegex(ValueError, 'module_state'):
+                        compare(a, changed)
+
     def test_plan_checks_trusted_source_and_exact_harness_without_squash_ancestry(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'output'
@@ -140,9 +164,9 @@ class EvidenceTests(unittest.TestCase):
 
     def test_pair_rejects_each_mismatched_contract(self):
         a = dict(valid=True, seed_enabled=False, identity={'sha': 'same'},
-                 initial={'snapshot_sha256': 'same'}, initial_images=[],
+                 initial={'snapshot_sha256': 'same', 'cache_state': 'warm'}, initial_images=[],
                  execution=self.read(self.events()), total_seconds=10)
-        b = dict(copy.deepcopy(a), seed_enabled=True, total_seconds=8)
+        b = dict(copy.deepcopy(a), seed_enabled=True, total_seconds=8, seed=self.seed_report('warm'))
         self.assertEqual(compare(a, b)['saved_seconds'], 2)
         for key in ('identity', 'initial', 'initial_images', 'execution', 'valid', 'seed_enabled'):
             changed = copy.deepcopy(b)
@@ -169,6 +193,8 @@ class EvidenceTests(unittest.TestCase):
                     result = dict(valid=True, seed_enabled=arm == 'B', identity={},
                                   initial={'cache_state': state}, initial_images=[],
                                   execution=self.read(self.events()), total_seconds=10)
+                    if arm == 'B':
+                        result['seed'] = self.seed_report(state)
                     (target / 'result.json').write_text(json.dumps(result))
             with mock.patch.dict(os.environ, CANARY_REPETITIONS='1',
                                  GITHUB_STEP_SUMMARY=str(root / 'summary.md')):

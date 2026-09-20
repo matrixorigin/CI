@@ -319,10 +319,7 @@ def run(args):
             raise ValueError('expected exactly one complete raw UT report')
         report['execution'] = execution(reports[0])
         if args.seed:
-            seeded = report['seed']
-            if (seeded.get('state') != 'seeded' or seeded.get('producer_flavor_status') != 'ok'
-                    or seeded.get('cleanup') != 'complete' or seeded.get('imported_files', 0) <= 0):
-                raise ValueError('seed skipped, partial, empty or failed: invalid B sample')
+            validate_seed(report)
         report['valid'] = True
         if args.export:
             args.export.mkdir()
@@ -342,6 +339,17 @@ def run(args):
     return 0 if report['valid'] else 1
 
 
+def validate_seed(report):
+    seeded = report.get('seed', {})
+    if (seeded.get('state') != 'seeded' or seeded.get('producer_flavor_status') != 'ok'
+            or seeded.get('cleanup') != 'complete' or seeded.get('imported_files', 0) <= 0):
+        raise ValueError('seed skipped, partial, empty or failed: invalid B sample')
+    cache_state = report.get('initial', {}).get('cache_state')
+    expected = {'cold': 'seeded', 'warm': 'preserved-populated'}.get(cache_state)
+    if expected is None or seeded.get('module_state') != expected:
+        raise ValueError(f'invalid {cache_state} B module_state: expected {expected}')
+
+
 def compare(a, b):
     if not a.get('valid') or not b.get('valid'):
         raise ValueError('invalid/incomplete arm')
@@ -350,6 +358,7 @@ def compare(a, b):
     for key in ('identity', 'initial', 'initial_images', 'execution'):
         if a[key] != b[key]:
             raise ValueError('pair mismatch: ' + key)
+    validate_seed(b)
     return {'A_seconds': a['total_seconds'], 'B_seconds': b['total_seconds'],
             'saved_seconds': a['total_seconds'] - b['total_seconds'],
             'saved_percent': 100 * (1 - b['total_seconds'] / a['total_seconds'])}
