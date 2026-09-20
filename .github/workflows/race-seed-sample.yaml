@@ -1,0 +1,142 @@
+name: Race seed measurement sample
+
+on:
+  workflow_call:
+    inputs:
+      ci_sha:
+        required: true
+        type: string
+      matrixone_sha:
+        required: true
+        type: string
+      image:
+        required: true
+        type: string
+      name:
+        required: true
+        type: string
+      cache_state:
+        required: true
+        type: string
+      seed:
+        required: true
+        type: boolean
+    secrets:
+      S3ENDPOINT:
+        required: true
+      S3REGION:
+        required: true
+      S3APIKEY:
+        required: true
+      S3APISECRET:
+        required: true
+      S3BUCKET:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  sample:
+    # Verified ARC pool: ephemeral pod, emptyDir workspace, no shared cache mount.
+    runs-on: amd64-mo-shanghai-8c16g
+    environment: ci
+    timeout-minutes: 120
+    steps:
+      - name: Require the audited pool and MatrixOne caller before any checkout
+        id: runner_guard
+        env:
+          RUNNER_KIND: ${{ runner.environment }}
+        run: |
+          test "$RUNNER_KIND" = self-hosted
+          test "$GITHUB_REPOSITORY" = matrixorigin/matrixone
+          test "$GITHUB_WORKSPACE" = /home/runner/_work/matrixone/matrixone
+          case "$RUNNER_NAME" in amd64-mo-shanghai-8c16g-*-runner-*) ;; *) exit 1;; esac
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: matrixorigin/matrixone
+          ref: ${{ inputs.matrixone_sha }}
+          persist-credentials: false
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: matrixorigin/CI
+          ref: ${{ inputs.ci_sha }}
+          path: _canary
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: adopt
+          java-version: '8'
+      - name: Match the existing UT CMake setup
+        uses: ./_canary/actions/setup-cmake
+      - name: Match the Shanghai UT module proxy policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          proxy='http://goproxy.goproxy.svc.cluster.local'
+          version="$(awk '$1 == "github.com/spf13/cobra" {print $2; exit}' go.mod)"
+          if test -n "$version" && curl --disable --fail --silent --connect-timeout 5 --max-time 30 "$proxy/github.com/spf13/cobra/@v/$version.info" >/dev/null; then
+            echo "GOPROXY=$proxy|https://goproxy.cn|direct" >> "$GITHUB_ENV"
+          fi
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: inputs.cache_state == 'warm'
+        with:
+          name: warm-snapshot
+          path: warm-snapshot
+      - name: Measure complete race suite
+        env:
+          SEED_IMAGE: ${{ inputs.image }}
+          SEED_FLAVOR: race
+          SEED_TRANSPORT: registry
+          ENABLE_SEED: ${{ inputs.seed }}
+          CACHE_STATE: ${{ inputs.cache_state }}
+          CANARY_RUNNER_LABEL: amd64-mo-shanghai-8c16g
+          CANARY_SOURCE_SHA: ${{ inputs.matrixone_sha }}
+          CANARY_CI_SHA: ${{ inputs.ci_sha }}
+          CANARY_UT_PARALLEL: ${{ vars.UT_PARALLEL || 6 }}
+          CANARY_UT_TIMEOUT: ${{ vars.UT_TIMEOUT || 40 }}
+          GOCACHE: /home/runner/.cache/mo-race-canary
+          GOMODCACHE: /home/runner/go/pkg/mod
+          UT_WORKDIR: /home/runner/_work/matrixone/matrixone
+          endpoint: ${{ secrets.S3ENDPOINT }}
+          region: ${{ secrets.S3REGION }}
+          apikey: ${{ secrets.S3APIKEY }}
+          apisecret: ${{ secrets.S3APISECRET }}
+          bucket: ${{ secrets.S3BUCKET }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [[ "$ENABLE_SEED" == true ]]; then args+=(--seed); fi
+          case "$CACHE_STATE" in
+            cold) ;;
+            warm) args+=(--snapshot "$GITHUB_WORKSPACE/warm-snapshot");;
+            prepare) args+=(--export "$GITHUB_WORKSPACE/warm-snapshot");;
+            *) exit 1;;
+          esac
+          python3 _canary/scripts/race_seed_canary.py "${args[@]}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ always() && steps.runner_guard.outcome == 'success' }}
+        with:
+          name: ${{ inputs.name }}
+          path: _canary/canary-report/
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ always() && steps.runner_guard.outcome == 'success' }}
+        with:
+          name: diagnostics-${{ inputs.name }}
+          path: /home/runner/_work/matrixone/matrixone/ut-report/
+          retention-days: 7
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: success() && inputs.cache_state == 'prepare'
+        with:
+          name: warm-snapshot
+          path: warm-snapshot/
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error

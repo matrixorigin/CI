@@ -1,5 +1,11 @@
 # Correct, measurable UT cache seeding
 
+For the opt-in daemonless Shanghai race experiment, see
+[race-seed-canary.md](race-seed-canary.md). `transport: registry` requires a
+trusted digest-pinned `image`; it uses checksum-pinned crane COPY-layer reads rather than
+a Docker daemon. Existing action callers still default to `transport: docker`.
+No production workflow enables the new transport or seeding automatically.
+
 ## Problem and scope
 
 The race and coverage UT workflows both consider a nonempty GOCACHE warm.

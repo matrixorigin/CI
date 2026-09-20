@@ -17,6 +17,7 @@ on:
       - 'scripts/select_coverage_artifacts.py'
       - 'scripts/test_select_coverage_artifacts.py'
       - 'scripts/test_merge_trigger_tke_subject.py'
+      - 'scripts/*race_seed*.py'
 
 permissions:
   contents: read
@@ -79,6 +80,8 @@ jobs:
           bash actions/restore-sca-analysis-cache/environment-hash.test.sh
       - name: Test Go cache import contracts
         run: python3 -m unittest discover -s actions/seed-go-caches -p 'test_*.py' -v
+      - name: Test race canary evidence contracts
+        run: python3 -m unittest discover -s scripts -p 'test_race_seed*.py' -v
       - name: Guard deliberate workflow disablements
         env:
           ACTIONLINT: ${{ steps.install-actionlint.outputs.executable }}

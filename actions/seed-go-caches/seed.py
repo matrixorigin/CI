@@ -15,6 +15,7 @@ import tarfile
 import tempfile
 import time
 import uuid
+import zlib
 
 SCHEMA = 2
 PROFILE = "host-ut-v1"
@@ -29,6 +30,20 @@ FLOOR = 30 * 1024**3
 RESERVE = 4 * 1024**3
 ENTRY = re.compile(r"[0-9a-f]{64}-[ad]")
 MARKER = ".matrixone-seed.json"
+
+
+def image_candidates(pinned, hosted=False):
+    """A canary may pin a digest, but may not change the trusted repository."""
+    repositories = ["registry.cn-shanghai.aliyuncs.com/matrixorigin/matrixone",
+                    "matrixorigin/matrixone"]
+    if pinned:
+        if not any(re.fullmatch(re.escape(repo) + r"@sha256:[0-9a-f]{64}", pinned)
+                   for repo in repositories):
+            raise ValueError("seed image must be a trusted repository at a sha256 digest")
+        return [pinned]
+    if hosted:
+        repositories.reverse()
+    return [repo + ":ci-builder" for repo in repositories]
 
 
 def directory(value):
@@ -53,17 +68,32 @@ def space_available(requirements):
                for path, size in devices.values())
 
 
-def extract(archive, destination, root, budget, build=False):
+def extract(archive, destination, root, budget, build=False, prefix=None):
     """No tar extraction APIs: allow only directories/regular files under root."""
     total = 0
-    with tarfile.open(archive, "r|*") as stream:
+    found = False
+    prefix_parts = PurePosixPath(prefix).parts if prefix else None
+    opener = ({"fileobj": archive, "mode": "r|"} if hasattr(archive, 'read')
+              else {"name": archive, "mode": "r|*"})
+    with tarfile.open(**opener) as stream:
         for member in stream:
+            stream.members.clear()
             name = PurePosixPath(member.name)
             if name.is_absolute() or ".." in name.parts or not name.parts:
                 raise ValueError("unsafe archive path")
-            if name.parts[0] != root:
-                raise ValueError("unexpected archive root")
-            relative = name.parts[1:]
+            if prefix_parts:
+                if any(part.startswith('.wh.') for part in name.parts):
+                    raise ValueError('cache COPY layer contains whiteout')
+                if name.parts[:len(prefix_parts)] != prefix_parts:
+                    if member.isdir() and prefix_parts[:len(name.parts)] == name.parts:
+                        continue
+                    raise ValueError('unexpected cache COPY layer entry')
+                relative = name.parts[len(prefix_parts):]
+            else:
+                if name.parts[0] != root:
+                    raise ValueError("unexpected archive root")
+                relative = name.parts[1:]
+            found = True
             if not (member.isdir() or member.isfile()):
                 raise ValueError("archive links/special files are not allowed")
             if not relative:
@@ -94,6 +124,8 @@ def extract(archive, destination, root, budget, build=False):
             with stream.extractfile(member) as source, target.open("xb") as output:
                 shutil.copyfileobj(source, output, 1024 * 1024)
             target.chmod(0o755 if member.mode & 0o111 else 0o644)
+    if prefix_parts and not found:
+        raise ValueError('missing cache COPY subtree')
     if build:
         for shard in destination.iterdir():
             for entry in shard.iterdir():
@@ -169,6 +201,7 @@ class Seeder:
         self.cleanup_remaining = 45.0
         self.cleanup_each = 15.0
         self.pending_marker = None
+        self.registry = None
         self.report = {"state": "failed", "flavor": flavor,
                        "module_state": "not-attempted", "imported_bytes": 0,
                        "producer_go_version": "unknown"}
@@ -308,16 +341,25 @@ class Seeder:
         archive = stage / "payload.tar"
         data = stage / "data"
         data.mkdir()
-        with archive.open("wb") as output:
-            self.docker("cp", f"{self.container}:{source}", "-",
-                        output=output, timeout=300)
-        extracted = extract(archive, data, root, budget, build)
+        if self.registry:
+            extracted = self.registry.extract(source, data, root, budget, build, extract)
+        else:
+            with archive.open("wb") as output:
+                self.docker("cp", f"{self.container}:{source}", "-",
+                            output=output, timeout=300)
+            extracted = extract(archive, data, root, budget, build)
+            archive.unlink()
         if build and extracted == 0:
             raise ValueError("empty build cache payload")
-        archive.unlink()
         return data
 
     def seed(self, stack):
+        pinned = self.env.get("SEED_IMAGE", "")
+        images = image_candidates(pinned, self.env.get("RUNNER_ENVIRONMENT") == "github-hosted")
+        transport = self.env.get("SEED_TRANSPORT", "docker")
+        if transport not in ("docker", "registry") or (transport == "registry" and not pinned):
+            raise ValueError("registry transport requires a trusted immutable image")
+        self.report["transport"] = transport
         values = json.loads(self.command([
             "go", "env", "-json", "GOCACHE", "GOMODCACHE", "GOVERSION",
             "GOOS", "GOARCH", "GOAMD64", "GOEXPERIMENT", "GOCACHEPROG", "GOMOD"]))
@@ -343,6 +385,10 @@ class Seeder:
         key = {"schema": SCHEMA, "generation": self.generation,
                "consumer": values, "flavor": self.flavor,
                "profile": PROFILE, "contracts": CONTRACTS, "checkout": CHECKOUT}
+        if pinned:
+            key["image"] = pinned
+        if transport == "registry":
+            key["transport"] = transport
         marker = cache / MARKER
         if marker.is_symlink():
             raise ValueError("symlink completion record")
@@ -358,28 +404,34 @@ class Seeder:
                                imported_bytes=0, imported_files=0, module_state="previous-import",
                                acquisition_seconds=0, build_import_seconds=0, module_import_seconds=0)
             return
-        # An empty config prevents reuse of runner registry credentials.
-        config = self.temporary(prefix="mo-docker-config-")
-        self.env["DOCKER_CONFIG"] = str(config)
-        docker_root = Path(self.docker("info", "--format", "{{.DockerRootDir}}").decode().strip())
-        if not docker_root.is_absolute() or not docker_root.is_dir():
-            self.report["state"] = "storage-unavailable"
-            return
-        if not space_available([(docker_root, 0), (cache, 0), (modules, 0)]):
-            self.report["state"] = "insufficient-space"
-            return
-        images = ["registry.cn-shanghai.aliyuncs.com/matrixorigin/matrixone:ci-builder",
-                  "matrixorigin/matrixone:ci-builder"]
-        if self.env.get("RUNNER_ENVIRONMENT") == "github-hosted":
-            images.reverse()
-        image = None
-        for candidate in images:
-            try:
-                self.docker("pull", candidate, timeout=300)
-                image = json.loads(self.docker("image", "inspect", candidate))[0]
-                break
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-                continue
+        if transport == "registry":
+            from registry import RegistryImage, PAYLOAD_LIMIT, BLOB_LIMIT
+            # One compressed blob plus extracted caches; no whole rootfs export.
+            if not space_available([(cache, PAYLOAD_LIMIT + BLOB_LIMIT), (modules, PAYLOAD_LIMIT)]):
+                self.report["state"] = "insufficient-space"
+                return
+            self.registry = RegistryImage(self, cache)
+            docker_root = self.registry.stage
+            image = self.registry.acquire(pinned)
+        else:
+            # An empty config prevents reuse of runner registry credentials.
+            config = self.temporary(prefix="mo-docker-config-")
+            self.env["DOCKER_CONFIG"] = str(config)
+            docker_root = Path(self.docker("info", "--format", "{{.DockerRootDir}}").decode().strip())
+            if not docker_root.is_absolute() or not docker_root.is_dir():
+                self.report["state"] = "storage-unavailable"
+                return
+            if not space_available([(docker_root, 0), (cache, 0), (modules, 0)]):
+                self.report["state"] = "insufficient-space"
+                return
+            image = None
+            for candidate in images:
+                try:
+                    self.docker("pull", candidate, timeout=300)
+                    image = json.loads(self.docker("image", "inspect", candidate))[0]
+                    break
+                except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                    continue
         if image is None:
             self.report["state"] = "unavailable"
             return
@@ -399,23 +451,19 @@ class Seeder:
             return
         # Establish an unpredictable owned name BEFORE creating the resource:
         # timeout/cancellation may lose stdout after the daemon created it.
-        self.container = "mo-go-seed-" + uuid.uuid4().hex
-        identity = self.docker("create", "--name", self.container, image["Id"]).decode().strip()
-        if not re.fullmatch(r"[0-9a-f]{12,64}", identity):
-            raise ValueError("unexpected container identity")
+        if not self.registry:
+            self.container = "mo-go-seed-" + uuid.uuid4().hex
+            identity = self.docker("create", "--name", self.container, image["Id"]).decode().strip()
+            if not re.fullmatch(r"[0-9a-f]{12,64}", identity):
+                raise ValueError("unexpected container identity")
         try:
-            # Reject legacy/incompatible producers BEFORE large cache payloads.
+            # Both transports validate the small producer manifest BEFORE
+            # acquiring large cache payloads or publishing any cache entries.
             with tempfile.TemporaryFile() as metadata:
-                self.docker("cp", f"{self.container}:/mo-prebuilt/go-cache-manifest.json", "-",
-                            output=metadata, timeout=15, max_bytes=65536)
-                if metadata.tell() > 65536:
-                    raise ValueError("oversize metadata archive")
-                metadata.seek(0)
-                with tarfile.open(fileobj=metadata, mode="r:") as archive:
-                    member = archive.getmember("go-cache-manifest.json")
-                    if not member.isfile() or member.size > 8192:
-                        raise ValueError("invalid manifest member")
-                    manifest = json.load(archive.extractfile(member))
+                if self.registry:
+                    manifest = self.registry.manifest()
+                else:
+                    manifest = self.docker_manifest(metadata)
             expected = {"schema": SCHEMA, "profile": PROFILE, "checkout": CHECKOUT,
                         "go_env": {field: values[field] for field in GO_FIELDS}, **CONTRACTS}
             if not isinstance(manifest, dict) or any(manifest.get(k) != v for k, v in expected.items()):
@@ -467,6 +515,18 @@ class Seeder:
                            completed_at=int(time.time()))
         self.pending_marker = cache
 
+    def docker_manifest(self, metadata):
+        self.docker("cp", f"{self.container}:/mo-prebuilt/go-cache-manifest.json", "-",
+                    output=metadata, timeout=15, max_bytes=65536)
+        if metadata.tell() > 65536:
+            raise ValueError("oversize metadata archive")
+        metadata.seek(0)
+        with tarfile.open(fileobj=metadata, mode="r:") as archive:
+            member = archive.getmember("go-cache-manifest.json")
+            if not member.isfile() or member.size > 8192:
+                raise ValueError("invalid manifest member")
+            return json.load(archive.extractfile(member))
+
     def commit_marker(self):
         # File creation, publication and cleanup form one short ownership
         # transition. Signals are remembered; a cancelled commit is removed.
@@ -509,7 +569,8 @@ class Seeder:
             try:
                 signal.alarm(1080)
                 self.seed(stack)
-            except (OSError, ValueError, tarfile.TarError, subprocess.SubprocessError,
+            except (OSError, ValueError, KeyError, TypeError, AttributeError, EOFError,
+                    tarfile.TarError, zlib.error, subprocess.SubprocessError,
                     TimeoutError) as error:
                 self.report.update(state="failed", error=str(error))
             finally:

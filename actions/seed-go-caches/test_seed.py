@@ -23,6 +23,21 @@ EXECUTABLE = "ee/" + "e" * 64 + "-d"
 CONTAINER = "c" * 64
 
 
+class ImageSelectionTests(unittest.TestCase):
+    def test_default_locality_and_immutable_override(self):
+        self.assertTrue(seed.image_candidates('', True)[0].startswith('matrixorigin/'))
+        self.assertTrue(seed.image_candidates('', False)[0].startswith('registry.cn-shanghai.'))
+        image = 'matrixorigin/matrixone@sha256:' + '1' * 64
+        self.assertEqual(seed.image_candidates(image), [image])
+
+    def test_untrusted_or_mutable_override_rejected(self):
+        for image in ('evil/matrixone@sha256:' + '1' * 64,
+                      'matrixorigin/matrixone:ci-builder',
+                      'matrixorigin/matrixone@sha256:abc', '--help'):
+            with self.subTest(image=image), self.assertRaises(ValueError):
+                seed.image_candidates(image)
+
+
 def tar_bytes(entries):
     """Entries are (name, bytes[, mode]) or explicit TarInfo objects."""
     output = io.BytesIO()
@@ -124,6 +139,84 @@ class FakeSeeder(seed.Seeder):
 
 
 class SeederTests(unittest.TestCase):
+    def test_registry_diff_id_and_truncated_gzip_reject_before_publication(self):
+        import registry
+        import gzip
+        for damage in ('diff-id', 'truncated', 'deflate'):
+            instance = self.make()
+            instance.env.update(SEED_TRANSPORT='registry', SEED_IMAGE='matrixorigin/matrixone@sha256:' + '1' * 64)
+            raw = tar_bytes([('root/.cache/go-build/' + MISSING, b'unpublished')])
+            def blob(image, source):
+                compressed = gzip.compress(raw)
+                if damage == 'truncated':
+                    compressed = compressed[:-4]
+                elif damage == 'deflate':
+                    compressed = compressed[:10] + b'\x07' + compressed[11:]
+                path = image.stage / 'layer.tar.gz'
+                path.write_bytes(compressed)
+                return path, 'sha256:' + '0' * 64 if damage == 'diff-id' else registry.digest(raw)
+            with self.subTest(damage=damage), \
+                    mock.patch.object(registry.RegistryImage, 'acquire', return_value=instance.image), \
+                    mock.patch.object(registry.RegistryImage, 'manifest', return_value=instance.manifest), \
+                    mock.patch.object(registry.RegistryImage, 'blob', blob):
+                report = self.run_seed(instance)
+            self.assertEqual(report['state'], 'failed')
+            self.assertEqual(report['cleanup'], 'complete')
+            self.assertFalse((instance.cache / MISSING).exists())
+            self.assert_no_marker(instance)
+
+    def test_registry_partial_acquisition_cleans_without_completion(self):
+        import registry
+        instance = self.make()
+        instance.env.update(SEED_TRANSPORT='registry', SEED_IMAGE='matrixorigin/matrixone@sha256:' + '1' * 64)
+        def acquire(image, reference):
+            (image.stage / 'partial').write_bytes(b'partial')
+            raise TimeoutError('bounded export timeout')
+        with mock.patch.object(registry.RegistryImage, 'acquire', acquire):
+            report = self.run_seed(instance)
+        self.assertEqual(report['state'], 'failed')
+        self.assertEqual(report['cleanup'], 'complete')
+        self.assert_no_marker(instance)
+        self.assertEqual(instance.calls, [])
+
+    def test_registry_import_preserves_cache_and_cleans_without_docker(self):
+        import registry
+        import gzip
+        instance = self.make()
+        instance.env.update(SEED_TRANSPORT='registry', SEED_IMAGE='matrixorigin/matrixone@sha256:' + '1' * 64)
+        def acquire(image, reference):
+            return dict(Id=reference, Os='linux', Architecture='amd64', Size=registry.PAYLOAD_LIMIT)
+        fetched = []
+        def blob(image, source):
+            fetched.append(source)
+            entries = {
+                '/mo-prebuilt/go-cache-manifest.json': [('mo-prebuilt/go-cache-manifest.json', json.dumps(instance.manifest).encode())],
+                '/root/.cache/go-build': [('root/.cache/go-build/' + EXISTING, b'collision'),
+                                         ('root/.cache/go-build/' + MISSING, b'new')],
+                '/go/pkg/mod': [('go/pkg/mod/example.test/m@v1/m.go', b'package m')],
+            }[source]
+            raw = tar_bytes(entries)
+            path = image.stage / 'layer.tar.gz'
+            path.write_bytes(gzip.compress(raw))
+            return path, registry.digest(raw)
+        with mock.patch.object(registry.RegistryImage, 'acquire', acquire), \
+                mock.patch.object(registry.RegistryImage, 'blob', blob):
+            report = self.run_seed(instance)
+            self.assertIn('/go/pkg/mod', fetched)
+            fetched.clear()
+            # A later generation still imports build entries additively, but
+            # must not acquire the already-populated module layer at all.
+            second = self.make(generation='2')
+            second.env.update(instance.env)
+            second_report = self.run_seed(second)
+            self.assertEqual(second_report['state'], 'seeded')
+            self.assertNotIn('/go/pkg/mod', fetched)
+        self.assertEqual(report['state'], 'seeded')
+        self.assertEqual(report['cleanup'], 'complete')
+        self.assertEqual((instance.cache / EXISTING).read_bytes(), b'local probe')
+        self.assertEqual((instance.cache / MISSING).read_bytes(), b'new')
+        self.assertEqual(instance.calls, [])
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -201,6 +294,26 @@ class SeederTests(unittest.TestCase):
         self.assertEqual(report["imported_bytes"], 0)
         self.assertEqual(report["imported_files"], 0)
         self.assertEqual(report["module_state"], "previous-import")
+
+    def test_pinned_digest_participates_in_marker_identity(self):
+        image = 'matrixorigin/matrixone@sha256:' + '1' * 64
+        first = self.make()
+        first.env['SEED_IMAGE'] = image
+        self.assertEqual(self.run_seed(first)['state'], 'seeded')
+        same = self.make()
+        same.env['SEED_IMAGE'] = image
+        self.assertEqual(self.run_seed(same)['state'], 'already-seeded')
+        self.assertEqual(same.calls, [])
+        changed = self.make()
+        changed.env['SEED_IMAGE'] = 'matrixorigin/matrixone@sha256:' + '2' * 64
+        self.assertEqual(self.run_seed(changed)['state'], 'seeded')
+        self.assertIn(('pull', changed.env['SEED_IMAGE']), changed.calls)
+
+    def test_invalid_pin_fails_before_any_docker_call(self):
+        instance = self.make()
+        instance.env['SEED_IMAGE'] = 'untrusted/image:latest'
+        self.assertEqual(self.run_seed(instance)['state'], 'failed')
+        self.assertEqual(instance.calls, [])
 
     def executable_payload(self):
         directory = tarfile.TarInfo("go-build/" + EXECUTABLE)
