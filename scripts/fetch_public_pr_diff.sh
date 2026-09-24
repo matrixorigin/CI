@@ -113,6 +113,16 @@ validate_diff() {
     echo "${source} returned a non-empty response that is not a Git diff; refusing to treat it as no changed lines" >&2
     return 1
   fi
+
+  local diff_file_count
+  if ! diff_file_count=$(git apply --numstat -- "$candidate_patch" | awk 'END { print NR }'); then
+    echo "${source} returned a malformed Git diff" >&2
+    return 1
+  fi
+  if [[ "$diff_file_count" != "$expected_changed_files" ]]; then
+    echo "${source} diff has file_count=${diff_file_count} despite changed_files=${expected_changed_files}" >&2
+    return 1
+  fi
 }
 
 download_diff() {

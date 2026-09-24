@@ -43,6 +43,8 @@ if "/pulls/42" in url and "api.github.com" in url and not api_diff:
     changed_files = 0 if mode in ("public-empty", "public-nonempty-metadata-empty") else 1
     if mode == "changed-files-move" and state["heads"] > 1:
         changed_files = 2
+    if mode == "metadata-two-files":
+        changed_files = 2
     body = json.dumps({"head": {"sha": head_sha}, "changed_files": changed_files}).encode()
     status = 200
     kind = "metadata"
@@ -54,7 +56,9 @@ elif "github.com/owner/repo/pull/42.diff" in url:
         status, body = 200, b""
     elif mode == "public-html":
         status, body = 200, b"<html>temporary failure</html>"
-    elif mode in ("public-ok", "head-moves", "changed-files-move", "public-nonempty-metadata-empty"):
+    elif mode == "public-truncated":
+        status, body = 200, b"diff --git a/main.go b/main.go\n"
+    elif mode in ("public-ok", "head-moves", "changed-files-move", "public-nonempty-metadata-empty", "metadata-two-files"):
         status, body = 200, os.environ["VALID_DIFF"].encode()
     else:
         status, body = 500, b"unexpected mode"
@@ -212,6 +216,21 @@ class FetchPublicPRDiffTest(unittest.TestCase):
         self.assertEqual(self.output.read_bytes(), VALID_DIFF)
         self.assertIn("not a Git diff", result.stderr)
         self.assertIn("api-diff", [call["kind"] for call in self.read_state()["calls"]])
+
+    def test_truncated_http_200_diff_falls_back_to_api(self):
+        result = self.run_fetch("public-truncated")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.output.read_bytes(), VALID_DIFF)
+        self.assertIn("malformed Git diff", result.stderr)
+        self.assertIn("api-diff", [call["kind"] for call in self.read_state()["calls"]])
+
+    def test_diff_with_fewer_files_than_metadata_is_rejected(self):
+        result = self.run_fetch("metadata-two-files")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.output.exists())
+        self.assertIn("diff has file_count=1 despite changed_files=2", result.stderr)
 
 
 if __name__ == "__main__":
