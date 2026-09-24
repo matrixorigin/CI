@@ -169,7 +169,7 @@ jobs:
         timeout-minutes: 10
         uses: matrixorigin/CI/actions/setup-env@main
         with:
-          setup-java: true
+          setup-java: false
           go-version-file: "${{ github.workspace }}/go.mod"
       - name: Prepare Python UDF contract tests
         if: ${{ hashFiles('pkg/udf/python/worker/requirements.txt') != '' }}
