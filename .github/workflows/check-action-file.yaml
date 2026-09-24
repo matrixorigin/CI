@@ -63,6 +63,8 @@ jobs:
         run: ${{ steps.install-actionlint.outputs.executable }} -shellcheck= -pyflakes= -color
       - name: Test coverage artifact generation selection
         run: python3 scripts/test_select_coverage_artifacts.py -v
+      - name: Test coverage PR diff fallback
+        run: python3 scripts/test_fetch_public_pr_diff.py -v
       - name: Test TKE merge subject identity contract
         run: python3 scripts/test_merge_trigger_tke_subject.py -v
       - name: Test SCA license scope selection
