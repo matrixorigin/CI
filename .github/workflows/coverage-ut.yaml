@@ -218,6 +218,8 @@ jobs:
         env:
           GOPROXY: http://goproxy.goproxy.svc.cluster.local,https://goproxy.cn,https://proxy.golang.org
           COVERAGE_UT_TEST_TIMEOUT_SECONDS: "3600"
+          # The go test package deadline below is 20m; it must leave time for
+          # the runner's 60m whole-suite deadline and diagnostics.
           COVERAGE_UT_HEARTBEAT_SECONDS: "15"
           COVERAGE_UT_CONSOLE_HEARTBEAT_SECONDS: "60"
           # Parent-shell fallback if the Python runner itself stops making
@@ -413,6 +415,7 @@ jobs:
             --console-heartbeat-seconds "${COVERAGE_UT_CONSOLE_HEARTBEAT_SECONDS}" \
             -- env CGO_CFLAGS="${cgo_cflags}" CGO_LDFLAGS="${cgo_ldflags}" \
             go test -mod=readonly -count=1 -json -short -v -tags matrixone_test \
+            -timeout=20m \
             -p "${COVERAGE_UT_PACKAGE_PARALLELISM}" \
             -covermode=set -coverprofile="${coverage_profile}" -coverpkg="${cover_pkgs}" \
             ${test_scope} &
