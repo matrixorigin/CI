@@ -9,6 +9,7 @@ from pathlib import Path
 EXPECTED_SHA = "a" * 40
 MOVED_SHA = "b" * 40
 VALID_DIFF = b"diff --git a/main.go b/main.go\n--- a/main.go\n+++ b/main.go\n@@ -1 +1 @@\n-old\n+new\n"
+TWO_HUNK_DIFF = VALID_DIFF + b"@@ -3 +3 @@\n-old2\n+new2\n"
 
 
 FAKE_CURL = r'''#!/usr/bin/env python3
@@ -45,7 +46,15 @@ if "/pulls/42" in url and "api.github.com" in url and not api_diff:
         changed_files = 2
     if mode == "metadata-two-files":
         changed_files = 2
-    body = json.dumps({"head": {"sha": head_sha}, "changed_files": changed_files}).encode()
+    line_changes = 0 if changed_files == 0 else 1
+    if mode in ("short-hunk-recovery", "short-hunk-both"):
+        line_changes = 2
+    body = json.dumps({
+        "head": {"sha": head_sha},
+        "changed_files": changed_files,
+        "additions": line_changes,
+        "deletions": line_changes,
+    }).encode()
     status = 200
     kind = "metadata"
 elif "github.com/owner/repo/pull/42.diff" in url:
@@ -58,7 +67,7 @@ elif "github.com/owner/repo/pull/42.diff" in url:
         status, body = 200, b"<html>temporary failure</html>"
     elif mode == "public-truncated":
         status, body = 200, b"diff --git a/main.go b/main.go\n"
-    elif mode in ("public-ok", "head-moves", "changed-files-move", "public-nonempty-metadata-empty", "metadata-two-files"):
+    elif mode in ("public-ok", "head-moves", "changed-files-move", "public-nonempty-metadata-empty", "metadata-two-files", "short-hunk-recovery", "short-hunk-both"):
         status, body = 200, os.environ["VALID_DIFF"].encode()
     else:
         status, body = 500, b"unexpected mode"
@@ -68,6 +77,8 @@ elif "api.github.com/repos/owner/repo/pulls/42" in url and api_diff:
         status, body = 403, b"forbidden"
     elif mode == "both-empty":
         status, body = 200, b""
+    elif mode == "short-hunk-recovery":
+        status, body = 200, os.environ["TWO_HUNK_DIFF"].encode()
     else:
         status, body = 200, os.environ["VALID_DIFF"].encode()
 else:
@@ -108,6 +119,7 @@ class FetchPublicPRDiffTest(unittest.TestCase):
                 "EXPECTED_SHA": EXPECTED_SHA,
                 "MOVED_SHA": MOVED_SHA,
                 "VALID_DIFF": VALID_DIFF.decode(),
+                "TWO_HUNK_DIFF": TWO_HUNK_DIFF.decode(),
             }
         )
 
@@ -207,7 +219,7 @@ class FetchPublicPRDiffTest(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(self.output.exists())
-        self.assertIn("PR changed-file count moved during diff download", result.stderr)
+        self.assertIn("PR diff statistics moved during diff download", result.stderr)
 
     def test_non_diff_http_200_body_falls_back_instead_of_becoming_no_changes(self):
         result = self.run_fetch("public-html")
@@ -230,7 +242,22 @@ class FetchPublicPRDiffTest(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(self.output.exists())
-        self.assertIn("diff has file_count=1 despite changed_files=2", result.stderr)
+        self.assertIn("diff stats", result.stderr)
+
+    def test_partial_hunk_diff_falls_back_to_api(self):
+        result = self.run_fetch("short-hunk-recovery")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.output.read_bytes(), TWO_HUNK_DIFF)
+        self.assertIn("diff stats", result.stderr)
+        self.assertIn("api-diff", [call["kind"] for call in self.read_state()["calls"]])
+
+    def test_partial_hunk_diff_from_both_sources_is_rejected(self):
+        result = self.run_fetch("short-hunk-both")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.output.exists())
+        self.assertIn("Unable to download a valid PR diff", result.stderr)
 
 
 if __name__ == "__main__":

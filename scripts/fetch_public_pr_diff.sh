@@ -84,13 +84,13 @@ verify_pr_head() {
   fi
 }
 
-pr_changed_files() {
-  local changed_files
-  changed_files=$(jq -er '.changed_files | select(type == "number" and . >= 0 and . == floor)' "$pr_metadata") || {
-    echo "GitHub PR metadata did not contain a valid changed-files count" >&2
+pr_diff_stats() {
+  local stats
+  stats=$(jq -er '[.changed_files, .additions, .deletions] | select(all(.[]; type == "number" and . >= 0 and . == floor)) | @tsv' "$pr_metadata") || {
+    echo "GitHub PR metadata did not contain valid diff statistics" >&2
     return 1
   }
-  printf '%s' "$changed_files"
+  printf '%s' "$stats"
 }
 
 validate_diff() {
@@ -114,13 +114,16 @@ validate_diff() {
     return 1
   fi
 
-  local diff_file_count
-  if ! diff_file_count=$(git apply --numstat -- "$candidate_patch" | awk 'END { print NR }'); then
+  local diff_stats
+  if ! diff_stats=$(git apply --numstat -- "$candidate_patch" | awk -F '\t' '
+    { files++; if ($1 != "-") additions += $1; if ($2 != "-") deletions += $2 }
+    END { printf "%d\t%d\t%d", files, additions, deletions }
+  '); then
     echo "${source} returned a malformed Git diff" >&2
     return 1
   fi
-  if [[ "$diff_file_count" != "$expected_changed_files" ]]; then
-    echo "${source} diff has file_count=${diff_file_count} despite changed_files=${expected_changed_files}" >&2
+  if [[ "$diff_stats" != "$expected_stats" ]]; then
+    echo "${source} diff stats (${diff_stats}) differ from PR metadata (${expected_stats})" >&2
     return 1
   fi
 }
@@ -136,7 +139,8 @@ download_diff() {
 }
 
 verify_pr_head "before diff download"
-expected_changed_files=$(pr_changed_files)
+expected_stats=$(pr_diff_stats)
+IFS=$'\t' read -r expected_changed_files expected_additions expected_deletions <<< "$expected_stats"
 
 public_diff_url="https://github.com/${pr_repo}/pull/${pr_number}.diff"
 if download_diff "public PR diff" "$public_diff_url"; then
@@ -155,11 +159,11 @@ else
 fi
 
 # The PR can be updated while the diff endpoints are retrying. Publish only
-# when both metadata checks agree on the expected head and changed-file count.
+# when both metadata checks agree on the expected head and diff statistics.
 verify_pr_head "after diff download"
-current_changed_files=$(pr_changed_files)
-if [[ "$current_changed_files" != "$expected_changed_files" ]]; then
-  echo "PR changed-file count moved during diff download: expected ${expected_changed_files}, found ${current_changed_files}; refusing to publish coverage diff" >&2
+current_stats=$(pr_diff_stats)
+if [[ "$current_stats" != "$expected_stats" ]]; then
+  echo "PR diff statistics moved during diff download: expected (${expected_stats}), found (${current_stats}); refusing to publish coverage diff" >&2
   exit 1
 fi
 mv -- "$candidate_patch" "$output_path"
