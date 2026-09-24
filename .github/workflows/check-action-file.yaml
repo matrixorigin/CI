@@ -17,6 +17,8 @@ on:
       - 'scripts/select_coverage_artifacts.py'
       - 'scripts/test_select_coverage_artifacts.py'
       - 'scripts/test_merge_trigger_tke_subject.py'
+      - 'scripts/compact_coverage_profile.go'
+      - 'scripts/compact_coverage_profile_test.go'
       - 'scripts/*race_seed*.py'
 
 permissions:
@@ -28,7 +30,7 @@ jobs:
     permissions:
       contents: read
     runs-on: arm64-mo-shanghai-4c8g
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -61,6 +63,24 @@ jobs:
         # Keep this gate focused on workflow/action semantics. The repository
         # has a separate backlog of legacy shellcheck and pyflakes findings.
         run: ${{ steps.install-actionlint.outputs.executable }} -shellcheck= -pyflakes= -color
+      - name: Set up Go for coverage helper checks
+        timeout-minutes: 5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.26.4'
+          cache: false
+      - name: Test and vet coverage profile compactor
+        timeout-minutes: 3
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          set -euo pipefail
+          go test -count=1 -timeout=60s \
+            scripts/compact_coverage_profile.go \
+            scripts/compact_coverage_profile_test.go
+          go vet \
+            scripts/compact_coverage_profile.go \
+            scripts/compact_coverage_profile_test.go
       - name: Test coverage artifact generation selection
         run: python3 scripts/test_select_coverage_artifacts.py -v
       - name: Test TKE merge subject identity contract
