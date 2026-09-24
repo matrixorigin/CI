@@ -35,21 +35,26 @@ except FileNotFoundError:
 api_diff = any("application/vnd.github.diff" in arg for arg in args)
 if "/pulls/42" in url and "api.github.com" in url and not api_diff:
     state["heads"] += 1
-    if mode == "head-moves" and state["heads"] > 1:
-        body = json.dumps({"head": {"sha": os.environ["MOVED_SHA"]}}).encode()
-    else:
-        body = json.dumps({"head": {"sha": os.environ["EXPECTED_SHA"]}}).encode()
+    head_sha = (
+        os.environ["MOVED_SHA"]
+        if mode == "head-moves" and state["heads"] > 1
+        else os.environ["EXPECTED_SHA"]
+    )
+    changed_files = 0 if mode in ("public-empty", "public-nonempty-metadata-empty") else 1
+    if mode == "changed-files-move" and state["heads"] > 1:
+        changed_files = 2
+    body = json.dumps({"head": {"sha": head_sha}, "changed_files": changed_files}).encode()
     status = 200
     kind = "metadata"
 elif "github.com/owner/repo/pull/42.diff" in url:
     kind = "public"
     if mode in ("public-503-api-ok", "api-fails"):
         status, body = 503, b"partial service error"
-    elif mode == "public-empty":
+    elif mode in ("public-empty", "public-empty-api-ok", "both-empty"):
         status, body = 200, b""
     elif mode == "public-html":
         status, body = 200, b"<html>temporary failure</html>"
-    elif mode in ("public-ok", "head-moves"):
+    elif mode in ("public-ok", "head-moves", "changed-files-move", "public-nonempty-metadata-empty"):
         status, body = 200, os.environ["VALID_DIFF"].encode()
     else:
         status, body = 500, b"unexpected mode"
@@ -57,6 +62,8 @@ elif "api.github.com/repos/owner/repo/pulls/42" in url and api_diff:
     kind = "api-diff"
     if mode == "api-fails":
         status, body = 403, b"forbidden"
+    elif mode == "both-empty":
+        status, body = 200, b""
     else:
         status, body = 200, os.environ["VALID_DIFF"].encode()
 else:
@@ -157,7 +164,7 @@ class FetchPublicPRDiffTest(unittest.TestCase):
         self.assertFalse(self.output.exists())
         self.assertIn("PR head moved after diff download", result.stderr)
 
-    def test_empty_successful_diff_is_preserved_as_empty(self):
+    def test_empty_diff_for_zero_changed_files_is_preserved(self):
         result = self.run_fetch("public-empty")
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -166,6 +173,37 @@ class FetchPublicPRDiffTest(unittest.TestCase):
         self.assertEqual([call["kind"] for call in self.read_state()["calls"]], [
             "metadata", "public", "metadata"
         ])
+
+    def test_empty_public_diff_with_changed_files_falls_back_to_api(self):
+        result = self.run_fetch("public-empty-api-ok")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.output.read_bytes(), VALID_DIFF)
+        self.assertIn("empty diff despite changed_files=1", result.stderr)
+        self.assertEqual([call["kind"] for call in self.read_state()["calls"]], [
+            "metadata", "public", "api-diff", "metadata"
+        ])
+
+    def test_empty_diff_from_both_sources_does_not_pass_coverage(self):
+        result = self.run_fetch("both-empty")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.output.exists())
+        self.assertIn("Unable to download a valid PR diff", result.stderr)
+
+    def test_nonempty_diff_with_zero_changed_files_is_rejected(self):
+        result = self.run_fetch("public-nonempty-metadata-empty")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.output.exists())
+        self.assertIn("non-empty diff despite changed_files=0", result.stderr)
+
+    def test_changed_file_count_moving_during_download_does_not_publish_diff(self):
+        result = self.run_fetch("changed-files-move")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.output.exists())
+        self.assertIn("PR changed-file count moved during diff download", result.stderr)
 
     def test_non_diff_http_200_body_falls_back_instead_of_becoming_no_changes(self):
         result = self.run_fetch("public-html")
