@@ -1,0 +1,48 @@
+name: Collect BVT coverage
+description: Verify CN shutdown and SQL execution counters before publishing BVT coverage
+inputs:
+  compose-file:
+    description: MatrixOne Compose configuration
+    default: etc/launch-tae-compose/compose.yaml
+  coverage-dir:
+    description: Run-owned raw Go coverage directory
+    required: true
+  output:
+    description: Destination coverage profile
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Stop CNs and verify normal exit
+      id: stop
+      if: ${{ !cancelled() }}
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        COMPOSE_FILE: ${{ inputs.compose-file }}
+        COVERAGE_OUTPUT: ${{ inputs.output }}
+      run: |
+        set -euo pipefail
+        rm -f -- "${COVERAGE_OUTPUT}"
+        python3 "${ACTION_PATH}/collect.py" stop --compose-file "${COMPOSE_FILE}"
+    - name: Remove containers
+      id: cleanup
+      if: ${{ always() }}
+      shell: bash
+      env:
+        COMPOSE_FILE: ${{ inputs.compose-file }}
+      run: |
+        docker compose -f "${COMPOSE_FILE}" --profile launch-multi-cn down --remove-orphans
+        docker volume rm launch-tae-compose_minio_storage || true
+    - name: Generate and validate coverage profile
+      if: ${{ always() && !cancelled() && steps.stop.outcome == 'success' && steps.cleanup.outcome == 'success' }}
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        COMPOSE_FILE: ${{ inputs.compose-file }}
+        COVERAGE_DIR: ${{ inputs.coverage-dir }}
+        COVERAGE_OUTPUT: ${{ inputs.output }}
+      run: |
+        python3 "${ACTION_PATH}/collect.py" profile \
+          --compose-file "${COMPOSE_FILE}" --coverage-dir "${COVERAGE_DIR}" \
+          --output "${COVERAGE_OUTPUT}"

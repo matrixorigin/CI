@@ -12,6 +12,7 @@ on:
       - 'actions/resolve-sca-license-scope/**'
       - 'actions/restore-sca-analysis-cache/**'
       - 'actions/seed-go-caches/**'
+      - 'actions/collect-bvt-coverage/**'
       - 'actions/upload-artifact-with-retry/action.yaml'
       - 'actions/upload-artifact-with-retry/state-machine.schema.json'
       - 'scripts/select_coverage_artifacts.py'
@@ -81,6 +82,8 @@ jobs:
           go vet \
             scripts/compact_coverage_profile.go \
             scripts/compact_coverage_profile_test.go
+      - name: Test BVT coverage collection
+        run: python3 -m unittest discover -s actions/collect-bvt-coverage -p 'test_*.py' -v
       - name: Test coverage artifact generation selection
         run: python3 scripts/test_select_coverage_artifacts.py -v
       - name: Test TKE merge subject identity contract
@@ -164,6 +167,7 @@ jobs:
             actions/resolve-sca-license-scope/action.yaml
             actions/restore-sca-analysis-cache/action.yaml
             actions/seed-go-caches/action.yaml
+            actions/collect-bvt-coverage/action.yaml
             actions/upload-artifact-with-retry/action.yaml
       - name: Validate artifact retry state machine
         uses: dsanders11/json-schema-validate-action@eddf079f55830cc9a916a3c512ba9086240d2fea # v2.0.0

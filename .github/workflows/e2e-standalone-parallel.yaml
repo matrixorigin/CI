@@ -312,6 +312,8 @@ jobs:
           cat ./etc/launch-tae-compose/config/cn-1.toml
           cat ./etc/launch-tae-compose/config/tn.toml
           sed -i 's|:/test\b|:'"$GITHUB_WORKSPACE"'/test|g' ./etc/launch-tae-compose/compose.yaml
+          # A rerun must never inherit counters from an earlier container generation.
+          sudo rm -rf -- "$GITHUB_WORKSPACE/coverage"
           mkdir -p "$GITHUB_WORKSPACE/coverage" "$GITHUB_WORKSPACE/docker-compose-log"
 
           # Assemble the runtime image from the shared -cover build when the
@@ -519,33 +521,13 @@ jobs:
         run: |
           ./optools/check_log_count.sh 1000 60 # {count threshold} {metric collected interval}
 
-      - name: shutdown containers
+      - name: Collect BVT coverage after verified CN shutdown
         if: ${{ always() }}
-        run: |
-          docker ps
-          docker compose -f etc/launch-tae-compose/compose.yaml --profile launch-multi-cn down --remove-orphans
-          docker volume rm launch-tae-compose_minio_storage || true
-
-      - name: Generate Compose BVT coverage profile
-        if: ${{ always() && !cancelled() }}
-        run: |
-          set -uo pipefail
-          coverage_dir="$GITHUB_WORKSPACE/coverage"
-          coverage_profile="${RUNNER_TEMP}/bvt-pessimistic.out"
-          compose_file="$GITHUB_WORKSPACE/etc/launch-tae-compose/compose.yaml"
-          if ! grep -Eq 'GOCOVERDIR=/coverage' "${compose_file}" \
-            || ! grep -Eq 'coverage:/coverage' "${compose_file}"; then
-            echo '::warning::Compose BVT coverage is unsupported by this legacy branch; keeping the successful BVT result'
-            exit 0
-          fi
-          if go tool covdata textfmt -i="${coverage_dir}" -o "${coverage_profile}"; then
-            test -s "${coverage_profile}"
-          elif [ "${{ steps.bvt_on_pr_version.conclusion }}" = "success" ]; then
-            echo '::error::failed to generate Compose + Pessimistic BVT coverage after a successful BVT'
-            exit 1
-          else
-            echo '::warning::Compose + Pessimistic BVT coverage unavailable because BVT did not finish successfully'
-          fi
+        timeout-minutes: 6
+        uses: matrixorigin/CI/actions/collect-bvt-coverage@main
+        with:
+          coverage-dir: ${{ github.workspace }}/coverage
+          output: ${{ runner.temp }}/bvt-pessimistic.out
 
       - name: Upload Compose + Pessimistic BVT coverage
         if: ${{ always() && !cancelled() }}
