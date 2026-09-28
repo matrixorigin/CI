@@ -86,7 +86,8 @@ jobs:
             exit 1
           fi
           if [ -n "${IS_PUB_REPO:-}" ] && [ "${IS_PUB_REPO}" != "0" ] && [ "${IS_PUB_REPO}" != "false" ]; then
-            curl -fL --retry 5 --retry-delay 3 "https://github.com/${pr_repo}/pull/${pr_number}.diff" -o diff.patch
+            timeout 240s bash "$GITHUB_WORKSPACE/CI/scripts/fetch_public_pr_diff.sh" \
+              "$pr_repo" "$pr_number" "$EXPECTED_HEAD_SHA" diff.patch
           else
             curl -fL --retry 5 --retry-delay 3 \
               -H 'Accept: application/vnd.github.v3.diff' \
