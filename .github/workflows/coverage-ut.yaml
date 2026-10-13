@@ -146,20 +146,27 @@ jobs:
     # external Aliyun/QCloud coverage UT. This is intentionally larger than
     # the UT-only minimum while we validate the external-storage timeout fix.
     runs-on: amd64-mo-guangzhou-2xlarge16
-    # Budget the whole producer: 20m cache seeding, a 190m coverage step
+    # Budget the whole producer: 20m source checkout, 20m cache seeding,
+    # a 190m coverage step
     # (15m package discovery, 30m native preparation, a 60m controlled test
     # deadline or 70m fallback, and bounded cleanup), plus enough time for
     # summaries and artifacts.
     # The wrapper below enforces the test deadline before this job-level last
     # resort.
     # The bounded setup/cache/coverage/report paths fit below this limit with
-    # roughly 20m of job-level cushion; the job timeout is never the diagnostic
+    # roughly 5m of job-level cushion; the job timeout is never the diagnostic
     # mechanism for a stuck test.
     timeout-minutes: 310
     steps:
       - name: Checkout MatrixOne source
-        timeout-minutes: 5
+        # A stalled HTTPS connection can consume libcurl's 300s connect limit.
+        # Allow checkout's existing retries to run before the step deadline;
+        # abort stalled HTTP transfers after connection without slowing retries.
+        timeout-minutes: 20
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        env:
+          GIT_HTTP_LOW_SPEED_LIMIT: "1"
+          GIT_HTTP_LOW_SPEED_TIME: "60"
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
