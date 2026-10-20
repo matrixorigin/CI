@@ -16,6 +16,7 @@ on:
       - 'actions/upload-artifact-with-retry/state-machine.schema.json'
       - 'scripts/select_coverage_artifacts.py'
       - 'scripts/test_select_coverage_artifacts.py'
+      - 'scripts/test_coverage_native_runtime.py'
       - 'scripts/test_merge_trigger_tke_subject.py'
       - 'scripts/compact_coverage_profile.go'
       - 'scripts/compact_coverage_profile_test.go'
@@ -83,6 +84,8 @@ jobs:
             scripts/compact_coverage_profile_test.go
       - name: Test coverage artifact generation selection
         run: python3 scripts/test_select_coverage_artifacts.py -v
+      - name: Test coverage native runtime paths
+        run: python3 scripts/test_coverage_native_runtime.py -v
       - name: Test TKE merge subject identity contract
         run: python3 scripts/test_merge_trigger_tke_subject.py -v
       - name: Test SCA license scope selection
