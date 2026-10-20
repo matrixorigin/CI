@@ -172,7 +172,7 @@ jobs:
           test_scope=$(go list ./... | grep -v 'driver\|engine/aoe\|engine/memEngine\|pkg/catalog')
           make clean && make config && make cgo
           CGO_CFLAGS="-I${GITHUB_WORKSPACE}/matrixone/cgo"
-          CGO_LDFLAGS="-L${GITHUB_WORKSPACE}/matrixone/cgo -lmo"
+          CGO_LDFLAGS="-L${GITHUB_WORKSPACE}/matrixone/cgo -lmo -Wl,-rpath,${GITHUB_WORKSPACE}/matrixone/cgo"
           THIRDPARTIES_DIR=$GITHUB_WORKSPACE/matrixone/thirdparties
           THIRDPARTIES_INSTALL_DIR=$THIRDPARTIES_DIR/install
           if [ -d $THIRDPARTIES_DIR ] ; then
