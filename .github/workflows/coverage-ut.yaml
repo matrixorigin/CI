@@ -350,7 +350,7 @@ jobs:
           (( phase_status == 0 )) || exit "${phase_status}"
           thirdparties_install_dir="$GITHUB_WORKSPACE/thirdparties/install"
           cgo_cflags="-I${GITHUB_WORKSPACE}/cgo -I${thirdparties_install_dir}/include"
-          cgo_ldflags="-L${GITHUB_WORKSPACE}/cgo -lmo -L${thirdparties_install_dir}/lib -lusearch_c -Wl,-rpath,${thirdparties_install_dir}/lib -lm"
+          cgo_ldflags="-L${GITHUB_WORKSPACE}/cgo -lmo -Wl,-rpath,${GITHUB_WORKSPACE}/cgo -L${thirdparties_install_dir}/lib -lusearch_c -Wl,-rpath,${thirdparties_install_dir}/lib -lm"
 
           # Keep the same all-package coverage scope and external storage
           # coverage as main. Save the verbose JSON report as an artifact
