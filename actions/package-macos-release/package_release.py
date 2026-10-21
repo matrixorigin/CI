@@ -125,8 +125,10 @@ def package_release(workspace, tag, gon):
         run(["ditto", "-x", "-k", archive, extracted], timeout=180)
         unpacked = extracted / name
         verify_dependencies(unpacked)
-        run(["codesign", "--verify", "--test-requirement==notarized", "-vv", unpacked / "mo-service"])
-        run(["spctl", "--assess", "--type", "execute", "--verbose=2", unpacked / "mo-service"])
+        # mo-service is a standalone CLI, not an app bundle for spctl assessment.
+        # Check its notarization ticket without weakening signature verification.
+        run(["codesign", "--verify", "--strict", "--verbose=2",
+             "-R=notarized", "--check-notarization", unpacked / "mo-service"])
         smoke(unpacked)
         # Same filesystem: failed/cancelled validation cannot expose a partial zip.
         archive.replace(destination)

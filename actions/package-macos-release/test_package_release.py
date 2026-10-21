@@ -81,8 +81,13 @@ class PackagingTests(unittest.TestCase):
             if binary.name == "mo-service":
                 return "mo-service:\n\t@rpath/libmo.dylib (compatibility version 0.0.0)\n"
             return f"{binary}:\n\t@rpath/{binary.name} (compatibility version 0.0.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0)\n"
-        elif self.failure == "verify" and args[0] == "codesign":
-            raise subprocess.CalledProcessError(1, args)
+        elif args[0] == "codesign":
+            phase = "notarization-verify" if "--check-notarization" in args else "verify"
+            if self.failure == phase:
+                raise subprocess.CalledProcessError(1, args)
+        elif args[0] == "spctl":
+            # App assessment rejects even valid notarized standalone CLI tools.
+            raise subprocess.CalledProcessError(3, args, stderr="the code is valid but does not seem to be an app")
         return ""
 
     def invoke(self):
@@ -105,17 +110,40 @@ class PackagingTests(unittest.TestCase):
         self.assertNotIn("never-serialize-me", json.dumps(self.configs))
         self.assertEqual(sum(args[0] == "ditto" and "-c" in args for args in self.calls), 1)
         self.assertEqual(sum(args[-1] == "--version" for args in self.calls), 2)
+        self.assertFalse(any(args[0] == "spctl" for args in self.calls))
+        # The final gate must check the extracted CLI, after notarization and
+        # before its smoke test. Merely deleting the app-only check is not enough.
+        notarize_index = max(i for i, args in enumerate(self.calls) if args[0] == "gon")
+        extract_index = next(i for i, args in enumerate(self.calls) if args[0] == "ditto" and "-x" in args)
+        extracted_binary = str(Path(self.calls[extract_index][-1]) / self.name / "mo-service")
+        ticket_checks = [(i, args) for i, args in enumerate(self.calls)
+                         if args[0] == "codesign" and "--check-notarization" in args]
+        self.assertEqual(len(ticket_checks), 1)
+        verify_index, verify_args = ticket_checks[0]
+        self.assertEqual(verify_args, ["codesign", "--verify", "--strict", "--verbose=2",
+                                       "-R=notarized", "--check-notarization", extracted_binary])
+        self.assertLess(notarize_index, extract_index)
+        self.assertLess(extract_index, verify_index)
+        self.assertEqual(self.calls[verify_index + 1:], [[extracted_binary, "--version"]])
         with zipfile.ZipFile(archive) as zipped:
             self.assertNotIn(self.name + "/lib/libmo.a", zipped.namelist())
             self.assertIn(self.name + "/pkg/udf/pythonservice/server.py", zipped.namelist())
         self.assert_clean()
 
     def test_failures_never_publish_and_clean_staging(self):
-        for phase in ("sign", "verify", "smoke", "archive", "notarize"):
+        for phase in ("sign", "verify", "smoke", "archive", "notarize", "notarization-verify"):
             with self.subTest(phase=phase):
+                self.calls.clear()
+                self.configs.clear()
                 self.failure = phase
-                with self.assertRaises(subprocess.CalledProcessError):
+                with self.assertRaises(subprocess.CalledProcessError) as failed:
                     self.invoke()
+                if phase == "notarization-verify":
+                    self.assertEqual(len(self.configs), 2)
+                    self.assertIn("notarize", self.configs[-1])
+                    self.assertIn("--check-notarization", failed.exception.cmd)
+                    self.assertIn("extracted", Path(failed.exception.cmd[-1]).parts)
+                    self.assertEqual(sum(args[-1] == "--version" for args in self.calls), 1)
                 self.assertFalse((self.root / (self.name + ".zip")).exists())
                 self.assert_clean()
 
