@@ -7,6 +7,10 @@
 Downloads CMake and ninja-build binaries.
 Works for Linux, macOS, and Windows.
 
+On Apple Silicon, versions older than CMake 3.22.6 / Ninja 1.12.1 are
+raised to those minimums to use native universal binaries. Newer requested
+versions are preserved. Other platforms retain their existing defaults.
+
 *Uses some code from <https://github.com/lukka/get-cmake> and <https://github.com/seanmiddleditch/gha-setup-ninja>.*
 
 ## Using
