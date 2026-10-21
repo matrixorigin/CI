@@ -1,0 +1,37 @@
+name: Package macOS release
+description: Sign and notarize the complete, self-contained Apple Silicon release.
+inputs:
+  tag:
+    description: Release tag used in the archive name.
+    required: true
+outputs:
+  asset-path:
+    description: Verified release archive, produced only after notarization succeeds.
+    value: ${{ steps.package.outputs.asset-path }}
+runs:
+  using: composite
+  steps:
+    - name: Checkout notarization tool
+      uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      with:
+        repository: matrixorigin/gon
+        ref: fda7f307f6423a8c0aab7a6efb2271c5e0de2a1c
+        path: .ci-release-gon
+        persist-credentials: false
+    - name: Build notarization tool
+      shell: bash
+      working-directory: ${{ github.workspace }}/.ci-release-gon
+      env:
+        CGO_ENABLED: '0'
+        GOWORK: 'off'
+        GOMAXPROCS: '2'
+      run: go build -mod=vendor -p 2 -o gon ./cmd/gon
+    - name: Package, sign, notarize and verify
+      id: package
+      shell: bash
+      env:
+        RELEASE_TAG: ${{ inputs.tag }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        python3 "$ACTION_PATH/package_release.py" \
+          "$GITHUB_WORKSPACE" "$RELEASE_TAG" "$GITHUB_WORKSPACE/.ci-release-gon/gon"
