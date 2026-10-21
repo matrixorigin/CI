@@ -38,21 +38,24 @@ on:
       S3BUCKET:
         description: "S3BUCKET For Test"
         required: true
+      # The CI workflow does not consume the EE_DB secrets. Keep these optional
+      # so control-only jobs, including the sharded-UT summary, do not require
+      # the ci environment merely to validate shard results.
       EE_DB_ADDR:
         description: "matrixone cloud host"
-        required: true
+        required: false
       EE_DB_PORT:
         description: "matrixone cloud port"
-        required: true
+        required: false
       EE_DB_USER:
         description: "matrixone cloud user"
-        required: true
+        required: false
       EE_DB_PASSWORD:
         description: "matrixone cloud password"
-        required: true
+        required: false
       EE_DB_DB:
         description: "matrixone cloud db"
-        required: true
+        required: false
 
 jobs:
   ut-linux-x86-shard:
