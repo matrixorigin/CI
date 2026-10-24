@@ -226,6 +226,9 @@ jobs:
           # Parent-shell fallback if the Python runner itself stops making
           # progress after its controlled 60-minute deadline.
           COVERAGE_UT_FALLBACK_TIMEOUT_SECONDS: "4200"
+          # Bound cross-process cluster overlap without serializing all eight
+          # packages on one admission lock. Same-process exclusion is preserved.
+          MO_TEST_CLUSTER_ADMISSION_POOL_SIZE: "2"
           COVERAGE_UT_PACKAGE_PARALLELISM: "8"
           COVERAGE_UT_DISCOVERY_TIMEOUT_SECONDS: "900"
           COVERAGE_UT_CGO_TIMEOUT_SECONDS: "1800"
