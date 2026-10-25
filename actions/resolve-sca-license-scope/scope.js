@@ -16,6 +16,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('node:child_process');
 
 const sourcePattern = /\.(?:go|c|s|h|cpp|proto)$/;
 const globPattern = /[*?[\]{}\\]/;
@@ -57,7 +58,7 @@ function publish(core, output, result) {
   core.exportVariable('SCA_LICENSE_DEPENDENCY_CHECK', String(result.dependencyCheck));
 }
 
-async function run({ github, context, core, runnerTemp = process.env.RUNNER_TEMP }) {
+async function run({ github, context, core, runnerTemp = process.env.RUNNER_TEMP, git = execFileSync }) {
   const output = path.join(runnerTemp, 'matrixone-sca-license-paths');
   const pull = context.payload.pull_request;
   if (!pull) {
@@ -66,15 +67,32 @@ async function run({ github, context, core, runnerTemp = process.env.RUNNER_TEMP
     return;
   }
 
-  const files = await github.paginate(github.rest.pulls.listFiles, {
+  const head = pull.head?.sha;
+  const base = pull.base?.sha;
+  if (![head, base].every(sha => /^[0-9a-f]{40}$/.test(sha || ''))) {
+    throw new Error('Immutable PR revision is unavailable; use complete license checks');
+  }
+  if (git('git', ['rev-parse', 'HEAD'], {
+    cwd: process.env.GITHUB_WORKSPACE || process.cwd(),
+    encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim() !== head) {
+    throw new Error('Checkout differs from the PR revision; use complete license checks');
+  }
+  const sameRevision = pr => pr.head?.sha === head && pr.base?.sha === base;
+  const params = {
     owner: context.repo.owner,
     repo: context.repo.repo,
     pull_number: pull.number,
-    per_page: 100,
-  });
-  const result = select(files, pull.changed_files);
+    request: { signal: AbortSignal.timeout(30000) },
+  };
+  const before = (await github.rest.pulls.get(params)).data;
+  if (!sameRevision(before)) throw new Error('PR revision changed before license selection');
+  const files = await github.paginate(github.rest.pulls.listFiles, { ...params, per_page: 100 });
+  const after = (await github.rest.pulls.get(params)).data;
+  if (!sameRevision(after)) throw new Error('PR revision changed during license selection');
+  const result = select(files, before.changed_files);
   publish(core, output, result);
-  core.info(`PR files=${files.length}/${pull.changed_files}, header paths=${result.paths.length}, full=${result.headerFull}, dependency=${result.dependencyCheck}`);
+  core.info(`PR files=${files.length}/${before.changed_files}, header paths=${result.paths.length}, full=${result.headerFull}, dependency=${result.dependencyCheck}`);
 }
 
 module.exports = { run, select };
