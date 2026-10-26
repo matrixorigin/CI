@@ -109,11 +109,8 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           script: |
-            const { execFileSync } = require('node:child_process');
-            execFileSync(process.execPath, [
-              '--test',
-              `${process.env.GITHUB_WORKSPACE}/actions/resolve-sca-license-scope/scope.test.js`,
-            ], { stdio: 'inherit' });
+            const tests = require(`${process.env.GITHUB_WORKSPACE}/actions/resolve-sca-license-scope/scope.test.js`);
+            await tests.testPagination(github.constructor);
       - name: Test SCA analysis cache contracts
         run: |
           bash actions/restore-sca-analysis-cache/cache-state.test.sh
