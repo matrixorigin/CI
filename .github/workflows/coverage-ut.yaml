@@ -146,7 +146,7 @@ jobs:
     # external Aliyun/QCloud coverage UT. This is intentionally larger than
     # the UT-only minimum while we validate the external-storage timeout fix.
     runs-on: amd64-mo-guangzhou-2xlarge16
-    # The cache-enabled failure path has 325m of step limits: 40m for the
+    # The cache-enabled failure path has 305m of step limits: 20m for the
     # two checkouts, 20m cache seeding, 190m coverage, 15m Go/Python setup,
     # 5m cache status, and 55m for failure reports, artifacts, final status,
     # and failure propagation. Reserve 5m for job overhead and post-action
@@ -154,14 +154,14 @@ jobs:
     # The wrapper below enforces the test deadline before this job-level last
     # resort; the job timeout is never the diagnostic mechanism for a stuck
     # test.
-    timeout-minutes: 330
+    timeout-minutes: 310
     steps:
       - name: Checkout MatrixOne source
         # Low-speed limits apply after connection; proxy CONNECT/TLS stalls
-        # can still consume libcurl's 300s connection timeout. The 20m step
-        # limit gives checkout's existing retries room and bounds the whole
+        # can still consume libcurl's 300s connection timeout. The 10m step
+        # limit permits retries after transient stalls and bounds the whole
         # checkout, including multiple connections and local Git work.
-        timeout-minutes: 20
+        timeout-minutes: 10
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         env:
           GIT_HTTP_LOW_SPEED_LIMIT: "1"
@@ -183,7 +183,7 @@ jobs:
         uses: matrixorigin/CI/actions/setup-python-udf@main
       - name: Checkout CI coverage helper
         # Use the same bounded retry budget on this runner's network path.
-        timeout-minutes: 20
+        timeout-minutes: 10
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         env:
           GIT_HTTP_LOW_SPEED_LIMIT: "1"
