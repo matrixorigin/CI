@@ -87,7 +87,10 @@ async function run({ github, context, core, runnerTemp = process.env.RUNNER_TEMP
   };
   const before = (await github.rest.pulls.get(params)).data;
   if (!sameRevision(before)) throw new Error('PR revision changed before license selection');
-  const files = await github.paginate(github.rest.pulls.listFiles, { ...params, per_page: 100 });
+  // The pagination iterator forwards only method/url/headers. Bind the deadline
+  // to the endpoint so it survives every page's reconstructed request.
+  const listFiles = github.rest.pulls.listFiles.defaults({ request: params.request });
+  const files = await github.paginate(listFiles, { ...params, per_page: 100 });
   const after = (await github.rest.pulls.get(params)).data;
   if (!sameRevision(after)) throw new Error('PR revision changed during license selection');
   const result = select(files, before.changed_files);
