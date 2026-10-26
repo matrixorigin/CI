@@ -255,9 +255,13 @@ module.exports.testPagination = Octokit => test('the real client aborts an in-fl
     github: new Octokit({
       baseUrl: `http://127.0.0.1:${server.address().port}`, auth: 'local-test-only',
       retry: { enabled: false }, // github-script defaults to zero retries.
+      // github-script's dispatcher is bound to the GitHub proxy. Keep this
+      // local fixture direct while retaining its real pagination client.
+      request: { fetch: globalThis.fetch },
     }),
     core: { exportVariable: (name, value) => exported.set(name, value), info: () => {} },
   }), /abort/i);
+  assert.equal(controller.signal.aborted, true);
   assert.deepEqual(requests, [
     '/repos/matrixorigin/matrixone/pulls/42',
     '/repos/matrixorigin/matrixone/pulls/42/files?per_page=100',
