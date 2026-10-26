@@ -23,6 +23,44 @@ var excludedPaths = [][]byte{
 	[]byte("yaccpar"),
 }
 
+func excludedCoveragePath(path []byte) bool {
+	for _, fragment := range excludedPaths {
+		if bytes.Contains(path, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
+// coveragePackages applies the report's exclusions before instrumentation.
+// This only selects counters; the workflow still executes every test package.
+func coveragePackages(in io.Reader, out io.Writer) error {
+	reader := bufio.NewScanner(in)
+	var packages bytes.Buffer
+	for reader.Scan() {
+		name := reader.Bytes()
+		if len(name) == 0 || bytes.ContainsAny(name, " ,\t\r\\") {
+			return errors.New("invalid coverage package name")
+		}
+		if excludedCoveragePath(name) {
+			continue
+		}
+		if packages.Len() > 0 {
+			packages.WriteByte(',')
+		}
+		packages.Write(name)
+	}
+	if err := reader.Err(); err != nil {
+		return err
+	}
+	if packages.Len() == 0 {
+		return errors.New("empty coverage instrumentation scope")
+	}
+	packages.WriteByte('\n')
+	_, err := packages.WriteTo(out)
+	return err
+}
+
 // compact retains one key per distinct (source range, statement count), not
 // one key per input row. The common duplicate lookup does not retain a copy of
 // the reader's buffer.
@@ -62,15 +100,7 @@ func compact(in io.Reader, out io.Writer) (int, error) {
 			return 0, fmt.Errorf("invalid hit count on coverage line %d", lineNumber)
 		}
 
-		path := line[:firstSpace]
-		excluded := false
-		for _, fragment := range excludedPaths {
-			if bytes.Contains(path, fragment) {
-				excluded = true
-				break
-			}
-		}
-		if excluded {
+		if excludedCoveragePath(line[:firstSpace]) {
 			continue
 		}
 		keyBytes := line[:secondSpace]
@@ -202,11 +232,17 @@ func compactFile(path string) error {
 
 func main() {
 	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: compact_coverage_profile.go COVERAGE_PROFILE")
+		fmt.Fprintln(os.Stderr, "usage: compact_coverage_profile COVERAGE_PROFILE | -packages < PACKAGE_LIST")
 		os.Exit(2)
 	}
-	if err := compactFile(os.Args[1]); err != nil {
-		fmt.Fprintf(os.Stderr, "coverage profile compaction failed: %v\n", err)
+	var err error
+	if os.Args[1] == "-packages" {
+		err = coveragePackages(os.Stdin, os.Stdout)
+	} else {
+		err = compactFile(os.Args[1])
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "coverage profile processing failed: %v\n", err)
 		os.Exit(1)
 	}
 }
