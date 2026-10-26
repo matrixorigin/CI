@@ -146,20 +146,26 @@ jobs:
     # external Aliyun/QCloud coverage UT. This is intentionally larger than
     # the UT-only minimum while we validate the external-storage timeout fix.
     runs-on: amd64-mo-guangzhou-2xlarge16
-    # Budget the whole producer: 20m cache seeding, a 190m coverage step
-    # (15m package discovery, 30m native preparation, a 60m controlled test
-    # deadline or 70m fallback, and bounded cleanup), plus enough time for
-    # summaries and artifacts.
+    # The cache-enabled failure path has 305m of step limits: 20m for the
+    # two checkouts, 20m cache seeding, 190m coverage, 15m Go/Python setup,
+    # 5m cache status, and 55m for failure reports, artifacts, final status,
+    # and failure propagation. Reserve 5m for job overhead and post-action
+    # cleanup. Success paths skip the failure-only steps.
     # The wrapper below enforces the test deadline before this job-level last
-    # resort.
-    # The bounded setup/cache/coverage/report paths fit below this limit with
-    # roughly 20m of job-level cushion; the job timeout is never the diagnostic
-    # mechanism for a stuck test.
+    # resort; the job timeout is never the diagnostic mechanism for a stuck
+    # test.
     timeout-minutes: 310
     steps:
       - name: Checkout MatrixOne source
-        timeout-minutes: 5
+        # Low-speed limits apply after connection; proxy CONNECT/TLS stalls
+        # can still consume libcurl's 300s connection timeout. The 10m step
+        # limit permits retries after transient stalls and bounds the whole
+        # checkout, including multiple connections and local Git work.
+        timeout-minutes: 10
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        env:
+          GIT_HTTP_LOW_SPEED_LIMIT: "1"
+          GIT_HTTP_LOW_SPEED_TIME: "60"
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
@@ -176,8 +182,12 @@ jobs:
         timeout-minutes: 5
         uses: matrixorigin/CI/actions/setup-python-udf@main
       - name: Checkout CI coverage helper
-        timeout-minutes: 5
+        # Use the same bounded retry budget on this runner's network path.
+        timeout-minutes: 10
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        env:
+          GIT_HTTP_LOW_SPEED_LIMIT: "1"
+          GIT_HTTP_LOW_SPEED_TIME: "60"
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           repository: ${{ job.workflow_repository }}
@@ -187,6 +197,7 @@ jobs:
             scripts/run_coverage_ut.py
             scripts/compact_coverage_profile.go
             scripts/summarize_coverage_ut.py
+            scripts/summarize_ut_report.py
           sparse-checkout-cone-mode: false
           path: .ci-workflow
       # Import completed seed entries, not a directory-emptiness heuristic.
@@ -546,15 +557,6 @@ jobs:
           echo '::endgroup::'
       # Match the legacy coverage job's actionable failure report while keeping
       # the large JSON stream out of successful coverage artifacts.
-      - name: Checkout CI repository for UT failure summary
-        if: ${{ always() && !cancelled() && steps.coverage_ut.outcome == 'failure' }}
-        timeout-minutes: 5
-        uses: actions/checkout@v6
-        with:
-          token: ${{ secrets.TOKEN_ACTION }}
-          repository: matrixorigin/CI
-          fetch-depth: "1"
-          path: CI
       - name: Analyze and summarize failed coverage UT
         if: ${{ always() && !cancelled() && steps.coverage_ut.outcome == 'failure' }}
         timeout-minutes: 10
@@ -579,7 +581,7 @@ jobs:
                 echo 'go-ut-analysis is unavailable; the raw JSON report is attached.' | tee -a "${summary}"
               fi
             fi
-            python "$GITHUB_WORKSPACE/CI/scripts/summarize_ut_report.py" "${report}" | tee -a "${summary}" || true
+            python "$GITHUB_WORKSPACE/.ci-workflow/scripts/summarize_ut_report.py" "${report}" | tee -a "${summary}" || true
           fi
           if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
             {
