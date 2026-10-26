@@ -308,7 +308,8 @@ jobs:
                 fi
               } > "${timeout_diagnostics}"
             elif { [ "${phase_name}" = 'discover_packages' ] && [ "${phase_status}" != '0' ]; } || \
-              { [ "${phase_name}" = 'prepare_cgo' ] && [ "${phase_status}" != '0' ]; }; then
+              { [ "${phase_name}" = 'prepare_cgo' ] && [ "${phase_status}" != '0' ]; } || \
+              { [ "${phase_name}" = 'build_coverage_scope' ] && [ "${phase_status}" != '0' ]; }; then
               {
                 echo "Coverage UT phase failed: ${phase_name}"
                 echo "phase=${phase_name} status=${phase_status}"
@@ -345,14 +346,21 @@ jobs:
           set -e
           phase_end "${phase_status}" "${COVERAGE_UT_DISCOVERY_TIMEOUT_SECONDS}"
           (( phase_status == 0 )) || exit "${phase_status}"
-          cover_pkgs=$(printf '%s\n' "${test_scope}" | paste -sd, -)
-          if [ -z "${cover_pkgs}" ]; then
-            echo 'Coverage UT package scope is empty after exclusions.' > "${phase_failure}"
-            echo 'phase=build_scope status=1 elapsed_seconds=0' >> "${phase_timing}"
-            exit 1
-          fi
+          # Use the existing profile policy before instrumentation too. Test
+          # selection stays complete, including tests in excluded packages.
+          phase_start build_coverage_scope
+          coverage_helper="${RUNNER_TEMP}/compact-coverage-profile"
+          set +e
+          timeout --kill-after=30s "${COVERAGE_UT_DISCOVERY_TIMEOUT_SECONDS}s" \
+            go build -o "${coverage_helper}" "$GITHUB_WORKSPACE/.ci-workflow/scripts/compact_coverage_profile.go" && \
+            cover_pkgs=$(printf '%s\n' "${test_scope}" | "${coverage_helper}" -packages)
+          phase_status=$?
+          set -e
+          phase_end "${phase_status}" "${COVERAGE_UT_DISCOVERY_TIMEOUT_SECONDS}"
+          (( phase_status == 0 )) || exit "${phase_status}"
           package_count=$(printf '%s\n' "${test_scope}" | awk 'NF { count++ } END { print count + 0 }')
-          echo "coverage_ut package_count=${package_count} package_parallelism=${COVERAGE_UT_PACKAGE_PARALLELISM}" | tee -a "${phase_timing}"
+          instrumented_package_count=$(printf '%s\n' "${cover_pkgs}" | awk -F, '{ print NF }')
+          echo "coverage_ut package_count=${package_count} package_parallelism=${COVERAGE_UT_PACKAGE_PARALLELISM} instrumented_package_count=${instrumented_package_count}" | tee -a "${phase_timing}"
 
           phase_start prepare_cgo
           set +e
@@ -533,7 +541,7 @@ jobs:
           # Go helper ORs exact block hits with memory proportional to unique
           # blocks, then atomically replaces the raw profile after success.
           set +e
-          go run "$GITHUB_WORKSPACE/.ci-workflow/scripts/compact_coverage_profile.go" "${coverage_profile}"
+          "${coverage_helper}" "${coverage_profile}"
           phase_status=$?
           set -e
           phase_end "${phase_status}"
