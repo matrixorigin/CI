@@ -795,15 +795,18 @@ jobs:
         with:
           github-token: ${{ secrets.TOKEN_ACTION || github.token }}
       - name: Static Code Analysis
+        env:
+          SCA_LICENSE_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          SCA_LICENSE_BASE_REPO: ${{ github.event.pull_request.base.repo.full_name }}
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
-          # Keep the legacy path byte-for-byte equivalent during the two-PR
-          # rollout. The optimized path is enabled only after MatrixOne adds
-          # the companion target.
+          # Keep using the legacy target until MatrixOne adds the companion
+          # analysis target, with the same resource settings for either path.
           if ! grep -q '^static-check-analysis:' Makefile; then
             echo "Incremental license target is unavailable; using complete static-check"
-            make static-check
+            go_flags="$(go env GOFLAGS)"
+            GOFLAGS="${go_flags:+${go_flags} }-p=1" GOMEMLIMIT="${GOMEMLIMIT:-5GiB}" make static-check
             exit 0
           fi
 
@@ -817,11 +820,15 @@ jobs:
             echo "PR license scope is unavailable; using complete header check"
             license_header_full="true"
           fi
-          expected_config_hash="0d7fbab69ced8ee9a79ab07a0bcd18b9000b76b6068c417e0ba2ace654409588"
           expected_tool_recipe_hash="4e79f64050864c9c411fc7a6cc6c206788d5480c8f3164e71ee6993231b2a5cb"
           config_hash="$(sha256sum .licenserc.yml | awk '{print $1}')"
           tool_recipe_hash="$(sed -n '/^install-static-check-tools:/,/^$/p' Makefile | sha256sum | awk '{print $1}')"
-          if [[ "$config_hash" != "$expected_config_hash" ]] || \
+          # The new configuration has a verified full-scan baseline on the
+          # canonical main branch; other bases keep the conservative fallback.
+          if [[ "$config_hash" != "0d7fbab69ced8ee9a79ab07a0bcd18b9000b76b6068c417e0ba2ace654409588" ]] && \
+             { [[ "$config_hash" != "dd53b959d42b19a9b5bedbcfc4e877194ab553f9a1164168d222b574180627f7" ]] || \
+               [[ "$SCA_LICENSE_BASE_REF" != "main" ]] || \
+               [[ "$SCA_LICENSE_BASE_REPO" != "matrixorigin/matrixone" ]]; } || \
             [[ "$tool_recipe_hash" != "$expected_tool_recipe_hash" ]]; then
             echo "License contract differs from the validated revision (config=${config_hash}, recipe=${tool_recipe_hash}); using complete license checks"
             license_header_full="true"
@@ -847,4 +854,7 @@ jobs:
 
           # Run cheap policy checks before the long analyzers so an invalid PR
           # fails in seconds rather than consuming the full SCA critical path.
-          make static-check-analysis GOLANGCI_LINT_CONCURRENCY=1
+          # The memory target is per process and soft; bound Go's concurrent
+          # package actions too, while retaining existing build flags.
+          go_flags="$(go env GOFLAGS)"
+          GOFLAGS="${go_flags:+${go_flags} }-p=1" GOMEMLIMIT="${GOMEMLIMIT:-5GiB}" make static-check-analysis GOLANGCI_LINT_CONCURRENCY=1
