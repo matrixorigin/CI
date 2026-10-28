@@ -847,4 +847,6 @@ jobs:
 
           # Run cheap policy checks before the long analyzers so an invalid PR
           # fails in seconds rather than consuming the full SCA critical path.
-          make static-check-analysis GOLANGCI_LINT_CONCURRENCY=1
+          # Keep room for the runner on the 8 GiB ARM worker. This is a soft
+          # limit per Go process, and an explicit setting takes precedence.
+          GOMEMLIMIT="${GOMEMLIMIT:-5GiB}" make static-check-analysis GOLANGCI_LINT_CONCURRENCY=1
