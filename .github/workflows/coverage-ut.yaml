@@ -8,6 +8,11 @@ on:
         required: false
         type: boolean
         default: false
+      canary_local_minio:
+        description: "Experimental pinned-PR canary: run local MinIO instead of cloud integration specs"
+        required: false
+        type: boolean
+        default: false
       canary_package_parallelism:
         description: "Package parallelism only for the isolated PR 32523 canary"
         required: false
@@ -70,7 +75,7 @@ jobs:
       allowed: ${{ steps.eligibility.outputs.allowed }}
     steps:
       - name: Validate pinned canary context
-        if: ${{ inputs.canary_pr_32523 }}
+        if: ${{ inputs.canary_pr_32523 || inputs.canary_local_minio }}
         env:
           GH_TOKEN: ${{ secrets.TOKEN_ACTION }}
         run: |
@@ -78,6 +83,7 @@ jobs:
           test '${{ github.repository }}' = 'matrixorigin/matrixone'
           test '${{ github.event_name }}' = 'workflow_dispatch'
           test '${{ github.ref }}' = 'refs/heads/weilu-runner-test'
+          test '${{ inputs.canary_pr_32523 }}' = 'true'
           curl -fsSL -H 'Accept: application/vnd.github+json' \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             https://api.github.com/repos/matrixorigin/matrixone/pulls/32523 |
@@ -251,6 +257,21 @@ jobs:
         timeout-minutes: 5
         run: |
           echo "- Go cache seed outcome: \`${{ steps.seed_caches.outcome }}\`." >> "$GITHUB_STEP_SUMMARY"
+      - name: Build local MinIO for isolated coverage canary
+        if: ${{ inputs.canary_local_minio && inputs.canary_pr_32523 }}
+        timeout-minutes: 30
+        env:
+          GOPROXY: https://goproxy.cn|https://proxy.golang.org|direct
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/minio-bin"
+          git init "$RUNNER_TEMP/minio-source"
+          git -C "$RUNNER_TEMP/minio-source" remote add origin https://github.com/minio/minio.git
+          git -C "$RUNNER_TEMP/minio-source" fetch --depth=1 origin f19c534b9f457773dcd043d977433e1a71525c3b
+          git -C "$RUNNER_TEMP/minio-source" checkout --detach FETCH_HEAD
+          (cd "$RUNNER_TEMP/minio-source" && go build -o "$RUNNER_TEMP/minio-bin/minio" .)
+          echo "$RUNNER_TEMP/minio-bin" >> "$GITHUB_PATH"
+          echo 'Local MinIO canary: COS/OSS integration specs are excluded and require a separate real-cloud run.' >> "$GITHUB_STEP_SUMMARY"
       - id: coverage_ut
         name: Run coverage unit tests
         # This step includes bounded package discovery and native preparation
@@ -289,6 +310,12 @@ jobs:
           export bucket='${{ secrets.S3BUCKET }}'
           export TEST_S3FS_ALIYUN='${{ secrets.TEST_S3FS_ALIYUN }}'
           export TEST_S3FS_QCLOUD='${{ secrets.TEST_S3FS_QCLOUD }}'
+          if [ '${{ inputs.canary_local_minio }}' = 'true' ]; then
+            test '${{ inputs.canary_pr_32523 }}' = 'true'
+            command -v minio >/dev/null
+            unset TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD
+            echo '::notice::Local MinIO canary excludes real COS and OSS integration specs; separate cloud validation is required.'
+          fi
           coverage_profile="${RUNNER_TEMP}/ut-coverage.out"
           coverage_report="${RUNNER_TEMP}/ut-coverage-report.json"
           coverage_progress="${RUNNER_TEMP}/ut-coverage-progress.txt"
@@ -572,6 +599,14 @@ jobs:
           fi
           test -s "${coverage_report}"
           test -s "${coverage_profile}"
+          if [ '${{ inputs.canary_local_minio }}' = 'true' ]; then
+            for required in 'TestMinioSDK/object_storage/minio/basic' 'TestMinioSDK/file_service/streaming_write'; do
+              jq -e --arg test_name "$required" 'select(.Action == "pass" and .Package == "github.com/matrixorigin/matrixone/pkg/fileservice" and .Test == $test_name)' "${coverage_report}" >/dev/null || {
+                echo "::error::Required local MinIO test did not pass: ${required}"
+                exit 1
+              }
+            done
+          fi
           phase_start compact_profile
           # -coverpkg repeats instrumented blocks for every test package. The
           # Go helper ORs exact block hits with memory proportional to unique
