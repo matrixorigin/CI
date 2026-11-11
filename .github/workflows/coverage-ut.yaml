@@ -76,7 +76,9 @@ jobs:
           curl -fsSL -H 'Accept: application/vnd.github+json' \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             https://api.github.com/repos/matrixorigin/matrixone/pulls/32523 |
-            jq -e '.state == "open" and .head.repo.full_name == "iamlinjunhong/matrixone" and .head.sha == "b0641dbf3cb1ed67f90f9e4226f0585ba451abc0" and .user.login == "iamlinjunhong"' >/dev/null
+            jq -e '.state == "open" and .head.repo.full_name == "iamlinjunhong/matrixone" and .user.login == "iamlinjunhong"' >/dev/null
+          gh api --paginate 'repos/matrixorigin/matrixone/pulls/32523/commits?per_page=100' \
+            --jq '.[].sha' | grep -Fx 'b0641dbf3cb1ed67f90f9e4226f0585ba451abc0' >/dev/null
       - id: check_in_org
         name: Check organization membership
         env:
@@ -269,7 +271,7 @@ jobs:
           # Bound cross-process cluster overlap without serializing all eight
           # packages on one admission lock. Same-process exclusion is preserved.
           MO_TEST_CLUSTER_ADMISSION_POOL_SIZE: "2"
-          COVERAGE_UT_PACKAGE_PARALLELISM: "8"
+          COVERAGE_UT_PACKAGE_PARALLELISM: ${{ inputs.canary_pr_32523 && '4' || '8' }}
           COVERAGE_UT_DISCOVERY_TIMEOUT_SECONDS: "900"
           COVERAGE_UT_CGO_TIMEOUT_SECONDS: "1800"
         run: |
