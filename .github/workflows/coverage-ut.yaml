@@ -3,6 +3,16 @@ name: MatrixOne UT Coverage
 on:
   workflow_call:
     inputs:
+      runner_label:
+        description: "Runner label for UT coverage; defaults to the existing Guangzhou runner"
+        required: false
+        type: string
+        default: "amd64-mo-guangzhou-2xlarge16"
+      go_proxy:
+        description: "Go module proxy chain reachable from the selected runner"
+        required: false
+        type: string
+        default: "http://goproxy.goproxy.svc.cluster.local,https://goproxy.cn,https://proxy.golang.org"
       cache_seed:
         description: "Opt-in host-ut-v1 cache canary; keep disabled until end-to-end cost is measured"
         required: false
@@ -145,7 +155,7 @@ jobs:
     # Preserve the Guangzhou network path and capacity used by main's
     # external Aliyun/QCloud coverage UT. This is intentionally larger than
     # the UT-only minimum while we validate the external-storage timeout fix.
-    runs-on: amd64-mo-guangzhou-2xlarge16
+    runs-on: ${{ inputs.runner_label }}
     # The cache-enabled failure path has 305m of step limits: 20m for the
     # two checkouts, 20m cache seeding, 190m coverage, 15m Go/Python setup,
     # 5m cache status, and 55m for failure reports, artifacts, final status,
@@ -228,7 +238,7 @@ jobs:
         timeout-minutes: 190
         continue-on-error: true
         env:
-          GOPROXY: http://goproxy.goproxy.svc.cluster.local,https://goproxy.cn,https://proxy.golang.org
+          GOPROXY: ${{ inputs.go_proxy }}
           COVERAGE_UT_TEST_TIMEOUT_SECONDS: "3600"
           # The go test package deadline below is 20m; it must leave time for
           # the runner's 60m whole-suite deadline and diagnostics.
