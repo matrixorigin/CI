@@ -8,6 +8,11 @@ on:
         required: false
         type: boolean
         default: false
+      canary_package_parallelism:
+        description: "Package parallelism only for the isolated PR 32523 canary"
+        required: false
+        type: number
+        default: 8
       runner_label:
         description: "Runner label for UT coverage"
         required: false
@@ -271,7 +276,7 @@ jobs:
           # Bound cross-process cluster overlap without serializing all eight
           # packages on one admission lock. Same-process exclusion is preserved.
           MO_TEST_CLUSTER_ADMISSION_POOL_SIZE: "2"
-          COVERAGE_UT_PACKAGE_PARALLELISM: ${{ inputs.canary_pr_32523 && '4' || '8' }}
+          COVERAGE_UT_PACKAGE_PARALLELISM: ${{ inputs.canary_pr_32523 && inputs.canary_package_parallelism || 8 }}
           COVERAGE_UT_DISCOVERY_TIMEOUT_SECONDS: "900"
           COVERAGE_UT_CGO_TIMEOUT_SECONDS: "1800"
         run: |
