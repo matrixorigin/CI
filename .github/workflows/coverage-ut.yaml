@@ -166,6 +166,13 @@ jobs:
     # test.
     timeout-minutes: 310
     steps:
+      - name: Install CS runner build dependencies
+        if: ${{ startsWith(inputs.runner_label, 'cs-') }}
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config python3 python-is-python3
       - name: Checkout MatrixOne source
         # Low-speed limits apply after connection; proxy CONNECT/TLS stalls
         # can still consume libcurl's 300s connection timeout. The 10m step
