@@ -4,15 +4,15 @@ on:
   workflow_call:
     inputs:
       runner_label:
-        description: "Runner label for UT coverage; defaults to the existing Guangzhou runner"
+        description: "Runner label for UT coverage"
         required: false
         type: string
-        default: "amd64-mo-guangzhou-2xlarge16"
+        default: "cs-large-7c14g"
       go_proxy:
         description: "Go module proxy chain reachable from the selected runner"
         required: false
         type: string
-        default: "http://goproxy.goproxy.svc.cluster.local,https://goproxy.cn,https://proxy.golang.org"
+        default: "https://goproxy.cn|https://proxy.golang.org|direct"
       cache_seed:
         description: "Opt-in host-ut-v1 cache canary; keep disabled until end-to-end cost is measured"
         required: false
@@ -152,9 +152,8 @@ jobs:
     needs: [check_coverage_eligibility]
     if: ${{ needs.check_coverage_eligibility.outputs.allowed == 'true' }}
     environment: ci
-    # Preserve the Guangzhou network path and capacity used by main's
-    # external Aliyun/QCloud coverage UT. This is intentionally larger than
-    # the UT-only minimum while we validate the external-storage timeout fix.
+    # Default to the shared CS pool; callers may explicitly select another
+    # runner and its reachable Go proxy when performing controlled comparisons.
     runs-on: ${{ inputs.runner_label }}
     # The cache-enabled failure path has 305m of step limits: 20m for the
     # two checkouts, 20m cache seeding, 190m coverage, 15m Go/Python setup,
