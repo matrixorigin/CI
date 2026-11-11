@@ -88,8 +88,15 @@ jobs:
             -H "Authorization: Bearer ${GH_TOKEN}" \
             https://api.github.com/repos/matrixorigin/matrixone/pulls/32523 |
             jq -e '.state == "open" and .head.repo.full_name == "iamlinjunhong/matrixone" and .user.login == "iamlinjunhong"' >/dev/null
-          gh api --paginate 'repos/matrixorigin/matrixone/pulls/32523/commits?per_page=100' \
-            --jq '.[].sha' | grep -Fx 'b0641dbf3cb1ed67f90f9e4226f0585ba451abc0' >/dev/null
+          if [ '${{ inputs.canary_local_minio }}' = 'true' ]; then
+            # The PR was force-pushed after the approved comparison baseline.
+            # Only this secret-free storage canary may use the historical SHA.
+            gh api 'repos/iamlinjunhong/matrixone/commits/b0641dbf3cb1ed67f90f9e4226f0585ba451abc0' \
+              --jq '.sha' | grep -Fx 'b0641dbf3cb1ed67f90f9e4226f0585ba451abc0' >/dev/null
+          else
+            gh api --paginate 'repos/matrixorigin/matrixone/pulls/32523/commits?per_page=100' \
+              --jq '.[].sha' | grep -Fx 'b0641dbf3cb1ed67f90f9e4226f0585ba451abc0' >/dev/null
+          fi
       - id: check_in_org
         name: Check organization membership
         env:
@@ -303,18 +310,19 @@ jobs:
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
-          export endpoint='${{ secrets.S3ENDPOINT }}'
-          export region='${{ secrets.S3REGION }}'
-          export apikey='${{ secrets.S3APIKEY }}'
-          export apisecret='${{ secrets.S3APISECRET }}'
-          export bucket='${{ secrets.S3BUCKET }}'
-          export TEST_S3FS_ALIYUN='${{ secrets.TEST_S3FS_ALIYUN }}'
-          export TEST_S3FS_QCLOUD='${{ secrets.TEST_S3FS_QCLOUD }}'
           if [ '${{ inputs.canary_local_minio }}' = 'true' ]; then
             test '${{ inputs.canary_pr_32523 }}' = 'true'
             command -v minio >/dev/null
-            unset TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD
+            unset endpoint region apikey apisecret bucket TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD
             echo '::notice::Local MinIO canary excludes real COS and OSS integration specs; separate cloud validation is required.'
+          else
+            export endpoint='${{ !inputs.canary_local_minio && secrets.S3ENDPOINT || '' }}'
+            export region='${{ !inputs.canary_local_minio && secrets.S3REGION || '' }}'
+            export apikey='${{ !inputs.canary_local_minio && secrets.S3APIKEY || '' }}'
+            export apisecret='${{ !inputs.canary_local_minio && secrets.S3APISECRET || '' }}'
+            export bucket='${{ !inputs.canary_local_minio && secrets.S3BUCKET || '' }}'
+            export TEST_S3FS_ALIYUN='${{ !inputs.canary_local_minio && secrets.TEST_S3FS_ALIYUN || '' }}'
+            export TEST_S3FS_QCLOUD='${{ !inputs.canary_local_minio && secrets.TEST_S3FS_QCLOUD || '' }}'
           fi
           coverage_profile="${RUNNER_TEMP}/ut-coverage.out"
           coverage_report="${RUNNER_TEMP}/ut-coverage-report.json"
