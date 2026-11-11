@@ -3,6 +3,11 @@ name: MatrixOne UT Coverage
 on:
   workflow_call:
     inputs:
+      canary_pr_32523:
+        description: "Run the explicitly pinned PR 32523 canary from the test branch"
+        required: false
+        type: boolean
+        default: false
       runner_label:
         description: "Runner label for UT coverage"
         required: false
@@ -59,11 +64,24 @@ jobs:
     outputs:
       allowed: ${{ steps.eligibility.outputs.allowed }}
     steps:
+      - name: Validate pinned canary context
+        if: ${{ inputs.canary_pr_32523 }}
+        env:
+          GH_TOKEN: ${{ secrets.TOKEN_ACTION }}
+        run: |
+          set -euo pipefail
+          test '${{ github.repository }}' = 'matrixorigin/matrixone'
+          test '${{ github.event_name }}' = 'workflow_dispatch'
+          test '${{ github.ref }}' = 'refs/heads/weilu-runner-test'
+          curl -fsSL -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            https://api.github.com/repos/matrixorigin/matrixone/pulls/32523 |
+            jq -e '.state == "open" and .head.repo.full_name == "iamlinjunhong/matrixone" and .head.sha == "b0641dbf3cb1ed67f90f9e4226f0585ba451abc0" and .user.login == "iamlinjunhong"' >/dev/null
       - id: check_in_org
         name: Check organization membership
         env:
           GH_TOKEN: ${{ secrets.TOKEN_ACTION }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_AUTHOR: ${{ inputs.canary_pr_32523 && 'iamlinjunhong' || github.event.pull_request.user.login }}
         run: |
           set -euo pipefail
           page=1
@@ -86,7 +104,7 @@ jobs:
         name: Check pull request label
         env:
           GH_TOKEN: ${{ secrets.TOKEN_ACTION }}
-          PR_URL: ${{ github.event.pull_request.url }}
+          PR_URL: ${{ inputs.canary_pr_32523 && 'https://api.github.com/repos/matrixorigin/matrixone/pulls/32523' || github.event.pull_request.url }}
         run: |
           set -euo pipefail
           labels=$(curl -fsSL \
@@ -180,8 +198,8 @@ jobs:
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
+          repository: ${{ inputs.canary_pr_32523 && 'iamlinjunhong/matrixone' || github.event.pull_request.head.repo.full_name }}
+          ref: ${{ inputs.canary_pr_32523 && 'b0641dbf3cb1ed67f90f9e4226f0585ba451abc0' || github.event.pull_request.head.sha }}
       - name: Set up Go
         timeout-minutes: 10
         uses: matrixorigin/CI/actions/setup-env@main
