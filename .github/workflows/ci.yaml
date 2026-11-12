@@ -312,7 +312,7 @@ jobs:
           root = Path(os.environ["GITHUB_WORKSPACE"])
           stage = Path(os.environ["RUNNER_TEMP"]) / "ut-diagnostics"
           limit = int(os.environ.get("UT_DIAGNOSTIC_MAX_BYTES", "262144000"))
-          manifest_reserve = 65536
+          manifest_reserve = min(65536, max(0, limit))
           payload_limit = max(0, limit - manifest_reserve)
           if stage.exists():
               shutil.rmtree(stage)
@@ -350,15 +350,22 @@ jobs:
           def priority(path):
               name = path.name
               if is_under(path, ut_report):
+                  # A full raw report can exhaust the artifact budget. Retain
+                  # the actual failures and small run diagnostics first.
+                  if path == ut_report / "failed" / "result.txt":
+                      return 0
+                  if is_under(path, ut_report / "failed" / "outputs"):
+                      return 3
                   return {
-                      "top.txt": 0,
-                      "ut-checkpoint.log": 1,
-                      "ut-report.json": 2,
-                      "ut-stderr.log": 3,
-                  }.get(name, 4)
-              return 5
+                      "ut-stderr.log": 1,
+                      "ut-checkpoint.log": 2,
+                      "ut-report.json": 4,
+                      "top.txt": 5,
+                  }.get(name, 6)
+              return 7
 
           ordered = sorted(files, key=lambda path: (priority(path), str(path)))
+          remaining_critical = sum(priority(path) <= 3 for path in ordered)
           entries = []
           original_total = 0
           stored_total = 0
@@ -424,19 +431,24 @@ jobs:
           for source in ordered:
               relative = source.relative_to(root)
               destination = stage / relative
+              allowed = remaining
+              if priority(source) <= 3:
+                  # One oversized diagnostic must not hide the other failures.
+                  allowed //= remaining_critical
+                  remaining_critical -= 1
               try:
                   size = source.stat().st_size
                   original_total += size
                   destination.parent.mkdir(parents=True, exist_ok=True)
-                  if size <= remaining:
-                      stored = copy_limited(source, destination, remaining)
+                  if size <= allowed:
+                      stored = copy_limited(source, destination, allowed)
                       try:
                           final_size = source.stat().st_size
                       except OSError:
                           final_size = size
                       truncated = stored < final_size
-                  elif remaining >= 128:
-                      stored = copy_head_tail(source, destination, remaining)
+                  elif allowed >= 128:
+                      stored = copy_head_tail(source, destination, allowed)
                       truncated = True
                   else:
                       stored = 0
