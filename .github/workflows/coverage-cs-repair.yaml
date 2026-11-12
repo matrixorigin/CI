@@ -707,7 +707,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ut-coverage-report-attempt-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ut-coverage-incident.md
+          path: |
+            ${{ runner.temp }}/ut-coverage-incident.md
+            ${{ runner.temp }}/ut-coverage.stderr.log
           if-no-files-found: warn
           retention-days: 7
       - id: upload_coverage_diagnostics
@@ -720,6 +722,7 @@ jobs:
           name: ut-coverage-diagnostics-attempt-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/ut-coverage-report.json
+            ${{ runner.temp }}/ut-coverage.stderr.log
             ${{ runner.temp }}/ut-failure-summary.md
             ${{ runner.temp }}/ut-report
             ${{ runner.temp }}/ut-runner-diagnostics.txt

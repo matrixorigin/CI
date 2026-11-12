@@ -28,7 +28,12 @@ def run(packages, profile, coverpkg, parallel, execute=subprocess.run):
     if profile.exists():
         raise ValueError("refusing to overwrite an existing coverage profile")
     status = 0
-    with tempfile.TemporaryDirectory(prefix="coverage-groups-", dir=profile.parent) as directory:
+    # go test writes -coverpkg dependency warnings to stderr. The outer
+    # supervisor merges stderr into its JSON stream, so retain compiler output
+    # separately instead of corrupting the evidence consumed by S3/skip gates.
+    # A nonzero go exit still fails the run; no warning/error text is discarded.
+    with tempfile.TemporaryDirectory(prefix="coverage-groups-", dir=profile.parent) as directory, \
+            profile.with_suffix(".stderr.log").open("xb") as diagnostics:
         parts = []
         for index, group in enumerate(plan):
             part = Path(directory) / f"{index}.out"
@@ -37,7 +42,9 @@ def run(packages, profile, coverpkg, parallel, execute=subprocess.run):
                        "-covermode=set", f"-coverprofile={part}", f"-coverpkg={coverpkg}", *group]
             # Inherit the outer process group so its bounded timeout also
             # terminates this scheduler, go test and all test descendants.
-            result = execute(command)
+            diagnostics.write(f"group={index} package_count={len(group)}\n".encode())
+            diagnostics.flush()
+            result = execute(command, stderr=diagnostics)
             if result.returncode:
                 status = 1
             parts.append(part)
