@@ -4,7 +4,7 @@ set -euo pipefail
 
 make clean
 make config
-make cgo
+make cgo NATIVE_BUILD_JOBS=2
 
 for header in \
     thirdparties/install/include/xxhash.h \
