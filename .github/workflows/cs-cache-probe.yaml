@@ -39,4 +39,4 @@ jobs:
         with:
           flavor: coverage
           transport: registry
-          image: registry.cn-shanghai.aliyuncs.com/matrixorigin/matrixone@sha256:8137d222d3a3b29d119173639cea98931168ab7d886bf882894391f7804d5d88
+          image: registry.cn-shanghai.aliyuncs.com/matrixorigin/matrixone@sha256:a675c572f1014c594411c44031f50946c3f284e8153a18a310cedd286a4854df
