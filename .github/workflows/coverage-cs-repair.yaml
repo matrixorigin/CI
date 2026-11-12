@@ -48,7 +48,7 @@ jobs:
           test "$EVENT_NAME" = workflow_dispatch
           case "$STACK" in mty|mnl2|ruh) ;; *) exit 1 ;; esac
           actual=$(gh api repos/matrixorigin/matrixone/pulls/32590 --jq .head.sha)
-          test "$actual" = b690d40ffcaaceae27fde2a97d6359fb40078b76
+          test "$actual" = 9ebafa87748246a5b144a270ecc26b3a1fb2136c
           ancestry=$(gh api repos/matrixorigin/matrixone/compare/3c389434ff902b262c6d4e8e1b13e5f264e3f0b1..."$actual" --jq .status)
           test "$ancestry" = ahead
           echo allowed=true >> "$GITHUB_OUTPUT"
@@ -138,7 +138,7 @@ jobs:
         with:
           flavor: coverage
           transport: registry
-          image: registry.cn-shanghai.aliyuncs.com/matrixorigin/matrixone@sha256:8137d222d3a3b29d119173639cea98931168ab7d886bf882894391f7804d5d88
+          image: matrixorigin/matrixone@sha256:a675c572f1014c594411c44031f50946c3f284e8153a18a310cedd286a4854df
       - name: Record cache seed outcome
         if: ${{ always() && !cancelled() }}
         timeout-minutes: 5
