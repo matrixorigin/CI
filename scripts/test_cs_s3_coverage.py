@@ -18,7 +18,7 @@ CLOUD_CONFIGS = (
 
 
 class CSS3CoverageTest(unittest.TestCase):
-    def gate(self, configs, *, runner="cs-large-7c14g", trusted=True, canary=False, local=False, jed=False, baseline=False):
+    def gate(self, configs, *, runner="cs-large-7c14g", trusted=True, canary=False, local=False, jed=False, baseline=False, cs_stack="jed"):
         workflow = WORKFLOW.read_text()
         block = workflow.split("      - id: check_coverage_secrets\n", 1)[1].split("      - id: eligibility\n", 1)[0]
         script = textwrap.dedent(block.split("        run: |\n", 1)[1])
@@ -26,7 +26,7 @@ class CSS3CoverageTest(unittest.TestCase):
             "runner_label": runner,
             "canary_pr_32523": str(canary).lower(),
             "canary_local_minio": str(local).lower(),
-            "canary_cs_s3_jed": str(jed).lower(),
+            "canary_cs_s3": str(jed).lower(),
             "canary_skip_baseline": str(baseline).lower(),
         }.items():
             script = script.replace("${{ inputs." + key + " }}", value)
@@ -34,7 +34,7 @@ class CSS3CoverageTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "output"
             env = {"PATH": os.environ["PATH"], "GITHUB_OUTPUT": str(output),
-                   "IN_ORG": "1" if trusted else "0", "SAFE_LABEL": "0"}
+                   "IN_ORG": "1" if trusted else "0", "SAFE_LABEL": "0", "CS_CANARY_ENV": cs_stack}
             env.update({name: "opaque-test-value" for name in configs})
             result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
             self.assertNotIn("opaque-test-value", result.stdout + result.stderr)
@@ -76,6 +76,14 @@ class CSS3CoverageTest(unittest.TestCase):
         self.assertNotEqual(self.gate(CLOUD_CONFIGS, **args)[0], 0)
         self.assertNotEqual(self.gate([], **args)[0], 0)
 
+    def test_each_cs_canary_requires_its_matching_secret(self):
+        for stack in ("mty", "mnl2", "jed", "ruh"):
+            with self.subTest(stack=stack):
+                args = {"runner": f"cs-{stack}-large-7c14g", "trusted": False, "jed": True, "cs_stack": stack}
+                name = f"CS_S3_{stack.upper()}_CONFIG"
+                self.assertIn("ready=true", self.gate([name], **args)[1])
+                self.assertNotEqual(self.gate([value for value in CS_CONFIGS if value != name], **args)[0], 0)
+
     def test_tke_skip_baseline_requires_no_storage_credentials(self):
         code, output, _ = self.gate([], runner="amd64-mo-guangzhou-2xlarge16", baseline=True, trusted=False)
         self.assertEqual(code, 0)
@@ -83,7 +91,7 @@ class CSS3CoverageTest(unittest.TestCase):
 
     def test_jed_canary_pins_context_source_and_runner(self):
         workflow = WORKFLOW.read_text()
-        guard = workflow.split("      - id: jed_context\n", 1)[1].split("      - name: Validate pinned canary context\n", 1)[0]
+        guard = workflow.split("      - id: cs_context\n", 1)[1].split("      - name: Validate pinned canary context\n", 1)[0]
         for required in ("matrixorigin/matrixone", "workflow_dispatch", "refs/heads/weilu-runner-test",
                          "cs-jed-large-7c14g", "pulls/32590", "Ariznawlll/matrixone",
                          "67e3cf40c8445fb429a7a20c0a67b95dec065155"):
@@ -92,34 +100,39 @@ class CSS3CoverageTest(unittest.TestCase):
             self.assertIn("test '${{ inputs." + mode + " }}' = 'false'", guard)
         secrets_block = workflow.split("      - id: check_coverage_secrets\n", 1)[1].split("        run: |\n", 1)[0]
         for name in CLOUD_CONFIGS:
-            self.assertIn(name + ": ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline && secrets." + name + " || '' }}", secrets_block)
+            self.assertIn(name + ": ${{ !inputs.canary_cs_s3 && !inputs.canary_skip_baseline && secrets." + name + " || '' }}", secrets_block)
 
-    def test_jed_context_rejects_other_refs_sources_and_modes(self):
-        block = WORKFLOW.read_text().split("      - id: jed_context\n", 1)[1].split("      - name: Validate pinned canary context\n", 1)[0]
+    def test_cs_context_rejects_other_refs_sources_and_modes(self):
+        block = WORKFLOW.read_text().split("      - id: cs_context\n", 1)[1].split("      - name: Validate pinned canary context\n", 1)[0]
         original = textwrap.dedent(block.split("        run: |\n", 1)[1])
         values = {"github.repository": "matrixorigin/matrixone", "github.event_name": "workflow_dispatch",
                   "github.ref": "refs/heads/weilu-runner-test", "inputs.runner_label": "cs-jed-large-7c14g",
                   "inputs.canary_pr_32523": "false", "inputs.canary_local_minio": "false",
-                  "inputs.canary_cs_s3_jed": "true", "inputs.canary_skip_baseline": "false"}
+                  "inputs.canary_cs_s3": "true", "inputs.canary_skip_baseline": "false"}
         cases = [({}, "true", True), ({}, "false", False)]
         for key in values:
             cases.append(({key: "unexpected"}, "true", False))
-        for changes, api_result, accepted in cases:
-            with self.subTest(changes=changes, api_result=api_result), tempfile.TemporaryDirectory() as directory:
+        scenarios = [(changes, api_result, accepted, "jed") for changes, api_result, accepted in cases]
+        for stack in ("mty", "mnl2", "ruh"):
+            scenarios.append(({"inputs.runner_label": f"cs-{stack}-large-7c14g"}, "true", True, stack))
+            scenarios.append(({}, "true", False, stack))
+        scenarios.append(({}, "true", False, "unexpected"))
+        for changes, api_result, accepted, stack in scenarios:
+            with self.subTest(changes=changes, api_result=api_result, stack=stack), tempfile.TemporaryDirectory() as directory:
                 script = original
                 for key, value in dict(values, **changes).items():
                     script = script.replace("${{ " + key + " }}", value)
                 self.assertNotIn("${{", script)
                 output = Path(directory) / "output"
                 result = subprocess.run(["bash", "-c", "gh() { echo " + api_result + "; };\n" + script],
-                                        env={"PATH": os.environ["PATH"], "GITHUB_OUTPUT": str(output)},
+                                        env={"PATH": os.environ["PATH"], "GITHUB_OUTPUT": str(output), "CS_CANARY_ENV": stack},
                                         capture_output=True, text=True)
                 self.assertEqual(result.returncode == 0, accepted)
                 self.assertEqual(output.exists() and "validated=true" in output.read_text(), accepted)
 
     def test_baseline_uses_same_source_and_excludes_cloud_credentials(self):
         workflow = WORKFLOW.read_text()
-        self.assertIn("(inputs.canary_cs_s3_jed || inputs.canary_skip_baseline) && '67e3cf40c8445fb429a7a20c0a67b95dec065155'", workflow)
+        self.assertIn("(inputs.canary_cs_s3 || inputs.canary_skip_baseline) && '67e3cf40c8445fb429a7a20c0a67b95dec065155'", workflow)
         baseline = workflow.split("if [ '${{ inputs.canary_skip_baseline }}' = 'true' ]; then")[-1].split("elif", 1)[0]
         self.assertIn("unset endpoint region apikey apisecret bucket TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD TEST_S3FS_CS", baseline)
 

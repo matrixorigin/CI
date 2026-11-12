@@ -89,11 +89,27 @@ CI PR in draft until configuration and end-to-end verification are complete.
 Roll out all configured environments together; do not silently reduce the
 production default to JED while other shared-pool configurations are missing.
 
-For pre-merge verification, `canary_cs_s3_jed` is restricted to a manual call
-from `matrixorigin/matrixone:weilu-runner-test` and `cs-jed-large-7c14g`. It
+For pre-merge verification, `canary_cs_s3` is restricted to a manual call
+from `matrixorigin/matrixone:weilu-runner-test`. Its
+`canary_cs_s3_environment` must be one of `mty`, `mnl2`, `jed`, or `ruh`, and
+the runner label must exactly match `cs-<environment>-large-7c14g`. It
 checks PR #32590's owner, repository and exact approved head SHA before using
-only `CS_S3_JED_CONFIG`. The normal shared-pool gate still requires all four
+the matching environment's restricted configuration. The normal shared-pool gate still requires all four
 environment configurations; the canary does not weaken normal PR eligibility.
 This runs the existing all-package Coverage selection, not just the S3 smoke,
 and must observe successful CS S3 basic and streaming-write test events. Real
 COS/OSS provider tests remain explicitly outside this CS validation.
+
+Provisioned dedicated scopes (do not substitute business buckets):
+
+| Environment | Dedicated bucket | Test prefix |
+| --- | --- | --- |
+| MTY | `217855-mo-ci-ut` | `ci-ut/<run-id>-<attempt>/` |
+| MNL2 | `361800-mo-ci-ut` | `ci-ut/<run-id>-<attempt>/` |
+| JED | `mo-ci-ut` | `ci-ut/<run-id>-<attempt>/` |
+| RUH | `589004-mo-ci-ut` | `ci-ut/<run-id>-<attempt>/` |
+
+The configuration secrets contain only restricted service-account credentials,
+not the parent provisioning credentials. Verify signed read/write/list and
+cleanup from the actual matching runner and deny business-bucket access before
+enabling each environment. Provisioning success alone is not UT validation.

@@ -8,11 +8,16 @@ on:
         required: false
         type: boolean
         default: false
-      canary_cs_s3_jed:
-        description: "Pinned PR 32590 Coverage validation using the dedicated JED CI bucket"
+      canary_cs_s3:
+        description: "Pinned PR 32590 Coverage validation using a dedicated environment-local CI bucket"
         required: false
         type: boolean
         default: false
+      canary_cs_s3_environment:
+        description: "Pinned canary environment only; production still uses the shared runner pool"
+        required: false
+        type: string
+        default: jed
       canary_pr_32523:
         description: "Run the explicitly pinned PR 32523 canary from the test branch"
         required: false
@@ -92,19 +97,27 @@ jobs:
     outputs:
       allowed: ${{ steps.eligibility.outputs.allowed }}
     steps:
-      - id: jed_context
+      - id: cs_context
         name: Validate pinned CS S3 comparison context
-        if: ${{ inputs.canary_cs_s3_jed || inputs.canary_skip_baseline }}
+        if: ${{ inputs.canary_cs_s3 || inputs.canary_skip_baseline }}
         env:
           GH_TOKEN: ${{ secrets.TOKEN_ACTION }}
+          CS_CANARY_ENV: ${{ inputs.canary_cs_s3_environment }}
         run: |
           set -euo pipefail
           test '${{ github.repository }}' = 'matrixorigin/matrixone'
           test '${{ github.event_name }}' = 'workflow_dispatch'
           test '${{ github.ref }}' = 'refs/heads/weilu-runner-test'
-          if [ '${{ inputs.canary_cs_s3_jed }}' = 'true' ]; then
+          if [ '${{ inputs.canary_cs_s3 }}' = 'true' ]; then
             test '${{ inputs.canary_skip_baseline }}' = 'false'
-            test '${{ inputs.runner_label }}' = 'cs-jed-large-7c14g'
+            case "${CS_CANARY_ENV}" in
+              mty) expected_runner=cs-mty-large-7c14g ;;
+              mnl2) expected_runner=cs-mnl2-large-7c14g ;;
+              jed) expected_runner=cs-jed-large-7c14g ;;
+              ruh) expected_runner=cs-ruh-large-7c14g ;;
+              *) echo 'Unsupported CS canary environment'; exit 1 ;;
+            esac
+            test '${{ inputs.runner_label }}' = "${expected_runner}"
           else
             test '${{ inputs.canary_skip_baseline }}' = 'true'
             test '${{ inputs.runner_label }}' = 'amd64-mo-guangzhou-2xlarge16'
@@ -124,7 +137,7 @@ jobs:
           test '${{ github.event_name }}' = 'workflow_dispatch'
           test '${{ github.ref }}' = 'refs/heads/weilu-runner-test'
           test '${{ inputs.canary_pr_32523 }}' = 'true'
-          test '${{ inputs.canary_cs_s3_jed }}' = 'false'
+          test '${{ inputs.canary_cs_s3 }}' = 'false'
           test '${{ inputs.canary_skip_baseline }}' = 'false'
           curl -fsSL -H 'Accept: application/vnd.github+json' \
             -H "Authorization: Bearer ${GH_TOKEN}" \
@@ -141,7 +154,7 @@ jobs:
           fi
       - id: check_in_org
         name: Check organization membership
-        if: ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline }}
+        if: ${{ !inputs.canary_cs_s3 && !inputs.canary_skip_baseline }}
         env:
           GH_TOKEN: ${{ secrets.TOKEN_ACTION }}
           PR_AUTHOR: ${{ inputs.canary_pr_32523 && 'iamlinjunhong' || github.event.pull_request.user.login }}
@@ -165,7 +178,7 @@ jobs:
           echo "in_org=${user_in_org}" >> "$GITHUB_OUTPUT"
       - id: check_safe_label
         name: Check pull request label
-        if: ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline }}
+        if: ${{ !inputs.canary_cs_s3 && !inputs.canary_skip_baseline }}
         env:
           GH_TOKEN: ${{ secrets.TOKEN_ACTION }}
           PR_URL: ${{ inputs.canary_pr_32523 && 'https://api.github.com/repos/matrixorigin/matrixone/pulls/32523' || github.event.pull_request.url }}
@@ -184,17 +197,18 @@ jobs:
       - id: check_coverage_secrets
         name: Check coverage secrets
         env:
-          TEST_S3FS_ALIYUN: ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline && secrets.TEST_S3FS_ALIYUN || '' }}
-          TEST_S3FS_QCLOUD: ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline && secrets.TEST_S3FS_QCLOUD || '' }}
-          S3ENDPOINT: ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline && secrets.S3ENDPOINT || '' }}
-          S3REGION: ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline && secrets.S3REGION || '' }}
-          S3APIKEY: ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline && secrets.S3APIKEY || '' }}
-          S3APISECRET: ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline && secrets.S3APISECRET || '' }}
-          S3BUCKET: ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline && secrets.S3BUCKET || '' }}
-          CS_S3_MTY_CONFIG: ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline && secrets.CS_S3_MTY_CONFIG || '' }}
-          CS_S3_MNL2_CONFIG: ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline && secrets.CS_S3_MNL2_CONFIG || '' }}
+          TEST_S3FS_ALIYUN: ${{ !inputs.canary_cs_s3 && !inputs.canary_skip_baseline && secrets.TEST_S3FS_ALIYUN || '' }}
+          TEST_S3FS_QCLOUD: ${{ !inputs.canary_cs_s3 && !inputs.canary_skip_baseline && secrets.TEST_S3FS_QCLOUD || '' }}
+          S3ENDPOINT: ${{ !inputs.canary_cs_s3 && !inputs.canary_skip_baseline && secrets.S3ENDPOINT || '' }}
+          S3REGION: ${{ !inputs.canary_cs_s3 && !inputs.canary_skip_baseline && secrets.S3REGION || '' }}
+          S3APIKEY: ${{ !inputs.canary_cs_s3 && !inputs.canary_skip_baseline && secrets.S3APIKEY || '' }}
+          S3APISECRET: ${{ !inputs.canary_cs_s3 && !inputs.canary_skip_baseline && secrets.S3APISECRET || '' }}
+          S3BUCKET: ${{ !inputs.canary_cs_s3 && !inputs.canary_skip_baseline && secrets.S3BUCKET || '' }}
+          CS_S3_MTY_CONFIG: ${{ !inputs.canary_skip_baseline && secrets.CS_S3_MTY_CONFIG || '' }}
+          CS_S3_MNL2_CONFIG: ${{ !inputs.canary_skip_baseline && secrets.CS_S3_MNL2_CONFIG || '' }}
           CS_S3_JED_CONFIG: ${{ !inputs.canary_skip_baseline && secrets.CS_S3_JED_CONFIG || '' }}
-          CS_S3_RUH_CONFIG: ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline && secrets.CS_S3_RUH_CONFIG || '' }}
+          CS_S3_RUH_CONFIG: ${{ !inputs.canary_skip_baseline && secrets.CS_S3_RUH_CONFIG || '' }}
+          CS_CANARY_ENV: ${{ inputs.canary_cs_s3_environment }}
           IN_ORG: ${{ steps.check_in_org.outputs.in_org }}
           SAFE_LABEL: ${{ steps.check_safe_label.outputs.safe_label }}
         run: |
@@ -202,8 +216,14 @@ jobs:
           missing=()
           if [ '${{ inputs.canary_skip_baseline }}' = 'true' ]; then
             required=()
-          elif [ '${{ inputs.canary_cs_s3_jed }}' = 'true' ]; then
-            required=(CS_S3_JED_CONFIG)
+          elif [ '${{ inputs.canary_cs_s3 }}' = 'true' ]; then
+            case "${CS_CANARY_ENV}" in
+              mty) required=(CS_S3_MTY_CONFIG) ;;
+              mnl2) required=(CS_S3_MNL2_CONFIG) ;;
+              jed) required=(CS_S3_JED_CONFIG) ;;
+              ruh) required=(CS_S3_RUH_CONFIG) ;;
+              *) echo 'Unsupported CS canary environment'; exit 1 ;;
+            esac
           elif [ '${{ inputs.canary_local_minio }}' = 'true' ]; then
             # The pinned-context step already validates this secret-free mode.
             required=()
@@ -221,7 +241,7 @@ jobs:
             echo 'ready=true' >> "$GITHUB_OUTPUT"
           else
             echo 'ready=false' >> "$GITHUB_OUTPUT"
-            if [ '${{ inputs.canary_cs_s3_jed }}' = 'true' ] || { [[ '${{ inputs.runner_label }}' == cs-* ]] && [ '${{ inputs.canary_pr_32523 }}' != 'true' ] && { [ "${IN_ORG}" = '1' ] || [ "${SAFE_LABEL}" = '1' ]; }; }; then
+            if [ '${{ inputs.canary_cs_s3 }}' = 'true' ] || { [[ '${{ inputs.runner_label }}' == cs-* ]] && [ '${{ inputs.canary_pr_32523 }}' != 'true' ] && { [ "${IN_ORG}" = '1' ] || [ "${SAFE_LABEL}" = '1' ]; }; }; then
               echo "::error::CS runner S3 configurations must be set before enabling Coverage: ${missing[*]}"
               exit 1
             fi
@@ -233,10 +253,10 @@ jobs:
           IN_ORG: ${{ steps.check_in_org.outputs.in_org }}
           SAFE_LABEL: ${{ steps.check_safe_label.outputs.safe_label }}
           SECRETS_READY: ${{ steps.check_coverage_secrets.outputs.ready }}
-          JED_CONTEXT_VALIDATED: ${{ steps.jed_context.outputs.validated }}
+          CS_CONTEXT_VALIDATED: ${{ steps.cs_context.outputs.validated }}
         run: |
           set -euo pipefail
-          if { [ "${IN_ORG}" = '1' ] || [ "${SAFE_LABEL}" = '1' ] || [ "${JED_CONTEXT_VALIDATED}" = 'true' ]; } && [ "${SECRETS_READY}" = 'true' ]; then
+          if { [ "${IN_ORG}" = '1' ] || [ "${SAFE_LABEL}" = '1' ] || [ "${CS_CONTEXT_VALIDATED}" = 'true' ]; } && [ "${SECRETS_READY}" = 'true' ]; then
             echo 'allowed=true' >> "$GITHUB_OUTPUT"
           else
             echo 'allowed=false' >> "$GITHUB_OUTPUT"
@@ -290,8 +310,8 @@ jobs:
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
-          repository: ${{ (inputs.canary_cs_s3_jed || inputs.canary_skip_baseline) && 'Ariznawlll/matrixone' || inputs.canary_pr_32523 && 'iamlinjunhong/matrixone' || github.event.pull_request.head.repo.full_name }}
-          ref: ${{ (inputs.canary_cs_s3_jed || inputs.canary_skip_baseline) && '67e3cf40c8445fb429a7a20c0a67b95dec065155' || inputs.canary_pr_32523 && 'b0641dbf3cb1ed67f90f9e4226f0585ba451abc0' || github.event.pull_request.head.sha }}
+          repository: ${{ (inputs.canary_cs_s3 || inputs.canary_skip_baseline) && 'Ariznawlll/matrixone' || inputs.canary_pr_32523 && 'iamlinjunhong/matrixone' || github.event.pull_request.head.repo.full_name }}
+          ref: ${{ (inputs.canary_cs_s3 || inputs.canary_skip_baseline) && '67e3cf40c8445fb429a7a20c0a67b95dec065155' || inputs.canary_pr_32523 && 'b0641dbf3cb1ed67f90f9e4226f0585ba451abc0' || github.event.pull_request.head.sha }}
           persist-credentials: false
       - name: Set up Go
         timeout-minutes: 10
