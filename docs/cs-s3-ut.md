@@ -42,3 +42,12 @@ Before rollout, run the isolated MinIO smoke (including an unrelated sentinel
 object and failure-path cleanup tests), then a real S3 smoke from each runner
 environment with the approved credentials, and finally PR Coverage. Keep the
 CI PR in draft until configuration and end-to-end verification are complete.
+
+For pre-merge verification, `canary_cs_s3_jed` is restricted to a manual call
+from `matrixorigin/matrixone:weilu-runner-test` and `cs-jed-large-7c14g`. It
+checks PR #32590's owner, repository and exact approved head SHA before using
+only `CS_S3_JED_CONFIG`. The normal shared-pool gate still requires all four
+environment configurations; the canary does not weaken normal PR eligibility.
+This runs the existing all-package Coverage selection, not just the S3 smoke,
+and must observe successful CS S3 basic and streaming-write test events. Real
+COS/OSS provider tests remain explicitly outside this CS validation.

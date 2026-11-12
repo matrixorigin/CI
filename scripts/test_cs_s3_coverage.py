@@ -18,7 +18,7 @@ CLOUD_CONFIGS = (
 
 
 class CSS3CoverageTest(unittest.TestCase):
-    def gate(self, configs, *, runner="cs-large-7c14g", trusted=True, canary=False, local=False):
+    def gate(self, configs, *, runner="cs-large-7c14g", trusted=True, canary=False, local=False, jed=False):
         workflow = WORKFLOW.read_text()
         block = workflow.split("      - id: check_coverage_secrets\n", 1)[1].split("      - id: eligibility\n", 1)[0]
         script = textwrap.dedent(block.split("        run: |\n", 1)[1])
@@ -26,6 +26,7 @@ class CSS3CoverageTest(unittest.TestCase):
             "runner_label": runner,
             "canary_pr_32523": str(canary).lower(),
             "canary_local_minio": str(local).lower(),
+            "canary_cs_s3_jed": str(jed).lower(),
         }.items():
             script = script.replace("${{ inputs." + key + " }}", value)
         self.assertNotIn("${{", script)
@@ -67,6 +68,47 @@ class CSS3CoverageTest(unittest.TestCase):
             with self.subTest(args=args):
                 self.assertIn("ready=true", self.gate(CLOUD_CONFIGS, **args)[1])
                 self.assertIn("ready=false", self.gate(CS_CONFIGS, **args)[1])
+
+    def test_jed_canary_requires_only_dedicated_jed_secret(self):
+        args = {"runner": "cs-jed-large-7c14g", "trusted": False, "jed": True}
+        self.assertIn("ready=true", self.gate(["CS_S3_JED_CONFIG"], **args)[1])
+        self.assertNotEqual(self.gate(CLOUD_CONFIGS, **args)[0], 0)
+        self.assertNotEqual(self.gate([], **args)[0], 0)
+
+    def test_jed_canary_pins_context_source_and_runner(self):
+        workflow = WORKFLOW.read_text()
+        guard = workflow.split("      - id: jed_context\n", 1)[1].split("      - name: Validate pinned canary context\n", 1)[0]
+        for required in ("matrixorigin/matrixone", "workflow_dispatch", "refs/heads/weilu-runner-test",
+                         "cs-jed-large-7c14g", "pulls/32590", "Ariznawlll/matrixone",
+                         "67e3cf40c8445fb429a7a20c0a67b95dec065155"):
+            self.assertIn(required, guard)
+        for mode in ("canary_pr_32523", "canary_local_minio"):
+            self.assertIn("test '${{ inputs." + mode + " }}' = 'false'", guard)
+        secrets_block = workflow.split("      - id: check_coverage_secrets\n", 1)[1].split("        run: |\n", 1)[0]
+        for name in CLOUD_CONFIGS:
+            self.assertIn(name + ": ${{ !inputs.canary_cs_s3_jed && secrets." + name + " || '' }}", secrets_block)
+
+    def test_jed_context_rejects_other_refs_sources_and_modes(self):
+        block = WORKFLOW.read_text().split("      - id: jed_context\n", 1)[1].split("      - name: Validate pinned canary context\n", 1)[0]
+        original = textwrap.dedent(block.split("        run: |\n", 1)[1])
+        values = {"github.repository": "matrixorigin/matrixone", "github.event_name": "workflow_dispatch",
+                  "github.ref": "refs/heads/weilu-runner-test", "inputs.runner_label": "cs-jed-large-7c14g",
+                  "inputs.canary_pr_32523": "false", "inputs.canary_local_minio": "false"}
+        cases = [({}, "true", True), ({}, "false", False)]
+        for key in values:
+            cases.append(({key: "unexpected"}, "true", False))
+        for changes, api_result, accepted in cases:
+            with self.subTest(changes=changes, api_result=api_result), tempfile.TemporaryDirectory() as directory:
+                script = original
+                for key, value in dict(values, **changes).items():
+                    script = script.replace("${{ " + key + " }}", value)
+                self.assertNotIn("${{", script)
+                output = Path(directory) / "output"
+                result = subprocess.run(["bash", "-c", "gh() { echo " + api_result + "; };\n" + script],
+                                        env={"PATH": os.environ["PATH"], "GITHUB_OUTPUT": str(output)},
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode == 0, accepted)
+                self.assertEqual(output.exists() and "validated=true" in output.read_text(), accepted)
 
     def test_runner_selects_only_its_own_secret(self):
         workflow = WORKFLOW.read_text()

@@ -3,6 +3,11 @@ name: MatrixOne UT Coverage
 on:
   workflow_call:
     inputs:
+      canary_cs_s3_jed:
+        description: "Pinned PR 32590 Coverage validation using the dedicated JED CI bucket"
+        required: false
+        type: boolean
+        default: false
       canary_pr_32523:
         description: "Run the explicitly pinned PR 32523 canary from the test branch"
         required: false
@@ -82,6 +87,22 @@ jobs:
     outputs:
       allowed: ${{ steps.eligibility.outputs.allowed }}
     steps:
+      - id: jed_context
+        name: Validate pinned JED S3 canary context
+        if: ${{ inputs.canary_cs_s3_jed }}
+        env:
+          GH_TOKEN: ${{ secrets.TOKEN_ACTION }}
+        run: |
+          set -euo pipefail
+          test '${{ github.repository }}' = 'matrixorigin/matrixone'
+          test '${{ github.event_name }}' = 'workflow_dispatch'
+          test '${{ github.ref }}' = 'refs/heads/weilu-runner-test'
+          test '${{ inputs.runner_label }}' = 'cs-jed-large-7c14g'
+          test '${{ inputs.canary_pr_32523 }}' = 'false'
+          test '${{ inputs.canary_local_minio }}' = 'false'
+          gh api repos/matrixorigin/matrixone/pulls/32590 --jq \
+            '.state == "open" and .user.login == "Ariznawlll" and .head.repo.full_name == "Ariznawlll/matrixone" and .head.sha == "67e3cf40c8445fb429a7a20c0a67b95dec065155"' | grep -Fx true >/dev/null
+          echo 'validated=true' >> "$GITHUB_OUTPUT"
       - name: Validate pinned canary context
         if: ${{ inputs.canary_pr_32523 || inputs.canary_local_minio }}
         env:
@@ -107,6 +128,7 @@ jobs:
           fi
       - id: check_in_org
         name: Check organization membership
+        if: ${{ !inputs.canary_cs_s3_jed }}
         env:
           GH_TOKEN: ${{ secrets.TOKEN_ACTION }}
           PR_AUTHOR: ${{ inputs.canary_pr_32523 && 'iamlinjunhong' || github.event.pull_request.user.login }}
@@ -130,6 +152,7 @@ jobs:
           echo "in_org=${user_in_org}" >> "$GITHUB_OUTPUT"
       - id: check_safe_label
         name: Check pull request label
+        if: ${{ !inputs.canary_cs_s3_jed }}
         env:
           GH_TOKEN: ${{ secrets.TOKEN_ACTION }}
           PR_URL: ${{ inputs.canary_pr_32523 && 'https://api.github.com/repos/matrixorigin/matrixone/pulls/32523' || github.event.pull_request.url }}
@@ -148,23 +171,25 @@ jobs:
       - id: check_coverage_secrets
         name: Check coverage secrets
         env:
-          TEST_S3FS_ALIYUN: ${{ secrets.TEST_S3FS_ALIYUN }}
-          TEST_S3FS_QCLOUD: ${{ secrets.TEST_S3FS_QCLOUD }}
-          S3ENDPOINT: ${{ secrets.S3ENDPOINT }}
-          S3REGION: ${{ secrets.S3REGION }}
-          S3APIKEY: ${{ secrets.S3APIKEY }}
-          S3APISECRET: ${{ secrets.S3APISECRET }}
-          S3BUCKET: ${{ secrets.S3BUCKET }}
-          CS_S3_MTY_CONFIG: ${{ secrets.CS_S3_MTY_CONFIG }}
-          CS_S3_MNL2_CONFIG: ${{ secrets.CS_S3_MNL2_CONFIG }}
+          TEST_S3FS_ALIYUN: ${{ !inputs.canary_cs_s3_jed && secrets.TEST_S3FS_ALIYUN || '' }}
+          TEST_S3FS_QCLOUD: ${{ !inputs.canary_cs_s3_jed && secrets.TEST_S3FS_QCLOUD || '' }}
+          S3ENDPOINT: ${{ !inputs.canary_cs_s3_jed && secrets.S3ENDPOINT || '' }}
+          S3REGION: ${{ !inputs.canary_cs_s3_jed && secrets.S3REGION || '' }}
+          S3APIKEY: ${{ !inputs.canary_cs_s3_jed && secrets.S3APIKEY || '' }}
+          S3APISECRET: ${{ !inputs.canary_cs_s3_jed && secrets.S3APISECRET || '' }}
+          S3BUCKET: ${{ !inputs.canary_cs_s3_jed && secrets.S3BUCKET || '' }}
+          CS_S3_MTY_CONFIG: ${{ !inputs.canary_cs_s3_jed && secrets.CS_S3_MTY_CONFIG || '' }}
+          CS_S3_MNL2_CONFIG: ${{ !inputs.canary_cs_s3_jed && secrets.CS_S3_MNL2_CONFIG || '' }}
           CS_S3_JED_CONFIG: ${{ secrets.CS_S3_JED_CONFIG }}
-          CS_S3_RUH_CONFIG: ${{ secrets.CS_S3_RUH_CONFIG }}
+          CS_S3_RUH_CONFIG: ${{ !inputs.canary_cs_s3_jed && secrets.CS_S3_RUH_CONFIG || '' }}
           IN_ORG: ${{ steps.check_in_org.outputs.in_org }}
           SAFE_LABEL: ${{ steps.check_safe_label.outputs.safe_label }}
         run: |
           set -euo pipefail
           missing=()
-          if [ '${{ inputs.canary_local_minio }}' = 'true' ]; then
+          if [ '${{ inputs.canary_cs_s3_jed }}' = 'true' ]; then
+            required=(CS_S3_JED_CONFIG)
+          elif [ '${{ inputs.canary_local_minio }}' = 'true' ]; then
             # The pinned-context step already validates this secret-free mode.
             required=()
           elif [[ '${{ inputs.runner_label }}' == cs-* ]] && [ '${{ inputs.canary_pr_32523 }}' != 'true' ]; then
@@ -181,7 +206,7 @@ jobs:
             echo 'ready=true' >> "$GITHUB_OUTPUT"
           else
             echo 'ready=false' >> "$GITHUB_OUTPUT"
-            if [[ '${{ inputs.runner_label }}' == cs-* ]] && [ '${{ inputs.canary_pr_32523 }}' != 'true' ] && { [ "${IN_ORG}" = '1' ] || [ "${SAFE_LABEL}" = '1' ]; }; then
+            if [ '${{ inputs.canary_cs_s3_jed }}' = 'true' ] || { [[ '${{ inputs.runner_label }}' == cs-* ]] && [ '${{ inputs.canary_pr_32523 }}' != 'true' ] && { [ "${IN_ORG}" = '1' ] || [ "${SAFE_LABEL}" = '1' ]; }; }; then
               echo "::error::CS runner S3 configurations must be set before enabling Coverage: ${missing[*]}"
               exit 1
             fi
@@ -193,9 +218,10 @@ jobs:
           IN_ORG: ${{ steps.check_in_org.outputs.in_org }}
           SAFE_LABEL: ${{ steps.check_safe_label.outputs.safe_label }}
           SECRETS_READY: ${{ steps.check_coverage_secrets.outputs.ready }}
+          JED_CONTEXT_VALIDATED: ${{ steps.jed_context.outputs.validated }}
         run: |
           set -euo pipefail
-          if { [ "${IN_ORG}" = '1' ] || [ "${SAFE_LABEL}" = '1' ]; } && [ "${SECRETS_READY}" = 'true' ]; then
+          if { [ "${IN_ORG}" = '1' ] || [ "${SAFE_LABEL}" = '1' ] || [ "${JED_CONTEXT_VALIDATED}" = 'true' ]; } && [ "${SECRETS_READY}" = 'true' ]; then
             echo 'allowed=true' >> "$GITHUB_OUTPUT"
           else
             echo 'allowed=false' >> "$GITHUB_OUTPUT"
@@ -229,8 +255,12 @@ jobs:
         timeout-minutes: 10
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config python3 python-is-python3
+          if command -v gcc && command -v g++ && command -v make && command -v pkg-config && command -v python; then
+            echo 'Build dependencies are already available.'
+          else
+            sudo apt-get -o Acquire::ForceIPv4=true update
+            sudo apt-get -o Acquire::ForceIPv4=true install -y build-essential pkg-config python3 python-is-python3
+          fi
       - name: Checkout MatrixOne source
         # Low-speed limits apply after connection; proxy CONNECT/TLS stalls
         # can still consume libcurl's 300s connection timeout. The 10m step
@@ -244,8 +274,9 @@ jobs:
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
-          repository: ${{ inputs.canary_pr_32523 && 'iamlinjunhong/matrixone' || github.event.pull_request.head.repo.full_name }}
-          ref: ${{ inputs.canary_pr_32523 && 'b0641dbf3cb1ed67f90f9e4226f0585ba451abc0' || github.event.pull_request.head.sha }}
+          repository: ${{ inputs.canary_cs_s3_jed && 'Ariznawlll/matrixone' || inputs.canary_pr_32523 && 'iamlinjunhong/matrixone' || github.event.pull_request.head.repo.full_name }}
+          ref: ${{ inputs.canary_cs_s3_jed && '67e3cf40c8445fb429a7a20c0a67b95dec065155' || inputs.canary_pr_32523 && 'b0641dbf3cb1ed67f90f9e4226f0585ba451abc0' || github.event.pull_request.head.sha }}
+          persist-credentials: false
       - name: Set up Go
         timeout-minutes: 10
         uses: matrixorigin/CI/actions/setup-env@main
