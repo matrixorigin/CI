@@ -1,5 +1,6 @@
-"""Contract checks for the CS S3 Coverage path; no network or credentials."""
+"""Production CS Coverage contracts; no network or real credentials."""
 
+import json
 import os
 from pathlib import Path
 import re
@@ -9,170 +10,110 @@ import textwrap
 import unittest
 
 
-WORKFLOW = Path(__file__).parents[1] / ".github/workflows/coverage-ut.yaml"
-CS_CONFIGS = tuple(f"CS_S3_{stack}_CONFIG" for stack in ("MTY", "MNL2", "JED", "RUH"))
-CLOUD_CONFIGS = (
-    "TEST_S3FS_ALIYUN", "TEST_S3FS_QCLOUD", "S3ENDPOINT", "S3REGION",
-    "S3APIKEY", "S3APISECRET", "S3BUCKET",
-)
+WORKFLOW = (Path(__file__).parents[1] / ".github/workflows/coverage-ut.yaml").read_text()
+STACKS = ("mty", "mnl2", "jed", "ruh")
+CONFIGS = tuple(f"CS_S3_{stack.upper()}_CONFIG" for stack in STACKS)
+
+
+def step_script(step):
+    block = re.split(r"\n(?:      - |  [\w-]+:)",
+                     WORKFLOW.split(f"      - id: {step}\n", 1)[1], maxsplit=1)[0]
+    return textwrap.dedent(block.split("        run: |\n", 1)[1])
 
 
 class CSS3CoverageTest(unittest.TestCase):
-    def gate(self, configs, *, runner="cs-large-7c14g", trusted=True, canary=False, local=False, jed=False, baseline=False, cs_stack="jed"):
-        workflow = WORKFLOW.read_text()
-        block = workflow.split("      - id: check_coverage_secrets\n", 1)[1].split("      - id: eligibility\n", 1)[0]
-        script = textwrap.dedent(block.split("        run: |\n", 1)[1])
-        for key, value in {
-            "runner_label": runner,
-            "canary_pr_32523": str(canary).lower(),
-            "canary_local_minio": str(local).lower(),
-            "canary_cs_s3": str(jed).lower(),
-            "canary_skip_baseline": str(baseline).lower(),
-        }.items():
-            script = script.replace("${{ inputs." + key + " }}", value)
-        self.assertNotIn("${{", script)
+    def gate(self, configs, *, member="1", label="0"):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "output"
-            env = {"PATH": os.environ["PATH"], "GITHUB_OUTPUT": str(output),
-                   "IN_ORG": "1" if trusted else "0", "SAFE_LABEL": "0", "CS_CANARY_ENV": cs_stack}
+            env = dict(PATH=os.environ["PATH"], GITHUB_OUTPUT=str(output), IN_ORG=member, SAFE_LABEL=label)
             env.update({name: "opaque-test-value" for name in configs})
-            result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
+            result = subprocess.run(["bash", "-c", step_script("check_coverage_secrets")],
+                                    env=env, capture_output=True, text=True)
             self.assertNotIn("opaque-test-value", result.stdout + result.stderr)
-            return result.returncode, output.read_text(), result.stdout
+            return result.returncode, output.read_text()
 
-    def test_all_cs_environments_required_for_shared_pool(self):
-        code, output, _ = self.gate(CS_CONFIGS)
-        self.assertEqual(code, 0)
-        self.assertIn("ready=true", output)
-        for missing in CS_CONFIGS:
+    def test_all_environments_required(self):
+        self.assertEqual(self.gate(CONFIGS), (0, "ready=true\n"))
+        for missing in CONFIGS:
             with self.subTest(missing=missing):
-                code, output, log = self.gate([name for name in CS_CONFIGS if name != missing])
+                code, output = self.gate([name for name in CONFIGS if name != missing])
                 self.assertNotEqual(code, 0)
-                self.assertIn("ready=false", output)
-                self.assertIn(missing, log)
+                self.assertEqual(output, "ready=false\n")
+        self.assertNotEqual(self.gate([], member="0", label="1")[0], 0)
+        self.assertEqual(self.gate([], member="0"), (0, "ready=false\n"))
 
-    def test_cloud_credentials_do_not_substitute_for_cs(self):
-        self.assertNotEqual(self.gate(CLOUD_CONFIGS)[0], 0)
-
-    def test_untrusted_pr_does_not_require_secrets(self):
-        code, output, _ = self.gate([], trusted=False)
-        self.assertEqual(code, 0)
-        self.assertIn("ready=false", output)
-
-    def test_secret_free_local_canary(self):
-        code, output, _ = self.gate([], canary=True, local=True)
-        self.assertEqual(code, 0)
-        self.assertIn("ready=true", output)
-
-    def test_legacy_tke_and_real_cloud_canary_keep_original_requirements(self):
-        for args in ({"runner": "amd64-tke"}, {"canary": True}):
-            with self.subTest(args=args):
-                self.assertIn("ready=true", self.gate(CLOUD_CONFIGS, **args)[1])
-                self.assertIn("ready=false", self.gate(CS_CONFIGS, **args)[1])
-
-    def test_jed_canary_requires_only_dedicated_jed_secret(self):
-        args = {"runner": "cs-jed-large-7c14g", "trusted": False, "jed": True}
-        self.assertIn("ready=true", self.gate(["CS_S3_JED_CONFIG"], **args)[1])
-        self.assertNotEqual(self.gate(CLOUD_CONFIGS, **args)[0], 0)
-        self.assertNotEqual(self.gate([], **args)[0], 0)
-
-    def test_each_cs_canary_requires_its_matching_secret(self):
-        for stack in ("mty", "mnl2", "jed", "ruh"):
-            with self.subTest(stack=stack):
-                args = {"runner": f"cs-{stack}-large-7c14g", "trusted": False, "jed": True, "cs_stack": stack}
-                name = f"CS_S3_{stack.upper()}_CONFIG"
-                self.assertIn("ready=true", self.gate([name], **args)[1])
-                self.assertNotEqual(self.gate([value for value in CS_CONFIGS if value != name], **args)[0], 0)
-
-    def test_tke_skip_baseline_requires_no_storage_credentials(self):
-        code, output, _ = self.gate([], runner="amd64-mo-guangzhou-2xlarge16", baseline=True, trusted=False)
-        self.assertEqual(code, 0)
-        self.assertIn("ready=true", output)
-
-    def test_jed_canary_pins_context_source_and_runner(self):
-        workflow = WORKFLOW.read_text()
-        guard = workflow.split("      - id: cs_context\n", 1)[1].split("      - name: Validate pinned canary context\n", 1)[0]
-        for required in ("matrixorigin/matrixone", "workflow_dispatch", "refs/heads/weilu-runner-test",
-                         "cs-jed-large-7c14g", "pulls/32590", "Ariznawlll/matrixone",
-                         "67e3cf40c8445fb429a7a20c0a67b95dec065155"):
-            self.assertIn(required, guard)
-        for mode in ("canary_pr_32523", "canary_local_minio", "canary_skip_baseline"):
-            self.assertIn("test '${{ inputs." + mode + " }}' = 'false'", guard)
-        secrets_block = workflow.split("      - id: check_coverage_secrets\n", 1)[1].split("        run: |\n", 1)[0]
-        for name in CLOUD_CONFIGS:
-            self.assertIn(name + ": ${{ !inputs.canary_cs_s3 && !inputs.canary_skip_baseline && secrets." + name + " || '' }}", secrets_block)
-
-    def test_cs_context_rejects_other_refs_sources_and_modes(self):
-        block = WORKFLOW.read_text().split("      - id: cs_context\n", 1)[1].split("      - name: Validate pinned canary context\n", 1)[0]
-        original = textwrap.dedent(block.split("        run: |\n", 1)[1])
-        values = {"github.repository": "matrixorigin/matrixone", "github.event_name": "workflow_dispatch",
-                  "github.ref": "refs/heads/weilu-runner-test", "inputs.runner_label": "cs-jed-large-7c14g",
-                  "inputs.canary_pr_32523": "false", "inputs.canary_local_minio": "false",
-                  "inputs.canary_cs_s3": "true", "inputs.canary_skip_baseline": "false"}
-        cases = [({}, "true", True), ({}, "false", False)]
-        for key in values:
-            cases.append(({key: "unexpected"}, "true", False))
-        scenarios = [(changes, api_result, accepted, "jed") for changes, api_result, accepted in cases]
-        for stack in ("mty", "mnl2", "ruh"):
-            scenarios.append(({"inputs.runner_label": f"cs-{stack}-large-7c14g"}, "true", True, stack))
-            scenarios.append(({}, "true", False, stack))
-        scenarios.append(({}, "true", False, "unexpected"))
-        for changes, api_result, accepted, stack in scenarios:
-            with self.subTest(changes=changes, api_result=api_result, stack=stack), tempfile.TemporaryDirectory() as directory:
-                script = original
-                for key, value in dict(values, **changes).items():
-                    script = script.replace("${{ " + key + " }}", value)
-                self.assertNotIn("${{", script)
+    def test_normal_pr_trust_gate_preserved(self):
+        for member, label, ready, allowed in (("0", "0", "true", False), ("1", "0", "true", True),
+                                             ("0", "1", "true", True), ("1", "0", "false", False)):
+            with self.subTest(member=member, label=label, ready=ready), tempfile.TemporaryDirectory() as directory:
                 output = Path(directory) / "output"
-                result = subprocess.run(["bash", "-c", "gh() { echo " + api_result + "; };\n" + script],
-                                        env={"PATH": os.environ["PATH"], "GITHUB_OUTPUT": str(output), "CS_CANARY_ENV": stack},
-                                        capture_output=True, text=True)
-                self.assertEqual(result.returncode == 0, accepted)
-                self.assertEqual(output.exists() and "validated=true" in output.read_text(), accepted)
+                result = subprocess.run(["bash", "-c", step_script("eligibility")], capture_output=True,
+                                        env=dict(PATH=os.environ["PATH"], GITHUB_OUTPUT=str(output),
+                                                 IN_ORG=member, SAFE_LABEL=label, SECRETS_READY=ready))
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(output.read_text(), f"allowed={str(allowed).lower()}\n")
 
-    def test_baseline_uses_same_source_and_excludes_cloud_credentials(self):
-        workflow = WORKFLOW.read_text()
-        self.assertIn("(inputs.canary_cs_s3 || inputs.canary_skip_baseline) && '67e3cf40c8445fb429a7a20c0a67b95dec065155'", workflow)
-        baseline = workflow.split("if [ '${{ inputs.canary_skip_baseline }}' = 'true' ]; then")[-1].split("elif", 1)[0]
-        self.assertIn("unset endpoint region apikey apisecret bucket TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD TEST_S3FS_CS", baseline)
+    def test_shared_pool_and_pr_source_without_experiment_inputs(self):
+        self.assertIn("runs-on: cs-large-7c14g", WORKFLOW)
+        for field, value in (("PR_AUTHOR", "user.login"), ("PR_URL", "url"),
+                             ("repository", "head.repo.full_name"), ("ref", "head.sha")):
+            self.assertIn(field + ": ${{ github.event.pull_request." + value + " }}", WORKFLOW)
+        self.assertNotRegex(WORKFLOW, r"inputs\.(canary_\w+|runner_label)|weilu-runner-test|pulls/325\d+|minio-source")
+        self.assertNotRegex(WORKFLOW, r"secrets\.(TEST_S3FS_(ALIYUN|QCLOUD)|S3\w+)")
+        self.assertIn('COVERAGE_UT_PACKAGE_PARALLELISM: "8"', WORKFLOW)
 
-    def test_skip_artifact_is_not_failure_only(self):
-        workflow = WORKFLOW.read_text()
-        step = workflow.split("      - id: skip_manifest\n", 1)[1].split("      - id: upload_coverage_report\n", 1)[0]
-        self.assertIn("always() && !cancelled()", step)
-        self.assertNotIn("outcome == 'failure'", step)
-        self.assertIn("ut-coverage-skip-manifest.json", step)
-
-    def test_runner_selects_only_its_own_secret(self):
-        workflow = WORKFLOW.read_text()
-        expression = next(line for line in workflow.splitlines() if "TEST_S3FS_CS: ${{" in line)
-        mappings = re.findall(r"startsWith\(runner.name, '([^']+)'\) && secrets\.(\w+)", expression)
-        self.assertEqual(mappings, [(f"cs-{stack.lower()}-", f"CS_S3_{stack}_CONFIG")
-                                    for stack in ("MTY", "MNL2", "JED", "RUH")])
-        self.assertTrue(expression.endswith("|| '' }}"))
-        self.assertIn('test -n "${TEST_S3FS_CS:-}"', workflow)
-        # Evaluate the restricted startsWith/&&/|| expression with opaque values.
-        expr = expression.split("${{", 1)[1].split("}}", 1)[0].strip()
-        for stack in ("mty", "mnl2", "jed", "ruh", "unknown"):
+    def test_runner_selects_only_its_own_storage(self):
+        for stack in (*STACKS, "unknown"):
             for missing in (False, True):
-                candidate = expr.replace("!inputs.canary_pr_32523", "True")
-                candidate = candidate.replace("&&", " and ").replace("||", " or ")
-                candidate = re.sub(r"startsWith\(runner.name, '([^']+)'\)",
-                                   lambda match: str(f"cs-{stack}-large-7c14g-runner-abc".startswith(match[1])), candidate)
-                for env in ("MTY", "MNL2", "JED", "RUH"):
-                    value = "" if missing and env.lower() == stack else env
-                    candidate = candidate.replace(f"secrets.CS_S3_{env}_CONFIG", repr(value))
-                expected = "" if missing or stack == "unknown" else stack.upper()
-                self.assertEqual(eval(candidate, {"__builtins__": {}}), expected)
-        self.assertIn("Unknown CS runner environment", workflow)
+                for field in ("CS_S3_ENV", "TEST_S3FS_CS"):
+                    with self.subTest(stack=stack, missing=missing, field=field):
+                        expression = next(line.split("${{", 1)[1].split("}}", 1)[0]
+                                          for line in WORKFLOW.splitlines() if f"{field}: ${{{{" in line)
+                        expression = re.sub(r"startsWith\(runner.name, '([^']+)'\)",
+                                            lambda m: str(f"cs-{stack}-large-7c14g-runner".startswith(m[1])), expression)
+                        for env in STACKS:
+                            value = "" if missing and env == stack else env
+                            expression = expression.replace(f"secrets.CS_S3_{env.upper()}_CONFIG", repr(value))
+                        expression = expression.replace("&&", " and ").replace("||", " or ")
+                        expected = "" if stack == "unknown" or (missing and field == "TEST_S3FS_CS") else stack
+                        self.assertEqual(eval(expression, {"__builtins__": {}}), expected)
 
-    def test_missing_or_skipped_cs_tests_cannot_pass(self):
-        workflow = WORKFLOW.read_text()
-        self.assertIn("TestObjectStorages/cs-s3/minio/basic", workflow)
-        self.assertIn("TestS3FSFromSpecs/cs-s3/streaming_write", workflow)
-        self.assertIn('select(.Action == "pass"', workflow)
-        self.assertIn('export MO_CI_S3_PREFIX="ci-ut/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"', workflow)
-        self.assertIn("unset endpoint region apikey apisecret bucket TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD", workflow)
+    def test_runtime_rejects_missing_config_and_isolates_attempts(self):
+        script = step_script("coverage_ut").split('coverage_profile="', 1)[0]
+        for stack, config, ok in [(s, "opaque-test-value", True) for s in STACKS] + [("unknown", "value", False), ("jed", "", False)]:
+            for attempt in ("1", "2"):
+                with self.subTest(stack=stack, config=bool(config), attempt=attempt), tempfile.TemporaryDirectory() as directory:
+                    summary = Path(directory) / "summary"
+                    env = dict(PATH=os.environ["PATH"], GITHUB_WORKSPACE=directory, GITHUB_STEP_SUMMARY=str(summary),
+                               GITHUB_RUN_ID="123", GITHUB_RUN_ATTEMPT=attempt, CS_S3_ENV=stack, TEST_S3FS_CS=config,
+                               endpoint="legacy", TEST_S3FS_ALIYUN="legacy", TEST_S3FS_QCLOUD="legacy")
+                    result = subprocess.run(["bash", "-c", script + '\ntest -z "${endpoint+x}${TEST_S3FS_ALIYUN+x}${TEST_S3FS_QCLOUD+x}"'],
+                                            env=env, capture_output=True, text=True)
+                    self.assertEqual(result.returncode == 0, ok)
+                    if ok:
+                        self.assertIn(f"ci-ut/123-{attempt}", summary.read_text())
+                        self.assertNotIn(config, summary.read_text() + result.stdout + result.stderr)
+
+    def test_required_s3_tests_cannot_be_missing_skipped_or_failed(self):
+        script = step_script("coverage_ut")
+        script = "for required in 'TestObjectStorages/" + script.split("for required in 'TestObjectStorages/", 1)[1].split("phase_start compact_profile", 1)[0]
+        names = ("TestObjectStorages/cs-s3/minio/basic", "TestS3FSFromSpecs/cs-s3/streaming_write")
+        for action in ("pass", "skip", "fail", "missing"):
+            with self.subTest(action=action), tempfile.TemporaryDirectory() as directory:
+                report = Path(directory) / "report.json"
+                report.write_text("\n".join(json.dumps(dict(Action=action if i else "pass", Test=name,
+                                                          Package="github.com/matrixorigin/matrixone/pkg/fileservice"))
+                                           for i, name in enumerate(names) if not (i and action == "missing")))
+                result = subprocess.run(["bash", "-c", script], capture_output=True,
+                                        env=dict(PATH=os.environ["PATH"], coverage_report=str(report)))
+                self.assertEqual(result.returncode == 0, action == "pass")
+
+    def test_skip_manifest_uploaded_for_success_and_failure(self):
+        block = WORKFLOW.split("      - id: skip_manifest\n", 1)[1].split("      - id: upload_coverage_report\n", 1)[0]
+        self.assertIn("always() && !cancelled()", block)
+        self.assertNotIn("outcome == 'failure'", block)
+        self.assertIn("coverage_skip_manifest.py", block)
+        self.assertIn("ut-coverage-skip-manifest.json", block)
 
 
 if __name__ == "__main__":
