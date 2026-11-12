@@ -41,6 +41,14 @@ on:
         description: "Terminal UT coverage producer status"
         value: ${{ jobs['ut-coverage-linux-x86'].outputs.status }}
     secrets:
+      CS_S3_MTY_CONFIG:
+        required: false
+      CS_S3_MNL2_CONFIG:
+        required: false
+      CS_S3_JED_CONFIG:
+        required: false
+      CS_S3_RUH_CONFIG:
+        required: false
       TOKEN_ACTION:
         description: "Token for checkout (e.g. pull from fork/private)"
         required: false
@@ -147,10 +155,21 @@ jobs:
           S3APIKEY: ${{ secrets.S3APIKEY }}
           S3APISECRET: ${{ secrets.S3APISECRET }}
           S3BUCKET: ${{ secrets.S3BUCKET }}
+          CS_S3_MTY_CONFIG: ${{ secrets.CS_S3_MTY_CONFIG }}
+          CS_S3_MNL2_CONFIG: ${{ secrets.CS_S3_MNL2_CONFIG }}
+          CS_S3_JED_CONFIG: ${{ secrets.CS_S3_JED_CONFIG }}
+          CS_S3_RUH_CONFIG: ${{ secrets.CS_S3_RUH_CONFIG }}
+          IN_ORG: ${{ steps.check_in_org.outputs.in_org }}
+          SAFE_LABEL: ${{ steps.check_safe_label.outputs.safe_label }}
         run: |
           set -euo pipefail
           missing=()
-          for name in TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD S3ENDPOINT S3REGION S3APIKEY S3APISECRET S3BUCKET; do
+          if [[ '${{ inputs.runner_label }}' == cs-* ]] && [ '${{ inputs.canary_pr_32523 }}' != 'true' ]; then
+            required=(CS_S3_MTY_CONFIG CS_S3_MNL2_CONFIG CS_S3_JED_CONFIG CS_S3_RUH_CONFIG)
+          else
+            required=(TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD S3ENDPOINT S3REGION S3APIKEY S3APISECRET S3BUCKET)
+          fi
+          for name in "${required[@]}"; do
             if [ -z "${!name:-}" ]; then
               missing+=("${name}")
             fi
@@ -160,6 +179,10 @@ jobs:
           else
             echo 'ready=false' >> "$GITHUB_OUTPUT"
             echo "::notice::UT coverage skipped because required secrets are unavailable: ${missing[*]}"
+            if [[ '${{ inputs.runner_label }}' == cs-* ]] && [ '${{ inputs.canary_pr_32523 }}' != 'true' ] && { [ "${IN_ORG}" = '1' ] || [ "${SAFE_LABEL}" = '1' ]; }; then
+              echo '::error::CS runner S3 configurations must be set before enabling Coverage.'
+              exit 1
+            fi
           fi
       - id: eligibility
         name: Decide coverage eligibility
@@ -293,6 +316,7 @@ jobs:
         continue-on-error: true
         env:
           GOPROXY: https://goproxy.cn|https://proxy.golang.org|direct
+          TEST_S3FS_CS: ${{ !inputs.canary_pr_32523 && (startsWith(runner.name, 'cs-mty-') && secrets.CS_S3_MTY_CONFIG || startsWith(runner.name, 'cs-mnl2-') && secrets.CS_S3_MNL2_CONFIG || startsWith(runner.name, 'cs-jed-') && secrets.CS_S3_JED_CONFIG || startsWith(runner.name, 'cs-ruh-') && secrets.CS_S3_RUH_CONFIG) || '' }}
           COVERAGE_UT_TEST_TIMEOUT_SECONDS: "3600"
           # The go test package deadline below is 20m; it must leave time for
           # the runner's 60m whole-suite deadline and diagnostics.
@@ -313,16 +337,22 @@ jobs:
           if [ '${{ inputs.canary_local_minio }}' = 'true' ]; then
             test '${{ inputs.canary_pr_32523 }}' = 'true'
             command -v minio >/dev/null
-            unset endpoint region apikey apisecret bucket TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD
+            unset endpoint region apikey apisecret bucket TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD TEST_S3FS_CS
             echo '::notice::Local MinIO canary excludes real COS and OSS integration specs; separate cloud validation is required.'
+          elif [[ '${{ inputs.runner_label }}' == cs-* ]] && [ '${{ inputs.canary_pr_32523 }}' != 'true' ]; then
+            test -n "${TEST_S3FS_CS:-}" || { echo '::error::Missing S3 configuration for the selected CS runner.'; exit 1; }
+            export MO_CI_S3_PREFIX="ci-ut/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            unset endpoint region apikey apisecret bucket TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD
+            echo '::notice::CS S3 mode: COS and OSS provider integration tests are not executed.'
           else
-            export endpoint='${{ !inputs.canary_local_minio && secrets.S3ENDPOINT || '' }}'
-            export region='${{ !inputs.canary_local_minio && secrets.S3REGION || '' }}'
-            export apikey='${{ !inputs.canary_local_minio && secrets.S3APIKEY || '' }}'
-            export apisecret='${{ !inputs.canary_local_minio && secrets.S3APISECRET || '' }}'
-            export bucket='${{ !inputs.canary_local_minio && secrets.S3BUCKET || '' }}'
-            export TEST_S3FS_ALIYUN='${{ !inputs.canary_local_minio && secrets.TEST_S3FS_ALIYUN || '' }}'
-            export TEST_S3FS_QCLOUD='${{ !inputs.canary_local_minio && secrets.TEST_S3FS_QCLOUD || '' }}'
+            unset TEST_S3FS_CS
+            export endpoint='${{ !inputs.canary_local_minio && (inputs.canary_pr_32523 || !startsWith(inputs.runner_label, 'cs-')) && secrets.S3ENDPOINT || '' }}'
+            export region='${{ !inputs.canary_local_minio && (inputs.canary_pr_32523 || !startsWith(inputs.runner_label, 'cs-')) && secrets.S3REGION || '' }}'
+            export apikey='${{ !inputs.canary_local_minio && (inputs.canary_pr_32523 || !startsWith(inputs.runner_label, 'cs-')) && secrets.S3APIKEY || '' }}'
+            export apisecret='${{ !inputs.canary_local_minio && (inputs.canary_pr_32523 || !startsWith(inputs.runner_label, 'cs-')) && secrets.S3APISECRET || '' }}'
+            export bucket='${{ !inputs.canary_local_minio && (inputs.canary_pr_32523 || !startsWith(inputs.runner_label, 'cs-')) && secrets.S3BUCKET || '' }}'
+            export TEST_S3FS_ALIYUN='${{ !inputs.canary_local_minio && (inputs.canary_pr_32523 || !startsWith(inputs.runner_label, 'cs-')) && secrets.TEST_S3FS_ALIYUN || '' }}'
+            export TEST_S3FS_QCLOUD='${{ !inputs.canary_local_minio && (inputs.canary_pr_32523 || !startsWith(inputs.runner_label, 'cs-')) && secrets.TEST_S3FS_QCLOUD || '' }}'
           fi
           coverage_profile="${RUNNER_TEMP}/ut-coverage.out"
           coverage_report="${RUNNER_TEMP}/ut-coverage-report.json"
@@ -611,6 +641,14 @@ jobs:
             for required in 'TestMinioSDK/object_storage/minio/basic' 'TestMinioSDK/file_service/streaming_write'; do
               jq -e --arg test_name "$required" 'select(.Action == "pass" and .Package == "github.com/matrixorigin/matrixone/pkg/fileservice" and .Test == $test_name)' "${coverage_report}" >/dev/null || {
                 echo "::error::Required local MinIO test did not pass: ${required}"
+                exit 1
+              }
+            done
+          fi
+          if [[ '${{ inputs.runner_label }}' == cs-* ]] && [ '${{ inputs.canary_pr_32523 }}' != 'true' ]; then
+            for required in 'TestObjectStorages/cs-s3/minio/basic' 'TestS3FSFromSpecs/cs-s3/streaming_write'; do
+              jq -e --arg test_name "$required" 'select(.Action == "pass" and .Package == "github.com/matrixorigin/matrixone/pkg/fileservice" and .Test == $test_name)' "${coverage_report}" >/dev/null || {
+                echo "::error::Required CS S3 test did not pass: ${required}"
                 exit 1
               }
             done
