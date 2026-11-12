@@ -1,0 +1,42 @@
+name: Isolated CS cache contract probe
+on:
+  workflow_call:
+    secrets:
+      TOKEN_ACTION:
+        required: true
+permissions:
+  contents: read
+jobs:
+  probe:
+    if: github.repository == 'matrixorigin/matrixone' && github.ref == 'refs/heads/weilu-runner-test' && github.event_name == 'workflow_dispatch'
+    runs-on: cs-mnl2-large-7c14g
+    timeout-minutes: 30
+    steps:
+      - name: Checkout fixed trusted test source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          repository: Ariznawlll/matrixone
+          ref: 3c389434ff902b262c6d4e8e1b13e5f264e3f0b1
+          token: ${{ secrets.TOKEN_ACTION }}
+          persist-credentials: false
+      - name: Set up Go
+        uses: matrixorigin/CI/actions/setup-env@main
+        with:
+          setup-java: false
+          go-version-file: ${{ github.workspace }}/go.mod
+      - name: Checkout fixed cache diagnostics
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          token: ${{ secrets.TOKEN_ACTION }}
+          persist-credentials: false
+          sparse-checkout: actions/seed-go-caches
+          sparse-checkout-cone-mode: false
+          path: .ci-workflow
+      - name: Probe pinned cache compatibility
+        uses: ./.ci-workflow/actions/seed-go-caches
+        with:
+          flavor: coverage
+          transport: registry
+          image: registry.cn-shanghai.aliyuncs.com/matrixorigin/matrixone@sha256:8137d222d3a3b29d119173639cea98931168ab7d886bf882894391f7804d5d88
