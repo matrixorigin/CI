@@ -164,7 +164,10 @@ jobs:
         run: |
           set -euo pipefail
           missing=()
-          if [[ '${{ inputs.runner_label }}' == cs-* ]] && [ '${{ inputs.canary_pr_32523 }}' != 'true' ]; then
+          if [ '${{ inputs.canary_local_minio }}' = 'true' ]; then
+            # The pinned-context step already validates this secret-free mode.
+            required=()
+          elif [[ '${{ inputs.runner_label }}' == cs-* ]] && [ '${{ inputs.canary_pr_32523 }}' != 'true' ]; then
             required=(CS_S3_MTY_CONFIG CS_S3_MNL2_CONFIG CS_S3_JED_CONFIG CS_S3_RUH_CONFIG)
           else
             required=(TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD S3ENDPOINT S3REGION S3APIKEY S3APISECRET S3BUCKET)
@@ -178,11 +181,11 @@ jobs:
             echo 'ready=true' >> "$GITHUB_OUTPUT"
           else
             echo 'ready=false' >> "$GITHUB_OUTPUT"
-            echo "::notice::UT coverage skipped because required secrets are unavailable: ${missing[*]}"
             if [[ '${{ inputs.runner_label }}' == cs-* ]] && [ '${{ inputs.canary_pr_32523 }}' != 'true' ] && { [ "${IN_ORG}" = '1' ] || [ "${SAFE_LABEL}" = '1' ]; }; then
-              echo '::error::CS runner S3 configurations must be set before enabling Coverage.'
+              echo "::error::CS runner S3 configurations must be set before enabling Coverage: ${missing[*]}"
               exit 1
             fi
+            echo "::notice::UT coverage skipped because required secrets are unavailable: ${missing[*]}"
           fi
       - id: eligibility
         name: Decide coverage eligibility
