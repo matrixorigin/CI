@@ -39,4 +39,4 @@ jobs:
         with:
           flavor: coverage
           transport: registry
-          image: registry.cn-shanghai.aliyuncs.com/matrixorigin/matrixone@sha256:a675c572f1014c594411c44031f50946c3f284e8153a18a310cedd286a4854df
+          image: matrixorigin/matrixone@sha256:a675c572f1014c594411c44031f50946c3f284e8153a18a310cedd286a4854df
