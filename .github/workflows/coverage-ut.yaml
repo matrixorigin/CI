@@ -3,6 +3,11 @@ name: MatrixOne UT Coverage
 on:
   workflow_call:
     inputs:
+      canary_skip_baseline:
+        description: "Same-source TKE skip baseline for PR 32590; no real cloud storage credentials"
+        required: false
+        type: boolean
+        default: false
       canary_cs_s3_jed:
         description: "Pinned PR 32590 Coverage validation using the dedicated JED CI bucket"
         required: false
@@ -88,8 +93,8 @@ jobs:
       allowed: ${{ steps.eligibility.outputs.allowed }}
     steps:
       - id: jed_context
-        name: Validate pinned JED S3 canary context
-        if: ${{ inputs.canary_cs_s3_jed }}
+        name: Validate pinned CS S3 comparison context
+        if: ${{ inputs.canary_cs_s3_jed || inputs.canary_skip_baseline }}
         env:
           GH_TOKEN: ${{ secrets.TOKEN_ACTION }}
         run: |
@@ -97,7 +102,13 @@ jobs:
           test '${{ github.repository }}' = 'matrixorigin/matrixone'
           test '${{ github.event_name }}' = 'workflow_dispatch'
           test '${{ github.ref }}' = 'refs/heads/weilu-runner-test'
-          test '${{ inputs.runner_label }}' = 'cs-jed-large-7c14g'
+          if [ '${{ inputs.canary_cs_s3_jed }}' = 'true' ]; then
+            test '${{ inputs.canary_skip_baseline }}' = 'false'
+            test '${{ inputs.runner_label }}' = 'cs-jed-large-7c14g'
+          else
+            test '${{ inputs.canary_skip_baseline }}' = 'true'
+            test '${{ inputs.runner_label }}' = 'amd64-mo-guangzhou-2xlarge16'
+          fi
           test '${{ inputs.canary_pr_32523 }}' = 'false'
           test '${{ inputs.canary_local_minio }}' = 'false'
           gh api repos/matrixorigin/matrixone/pulls/32590 --jq \
@@ -113,6 +124,8 @@ jobs:
           test '${{ github.event_name }}' = 'workflow_dispatch'
           test '${{ github.ref }}' = 'refs/heads/weilu-runner-test'
           test '${{ inputs.canary_pr_32523 }}' = 'true'
+          test '${{ inputs.canary_cs_s3_jed }}' = 'false'
+          test '${{ inputs.canary_skip_baseline }}' = 'false'
           curl -fsSL -H 'Accept: application/vnd.github+json' \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             https://api.github.com/repos/matrixorigin/matrixone/pulls/32523 |
@@ -128,7 +141,7 @@ jobs:
           fi
       - id: check_in_org
         name: Check organization membership
-        if: ${{ !inputs.canary_cs_s3_jed }}
+        if: ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline }}
         env:
           GH_TOKEN: ${{ secrets.TOKEN_ACTION }}
           PR_AUTHOR: ${{ inputs.canary_pr_32523 && 'iamlinjunhong' || github.event.pull_request.user.login }}
@@ -152,7 +165,7 @@ jobs:
           echo "in_org=${user_in_org}" >> "$GITHUB_OUTPUT"
       - id: check_safe_label
         name: Check pull request label
-        if: ${{ !inputs.canary_cs_s3_jed }}
+        if: ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline }}
         env:
           GH_TOKEN: ${{ secrets.TOKEN_ACTION }}
           PR_URL: ${{ inputs.canary_pr_32523 && 'https://api.github.com/repos/matrixorigin/matrixone/pulls/32523' || github.event.pull_request.url }}
@@ -171,23 +184,25 @@ jobs:
       - id: check_coverage_secrets
         name: Check coverage secrets
         env:
-          TEST_S3FS_ALIYUN: ${{ !inputs.canary_cs_s3_jed && secrets.TEST_S3FS_ALIYUN || '' }}
-          TEST_S3FS_QCLOUD: ${{ !inputs.canary_cs_s3_jed && secrets.TEST_S3FS_QCLOUD || '' }}
-          S3ENDPOINT: ${{ !inputs.canary_cs_s3_jed && secrets.S3ENDPOINT || '' }}
-          S3REGION: ${{ !inputs.canary_cs_s3_jed && secrets.S3REGION || '' }}
-          S3APIKEY: ${{ !inputs.canary_cs_s3_jed && secrets.S3APIKEY || '' }}
-          S3APISECRET: ${{ !inputs.canary_cs_s3_jed && secrets.S3APISECRET || '' }}
-          S3BUCKET: ${{ !inputs.canary_cs_s3_jed && secrets.S3BUCKET || '' }}
-          CS_S3_MTY_CONFIG: ${{ !inputs.canary_cs_s3_jed && secrets.CS_S3_MTY_CONFIG || '' }}
-          CS_S3_MNL2_CONFIG: ${{ !inputs.canary_cs_s3_jed && secrets.CS_S3_MNL2_CONFIG || '' }}
-          CS_S3_JED_CONFIG: ${{ secrets.CS_S3_JED_CONFIG }}
-          CS_S3_RUH_CONFIG: ${{ !inputs.canary_cs_s3_jed && secrets.CS_S3_RUH_CONFIG || '' }}
+          TEST_S3FS_ALIYUN: ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline && secrets.TEST_S3FS_ALIYUN || '' }}
+          TEST_S3FS_QCLOUD: ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline && secrets.TEST_S3FS_QCLOUD || '' }}
+          S3ENDPOINT: ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline && secrets.S3ENDPOINT || '' }}
+          S3REGION: ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline && secrets.S3REGION || '' }}
+          S3APIKEY: ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline && secrets.S3APIKEY || '' }}
+          S3APISECRET: ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline && secrets.S3APISECRET || '' }}
+          S3BUCKET: ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline && secrets.S3BUCKET || '' }}
+          CS_S3_MTY_CONFIG: ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline && secrets.CS_S3_MTY_CONFIG || '' }}
+          CS_S3_MNL2_CONFIG: ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline && secrets.CS_S3_MNL2_CONFIG || '' }}
+          CS_S3_JED_CONFIG: ${{ !inputs.canary_skip_baseline && secrets.CS_S3_JED_CONFIG || '' }}
+          CS_S3_RUH_CONFIG: ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline && secrets.CS_S3_RUH_CONFIG || '' }}
           IN_ORG: ${{ steps.check_in_org.outputs.in_org }}
           SAFE_LABEL: ${{ steps.check_safe_label.outputs.safe_label }}
         run: |
           set -euo pipefail
           missing=()
-          if [ '${{ inputs.canary_cs_s3_jed }}' = 'true' ]; then
+          if [ '${{ inputs.canary_skip_baseline }}' = 'true' ]; then
+            required=()
+          elif [ '${{ inputs.canary_cs_s3_jed }}' = 'true' ]; then
             required=(CS_S3_JED_CONFIG)
           elif [ '${{ inputs.canary_local_minio }}' = 'true' ]; then
             # The pinned-context step already validates this secret-free mode.
@@ -244,11 +259,12 @@ jobs:
     # two checkouts, 20m cache seeding, 190m coverage, 15m Go/Python setup,
     # 5m cache status, and 55m for failure reports, artifacts, final status,
     # and failure propagation. Reserve 5m for job overhead and post-action
-    # cleanup. Success paths skip the failure-only steps.
+    # cleanup, plus 10m for the skip manifest and its artifact. Success paths
+    # skip the failure-only steps.
     # The wrapper below enforces the test deadline before this job-level last
     # resort; the job timeout is never the diagnostic mechanism for a stuck
     # test.
-    timeout-minutes: 310
+    timeout-minutes: 320
     steps:
       - name: Install CS runner build dependencies
         if: ${{ startsWith(inputs.runner_label, 'cs-') }}
@@ -274,8 +290,8 @@ jobs:
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
-          repository: ${{ inputs.canary_cs_s3_jed && 'Ariznawlll/matrixone' || inputs.canary_pr_32523 && 'iamlinjunhong/matrixone' || github.event.pull_request.head.repo.full_name }}
-          ref: ${{ inputs.canary_cs_s3_jed && '67e3cf40c8445fb429a7a20c0a67b95dec065155' || inputs.canary_pr_32523 && 'b0641dbf3cb1ed67f90f9e4226f0585ba451abc0' || github.event.pull_request.head.sha }}
+          repository: ${{ (inputs.canary_cs_s3_jed || inputs.canary_skip_baseline) && 'Ariznawlll/matrixone' || inputs.canary_pr_32523 && 'iamlinjunhong/matrixone' || github.event.pull_request.head.repo.full_name }}
+          ref: ${{ (inputs.canary_cs_s3_jed || inputs.canary_skip_baseline) && '67e3cf40c8445fb429a7a20c0a67b95dec065155' || inputs.canary_pr_32523 && 'b0641dbf3cb1ed67f90f9e4226f0585ba451abc0' || github.event.pull_request.head.sha }}
           persist-credentials: false
       - name: Set up Go
         timeout-minutes: 10
@@ -303,6 +319,7 @@ jobs:
             scripts/run_coverage_ut.py
             scripts/compact_coverage_profile.go
             scripts/summarize_coverage_ut.py
+            scripts/coverage_skip_manifest.py
             scripts/summarize_ut_report.py
           sparse-checkout-cone-mode: false
           path: .ci-workflow
@@ -335,7 +352,7 @@ jobs:
           git -C "$RUNNER_TEMP/minio-source" checkout --detach FETCH_HEAD
           (cd "$RUNNER_TEMP/minio-source" && go build -o "$RUNNER_TEMP/minio-bin/minio" .)
           echo "$RUNNER_TEMP/minio-bin" >> "$GITHUB_PATH"
-          echo 'Local MinIO canary: COS/OSS integration specs are excluded and require a separate real-cloud run.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Local MinIO canary: real COS/OSS integration specs are explicitly outside UT scope.' >> "$GITHUB_STEP_SUMMARY"
       - id: coverage_ut
         name: Run coverage unit tests
         # This step includes bounded package discovery and native preparation
@@ -350,6 +367,7 @@ jobs:
         continue-on-error: true
         env:
           GOPROXY: https://goproxy.cn|https://proxy.golang.org|direct
+          CS_S3_ENV: ${{ startsWith(runner.name, 'cs-mty-') && 'mty' || startsWith(runner.name, 'cs-mnl2-') && 'mnl2' || startsWith(runner.name, 'cs-jed-') && 'jed' || startsWith(runner.name, 'cs-ruh-') && 'ruh' || '' }}
           TEST_S3FS_CS: ${{ !inputs.canary_pr_32523 && (startsWith(runner.name, 'cs-mty-') && secrets.CS_S3_MTY_CONFIG || startsWith(runner.name, 'cs-mnl2-') && secrets.CS_S3_MNL2_CONFIG || startsWith(runner.name, 'cs-jed-') && secrets.CS_S3_JED_CONFIG || startsWith(runner.name, 'cs-ruh-') && secrets.CS_S3_RUH_CONFIG) || '' }}
           COVERAGE_UT_TEST_TIMEOUT_SECONDS: "3600"
           # The go test package deadline below is 20m; it must leave time for
@@ -368,15 +386,23 @@ jobs:
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
-          if [ '${{ inputs.canary_local_minio }}' = 'true' ]; then
+          if [ '${{ inputs.canary_skip_baseline }}' = 'true' ]; then
+            unset endpoint region apikey apisecret bucket TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD TEST_S3FS_CS
+            echo '::notice::Same-source TKE skip baseline: no real COS/OSS or CS storage credentials. Not a storage acceptance run.'
+          elif [ '${{ inputs.canary_local_minio }}' = 'true' ]; then
             test '${{ inputs.canary_pr_32523 }}' = 'true'
             command -v minio >/dev/null
             unset endpoint region apikey apisecret bucket TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD TEST_S3FS_CS
-            echo '::notice::Local MinIO canary excludes real COS and OSS integration specs; separate cloud validation is required.'
+            echo '::notice::Local MinIO canary excludes real COS and OSS integration specs by the agreed UT scope.'
           elif [[ '${{ inputs.runner_label }}' == cs-* ]] && [ '${{ inputs.canary_pr_32523 }}' != 'true' ]; then
+            case "${CS_S3_ENV:-}" in
+              mty|mnl2|jed|ruh) ;;
+              *) echo '::error::Unknown CS runner environment; refusing to choose another environment storage.'; exit 1 ;;
+            esac
             test -n "${TEST_S3FS_CS:-}" || { echo '::error::Missing S3 configuration for the selected CS runner.'; exit 1; }
             export MO_CI_S3_PREFIX="ci-ut/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
             unset endpoint region apikey apisecret bucket TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD
+            echo "- Coverage runner environment: ${CS_S3_ENV}; storage: same-environment CS S3; prefix: ${MO_CI_S3_PREFIX}." >> "$GITHUB_STEP_SUMMARY"
             echo '::notice::CS S3 mode: COS and OSS provider integration tests are not executed.'
           else
             unset TEST_S3FS_CS
@@ -873,6 +899,30 @@ jobs:
           else
             echo '::warning::failed to render the readable coverage UT report'
           fi
+      - id: skip_manifest
+        name: Preserve per-test skip evidence on success and failure
+        if: ${{ always() && !cancelled() }}
+        timeout-minutes: 5
+        env:
+          ACTUAL_RUNNER: ${{ runner.name }}
+          STORAGE_MODE: ${{ inputs.canary_skip_baseline && 'tke-no-cloud-baseline' || inputs.canary_local_minio && 'local-minio' || startsWith(inputs.runner_label, 'cs-') && !inputs.canary_pr_32523 && 'cs-s3' || 'legacy-cloud' }}
+        run: |
+          set -euo pipefail
+          python "$GITHUB_WORKSPACE/.ci-workflow/scripts/coverage_skip_manifest.py" \
+            --report "$RUNNER_TEMP/ut-coverage-report.json" \
+            --status "$RUNNER_TEMP/ut-coverage-status.json" \
+            --source-sha "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" \
+            --runner "$ACTUAL_RUNNER" --mode "$STORAGE_MODE" \
+            --output "$RUNNER_TEMP/ut-coverage-skip-manifest.json"
+      - name: Upload skip comparison evidence
+        if: ${{ always() && !cancelled() && steps.skip_manifest.outcome == 'success' }}
+        timeout-minutes: 5
+        uses: actions/upload-artifact@v7
+        with:
+          name: ut-coverage-skips-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ut-coverage-skip-manifest.json
+          if-no-files-found: error
+          retention-days: 14
       - id: upload_coverage_report
         name: Upload readable coverage UT report
         if: ${{ always() && !cancelled() && steps.render_coverage_report.outcome == 'success' }}

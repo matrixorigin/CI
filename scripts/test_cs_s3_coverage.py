@@ -18,7 +18,7 @@ CLOUD_CONFIGS = (
 
 
 class CSS3CoverageTest(unittest.TestCase):
-    def gate(self, configs, *, runner="cs-large-7c14g", trusted=True, canary=False, local=False, jed=False):
+    def gate(self, configs, *, runner="cs-large-7c14g", trusted=True, canary=False, local=False, jed=False, baseline=False):
         workflow = WORKFLOW.read_text()
         block = workflow.split("      - id: check_coverage_secrets\n", 1)[1].split("      - id: eligibility\n", 1)[0]
         script = textwrap.dedent(block.split("        run: |\n", 1)[1])
@@ -27,6 +27,7 @@ class CSS3CoverageTest(unittest.TestCase):
             "canary_pr_32523": str(canary).lower(),
             "canary_local_minio": str(local).lower(),
             "canary_cs_s3_jed": str(jed).lower(),
+            "canary_skip_baseline": str(baseline).lower(),
         }.items():
             script = script.replace("${{ inputs." + key + " }}", value)
         self.assertNotIn("${{", script)
@@ -75,6 +76,11 @@ class CSS3CoverageTest(unittest.TestCase):
         self.assertNotEqual(self.gate(CLOUD_CONFIGS, **args)[0], 0)
         self.assertNotEqual(self.gate([], **args)[0], 0)
 
+    def test_tke_skip_baseline_requires_no_storage_credentials(self):
+        code, output, _ = self.gate([], runner="amd64-mo-guangzhou-2xlarge16", baseline=True, trusted=False)
+        self.assertEqual(code, 0)
+        self.assertIn("ready=true", output)
+
     def test_jed_canary_pins_context_source_and_runner(self):
         workflow = WORKFLOW.read_text()
         guard = workflow.split("      - id: jed_context\n", 1)[1].split("      - name: Validate pinned canary context\n", 1)[0]
@@ -82,18 +88,19 @@ class CSS3CoverageTest(unittest.TestCase):
                          "cs-jed-large-7c14g", "pulls/32590", "Ariznawlll/matrixone",
                          "67e3cf40c8445fb429a7a20c0a67b95dec065155"):
             self.assertIn(required, guard)
-        for mode in ("canary_pr_32523", "canary_local_minio"):
+        for mode in ("canary_pr_32523", "canary_local_minio", "canary_skip_baseline"):
             self.assertIn("test '${{ inputs." + mode + " }}' = 'false'", guard)
         secrets_block = workflow.split("      - id: check_coverage_secrets\n", 1)[1].split("        run: |\n", 1)[0]
         for name in CLOUD_CONFIGS:
-            self.assertIn(name + ": ${{ !inputs.canary_cs_s3_jed && secrets." + name + " || '' }}", secrets_block)
+            self.assertIn(name + ": ${{ !inputs.canary_cs_s3_jed && !inputs.canary_skip_baseline && secrets." + name + " || '' }}", secrets_block)
 
     def test_jed_context_rejects_other_refs_sources_and_modes(self):
         block = WORKFLOW.read_text().split("      - id: jed_context\n", 1)[1].split("      - name: Validate pinned canary context\n", 1)[0]
         original = textwrap.dedent(block.split("        run: |\n", 1)[1])
         values = {"github.repository": "matrixorigin/matrixone", "github.event_name": "workflow_dispatch",
                   "github.ref": "refs/heads/weilu-runner-test", "inputs.runner_label": "cs-jed-large-7c14g",
-                  "inputs.canary_pr_32523": "false", "inputs.canary_local_minio": "false"}
+                  "inputs.canary_pr_32523": "false", "inputs.canary_local_minio": "false",
+                  "inputs.canary_cs_s3_jed": "true", "inputs.canary_skip_baseline": "false"}
         cases = [({}, "true", True), ({}, "false", False)]
         for key in values:
             cases.append(({key: "unexpected"}, "true", False))
@@ -110,6 +117,19 @@ class CSS3CoverageTest(unittest.TestCase):
                 self.assertEqual(result.returncode == 0, accepted)
                 self.assertEqual(output.exists() and "validated=true" in output.read_text(), accepted)
 
+    def test_baseline_uses_same_source_and_excludes_cloud_credentials(self):
+        workflow = WORKFLOW.read_text()
+        self.assertIn("(inputs.canary_cs_s3_jed || inputs.canary_skip_baseline) && '67e3cf40c8445fb429a7a20c0a67b95dec065155'", workflow)
+        baseline = workflow.split("if [ '${{ inputs.canary_skip_baseline }}' = 'true' ]; then")[-1].split("elif", 1)[0]
+        self.assertIn("unset endpoint region apikey apisecret bucket TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD TEST_S3FS_CS", baseline)
+
+    def test_skip_artifact_is_not_failure_only(self):
+        workflow = WORKFLOW.read_text()
+        step = workflow.split("      - id: skip_manifest\n", 1)[1].split("      - id: upload_coverage_report\n", 1)[0]
+        self.assertIn("always() && !cancelled()", step)
+        self.assertNotIn("outcome == 'failure'", step)
+        self.assertIn("ut-coverage-skip-manifest.json", step)
+
     def test_runner_selects_only_its_own_secret(self):
         workflow = WORKFLOW.read_text()
         expression = next(line for line in workflow.splitlines() if "TEST_S3FS_CS: ${{" in line)
@@ -118,6 +138,20 @@ class CSS3CoverageTest(unittest.TestCase):
                                     for stack in ("MTY", "MNL2", "JED", "RUH")])
         self.assertTrue(expression.endswith("|| '' }}"))
         self.assertIn('test -n "${TEST_S3FS_CS:-}"', workflow)
+        # Evaluate the restricted startsWith/&&/|| expression with opaque values.
+        expr = expression.split("${{", 1)[1].split("}}", 1)[0].strip()
+        for stack in ("mty", "mnl2", "jed", "ruh", "unknown"):
+            for missing in (False, True):
+                candidate = expr.replace("!inputs.canary_pr_32523", "True")
+                candidate = candidate.replace("&&", " and ").replace("||", " or ")
+                candidate = re.sub(r"startsWith\(runner.name, '([^']+)'\)",
+                                   lambda match: str(f"cs-{stack}-large-7c14g-runner-abc".startswith(match[1])), candidate)
+                for env in ("MTY", "MNL2", "JED", "RUH"):
+                    value = "" if missing and env.lower() == stack else env
+                    candidate = candidate.replace(f"secrets.CS_S3_{env}_CONFIG", repr(value))
+                expected = "" if missing or stack == "unknown" else stack.upper()
+                self.assertEqual(eval(candidate, {"__builtins__": {}}), expected)
+        self.assertIn("Unknown CS runner environment", workflow)
 
     def test_missing_or_skipped_cs_tests_cannot_pass(self):
         workflow = WORKFLOW.read_text()

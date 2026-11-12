@@ -14,6 +14,28 @@ credentials scoped to that test data. Never paste real credentials into this
 file or workflow logs. All four configurations are required before enabling
 the shared runner label; the selected runner's name chooses exactly one.
 
+## Scheduling and storage binding
+
+The production default remains `runs-on: cs-large-7c14g`, **not a pinned JED
+runner**. GitHub selects one eligible large runner across the CS environments.
+The entire Coverage job, including its eight parallel Go packages and S3
+subtests, stays on that runner. Tests are not independently scheduled to other
+runner environments. A second PR/job may land elsewhere and must select its
+own configuration again.
+
+| Actual runner name prefix | Configuration |
+| --- | --- |
+| `cs-mty-` | `CS_S3_MTY_CONFIG` |
+| `cs-mnl2-` | `CS_S3_MNL2_CONFIG` |
+| `cs-jed-` | `CS_S3_JED_CONFIG` |
+| `cs-ruh-` | `CS_S3_RUH_CONFIG` |
+
+Unknown runner names and missing matching configuration fail explicitly. There
+is no fallback to another environment's storage, and the job summary records
+the selected environment and isolated prefix without printing credentials.
+If Coverage is split into multiple jobs in the future, every job needs this
+binding; a configuration selected by a previous job must not be reused.
+
 JED storage may be cluster-internal only. In that case use its internal S3
 endpoint and run on a JED runner that can resolve and reach that endpoint.
 Public exposure is not required. Check DNS, TLS trust (for HTTPS), and signed
@@ -35,13 +57,37 @@ Abrupt process or runner termination can leave objects behind; any lifecycle
 policy or manual cleanup must be restricted to the dedicated test scope.
 
 This mode intentionally does not exercise real Tencent COS or Aliyun OSS
-provider integrations. Retain or establish separate daily coverage for those
-providers before claiming equivalent vendor-specific coverage.
+provider integrations. Their absence is an explicitly accepted scope change,
+not a rollout blocker. This PR does not claim equivalent vendor-specific
+coverage or require these integrations to run in the UT job.
+
+Existing TKE skipped tests are accepted unchanged. Migration validation checks
+for new skipped test identities, failures and package/suite timeouts, not equal
+skip totals. Successful and failed runs both upload
+`ut-coverage-skip-manifest.json`: source SHA, actual runner, test/package skip
+distinction, reasons, failed tests and package timeout events. Dynamic cloud
+cases that are not generated are explicitly outside this comparison.
+
+For a controlled comparison, use the same source SHA and package selection.
+`canary_skip_baseline` is restricted to the same approved PR #32590 commit and
+test branch as the JED canary, on the original TKE runner label, with no real
+COS/OSS or CS credentials. It establishes non-storage skip behavior; it is not
+a substitute for each CS environment's mandatory real S3 acceptance. Compare
+the downloaded manifests with:
+
+```sh
+python3 scripts/coverage_skip_manifest.py --baseline tke.json --candidate cs.json --output comparison.json
+```
+
+The comparison rejects different source/package scopes, failed producers,
+package timeouts, malformed evidence and newly skipped test identities.
 
 Before rollout, run the isolated MinIO smoke (including an unrelated sentinel
 object and failure-path cleanup tests), then a real S3 smoke from each runner
 environment with the approved credentials, and finally PR Coverage. Keep the
 CI PR in draft until configuration and end-to-end verification are complete.
+Roll out all configured environments together; do not silently reduce the
+production default to JED while other shared-pool configurations are missing.
 
 For pre-merge verification, `canary_cs_s3_jed` is restricted to a manual call
 from `matrixorigin/matrixone:weilu-runner-test` and `cs-jed-large-7c14g`. It
