@@ -125,6 +125,7 @@ jobs:
             scripts/summarize_coverage_ut.py
             scripts/coverage_skip_manifest.py
             scripts/summarize_ut_report.py
+            actions/seed-go-caches
           sparse-checkout-cone-mode: false
           path: .ci-workflow
       # Import completed seed entries, not a directory-emptiness heuristic.
@@ -134,7 +135,7 @@ jobs:
         name: Seed Go caches from CI builder image
         timeout-minutes: 20
         continue-on-error: true
-        uses: matrixorigin/CI/actions/seed-go-caches@main
+        uses: ./.ci-workflow/actions/seed-go-caches
         with:
           flavor: coverage
           transport: registry

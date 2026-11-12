@@ -32,6 +32,26 @@ ENTRY = re.compile(r"[0-9a-f]{64}-[ad]")
 MARKER = ".matrixone-seed.json"
 
 
+def contract_mismatches(manifest, expected):
+    """Return only known field names, never producer-controlled values."""
+    if not isinstance(manifest, dict):
+        return ["manifest"]
+    mismatches = []
+    for field, value in expected.items():
+        if field == "go_env":
+            actual = manifest.get("go_env")
+            if not isinstance(actual, dict):
+                mismatches.append("go_env")
+            else:
+                mismatches.extend("go_env." + key for key, expected_value in value.items()
+                                  if actual.get(key) != expected_value)
+                if actual != value and not any(name.startswith("go_env.") for name in mismatches):
+                    mismatches.append("go_env.extra_fields")
+        elif manifest.get(field) != value:
+            mismatches.append(field)
+    return mismatches
+
+
 def image_candidates(pinned, hosted=False):
     """A canary may pin a digest, but may not change the trusted repository."""
     repositories = ["registry.cn-shanghai.aliyuncs.com/matrixorigin/matrixone",
@@ -466,7 +486,9 @@ class Seeder:
                     manifest = self.docker_manifest(metadata)
             expected = {"schema": SCHEMA, "profile": PROFILE, "checkout": CHECKOUT,
                         "go_env": {field: values[field] for field in GO_FIELDS}, **CONTRACTS}
-            if not isinstance(manifest, dict) or any(manifest.get(k) != v for k, v in expected.items()):
+            mismatch_fields = contract_mismatches(manifest, expected)
+            if mismatch_fields:
+                self.report["mismatch_fields"] = mismatch_fields
                 raise ValueError("producer manifest does not match host UT contract")
             status = manifest.get("flavors", {}).get(self.flavor)
             if status not in ("ok", "FAILED"):

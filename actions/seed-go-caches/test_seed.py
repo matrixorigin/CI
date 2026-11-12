@@ -380,6 +380,13 @@ class SeederTests(unittest.TestCase):
                 self.assertTrue(any(call[0] == "pull" for call in changed.calls))
                 self.assertEqual(report["imported_bytes"], 0)
 
+    def test_contract_mismatch_reports_names_without_values(self):
+        expected = {"schema": 2, "profile": "expected", "go_env": {"GOVERSION": "go1"}}
+        actual = {"schema": 2, "profile": "producer-private-value", "go_env": {"GOVERSION": "go2"}}
+        self.assertEqual(seed.contract_mismatches(actual, expected), ["profile", "go_env.GOVERSION"])
+        self.assertEqual(seed.contract_mismatches(None, expected), ["manifest"])
+        self.assertEqual(seed.contract_mismatches({**expected, "go_env": {"GOVERSION": "go1", "unknown": "x"}}, expected), ["go_env.extra_fields"])
+
     def test_populated_modules_are_preserved_without_extraction(self):
         instance = self.make()
         instance.modules.mkdir()
