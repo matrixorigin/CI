@@ -38,6 +38,10 @@ paths:
     ignore:
       # actionlint v1.7.12 predates this input's backport to checkout v6.
       - 'input "allow-unsafe-pr-checkout" is not defined in action "actions/checkout@v6"'
+  .github/workflows/merge-trigger-standalone.yaml:
+    ignore:
+      # actionlint v1.7.12 predates this input's backport to checkout v6.
+      - 'input "allow-unsafe-pr-checkout" is not defined in action "actions/checkout@v6"'
   .github/workflows/robot.yaml:
     ignore:
       # Existing legacy workflow; keep new changes clean without broadening
