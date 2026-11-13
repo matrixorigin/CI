@@ -63,6 +63,8 @@ jobs:
             stack: mnl2
           - group: 1
             stack: jed
+          - group: 2
+            stack: mty
     outputs:
       status: ${{ steps.coverage_status.outputs.status }}
     needs: [check_coverage_eligibility]
@@ -817,23 +819,32 @@ jobs:
           path: groups/1
       - uses: actions/download-artifact@v4
         with:
+          name: ut-coverage-skips-group-2-${{ github.run_id }}-${{ github.run_attempt }}
+          path: groups/2
+      - uses: actions/download-artifact@v4
+        with:
           name: ut-coverage-group-0-generation-${{ github.run_id }}-${{ github.run_attempt }}
           path: profiles/0
       - uses: actions/download-artifact@v4
         with:
           name: ut-coverage-group-1-generation-${{ github.run_id }}-${{ github.run_attempt }}
           path: profiles/1
+      - uses: actions/download-artifact@v4
+        with:
+          name: ut-coverage-group-2-generation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: profiles/2
       - name: Validate complete package evidence and merge profiles
         run: |
           set -euo pipefail
           python3 scripts/coverage_two_groups_merge.py groups combined-skip-manifest.json
           test "$(head -n 1 profiles/0/ut-coverage.out)" = 'mode: set'
           test "$(head -n 1 profiles/1/ut-coverage.out)" = 'mode: set'
-          { cat profiles/0/ut-coverage.out; tail -n +2 profiles/1/ut-coverage.out; } > "$RUNNER_TEMP/ut-coverage.out"
+          test "$(head -n 1 profiles/2/ut-coverage.out)" = 'mode: set'
+          { cat profiles/0/ut-coverage.out; tail -n +2 profiles/1/ut-coverage.out; tail -n +2 profiles/2/ut-coverage.out; } > "$RUNNER_TEMP/ut-coverage.out"
           go run scripts/compact_coverage_profile.go "$RUNNER_TEMP/ut-coverage.out"
       - uses: actions/upload-artifact@v7
         with:
-          name: two-group-merged-coverage-${{ github.run_id }}-${{ github.run_attempt }}
+          name: three-group-merged-coverage-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/ut-coverage.out
             combined-skip-manifest.json

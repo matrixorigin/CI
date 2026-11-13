@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministically partition a complete Go package list into two groups.
+"""Deterministically partition a complete Go package list into three groups.
 
 Weights are approximate elapsed seconds from one MNL2 Coverage run; they are
 only scheduling hints, never an allowlist. Unknown packages are still tested.
@@ -30,15 +30,15 @@ def plan(packages):
         raise ValueError('empty or duplicate package scope')
     if FILE_SERVICE not in packages:
         raise ValueError('required S3 test package is missing')
-    groups = [[FILE_SERVICE], []]
-    weights = [5, 0]
+    groups = [[FILE_SERVICE], [], []]
+    weights = [5, 0, 0]
     for package in sorted(set(packages) - {FILE_SERVICE},
                           key=lambda p: (-WEIGHTS.get(p.removeprefix(ROOT), 5), p)):
-        index = min(range(2), key=lambda i: (weights[i], i))
+        index = min(range(3), key=lambda i: (weights[i], i))
         groups[index].append(package)
         weights[index] += WEIGHTS.get(package.removeprefix(ROOT), 5)
     groups = [sorted(group) for group in groups]
-    if not all(groups) or set(groups[0]) & set(groups[1]) or set(groups[0] + groups[1]) != set(packages):
+    if not all(groups) or sum(len(set(g)) for g in groups) != len(set().union(*map(set, groups))) or set().union(*map(set, groups)) != set(packages):
         raise ValueError('invalid partition')
     scope = sorted(packages)
     digest = hashlib.sha256(('\n'.join(scope) + '\n').encode()).hexdigest()
@@ -49,7 +49,7 @@ def plan(packages):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--packages', required=True, type=Path)
-    parser.add_argument('--group', required=True, type=int, choices=(0, 1))
+    parser.add_argument('--group', required=True, type=int, choices=(0, 1, 2))
     parser.add_argument('--manifest', required=True, type=Path)
     parser.add_argument('--selected', required=True, type=Path)
     args = parser.parse_args()
