@@ -48,7 +48,9 @@ jobs:
           test "$EVENT_NAME" = workflow_dispatch
           case "$STACK" in mty|mnl2|ruh) ;; *) exit 1 ;; esac
           actual=$(gh api repos/matrixorigin/matrixone/pulls/32590 --jq .head.sha)
-          test "$actual" = 3c389434ff902b262c6d4e8e1b13e5f264e3f0b1
+          test "$actual" = 9ebafa87748246a5b144a270ecc26b3a1fb2136c
+          ancestry=$(gh api repos/matrixorigin/matrixone/compare/3c389434ff902b262c6d4e8e1b13e5f264e3f0b1..."$actual" --jq .status)
+          test "$ancestry" = ahead
           echo allowed=true >> "$GITHUB_OUTPUT"
 
   ut-coverage-linux-x86:
@@ -121,6 +123,7 @@ jobs:
             scripts/test_run_coverage_packages.py
             scripts/compact_coverage_profile.go
             scripts/summarize_coverage_ut.py
+            scripts/coverage_timing.py
             scripts/coverage_skip_manifest.py
             scripts/summarize_ut_report.py
           sparse-checkout-cone-mode: false
@@ -675,6 +678,13 @@ jobs:
           else
             echo '::warning::failed to render the readable coverage UT report'
           fi
+      - name: Summarize package and admission timings
+        if: ${{ always() && !cancelled() }}
+        timeout-minutes: 5
+        continue-on-error: true
+        run: |
+          python "$GITHUB_WORKSPACE/.ci-workflow/scripts/coverage_timing.py" \
+            "$RUNNER_TEMP/ut-coverage-report.json" "$RUNNER_TEMP/ut-coverage-timing.json"
       - id: skip_manifest
         name: Preserve per-test skip evidence on success and failure
         if: ${{ always() && !cancelled() }}
@@ -710,6 +720,7 @@ jobs:
           path: |
             ${{ runner.temp }}/ut-coverage-incident.md
             ${{ runner.temp }}/ut-coverage.stderr.log
+            ${{ runner.temp }}/ut-coverage-timing.json
           if-no-files-found: warn
           retention-days: 7
       - id: upload_coverage_diagnostics
