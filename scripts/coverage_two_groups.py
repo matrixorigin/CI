@@ -23,16 +23,19 @@ WEIGHTS = {
     'pkg/lockservice': 50, 'pkg/frontend': 46,
 }
 FILE_SERVICE = ROOT + 'pkg/fileservice'
+EMBED = ROOT + 'pkg/embed'
 
 
 def plan(packages):
     if not packages or len(set(packages)) != len(packages):
         raise ValueError('empty or duplicate package scope')
-    if FILE_SERVICE not in packages:
-        raise ValueError('required S3 test package is missing')
-    groups = [[FILE_SERVICE], [], []]
-    weights = [5, 0, 0]
-    for package in sorted(set(packages) - {FILE_SERVICE},
+    if FILE_SERVICE not in packages or EMBED not in packages:
+        raise ValueError('required S3 or embed test package is missing')
+    # Isolated experiment: group 2 runs on MTY, which had headroom in the
+    # previous run. Keep S3 integration in group 0 and move embed off MNL2.
+    groups = [[FILE_SERVICE], [], [EMBED]]
+    weights = [5, 0, WEIGHTS['pkg/embed']]
+    for package in sorted(set(packages) - {FILE_SERVICE, EMBED},
                           key=lambda p: (-WEIGHTS.get(p.removeprefix(ROOT), 5), p)):
         index = min(range(3), key=lambda i: (weights[i], i))
         groups[index].append(package)
