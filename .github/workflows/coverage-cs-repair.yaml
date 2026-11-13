@@ -46,7 +46,7 @@ jobs:
           test "$CALLER_REPOSITORY" = matrixorigin/matrixone
           test "$CALLER_REF" = refs/heads/weilu-runner-test
           test "$EVENT_NAME" = workflow_dispatch
-          case "$STACK" in mty|mnl2|jed|ruh) ;; *) exit 1 ;; esac
+          test "$STACK" = mnl2
           actual=$(gh api repos/matrixorigin/matrixone/pulls/32590 --jq .head.sha)
           test "$actual" = 9ebafa87748246a5b144a270ecc26b3a1fb2136c
           ancestry=$(gh api repos/matrixorigin/matrixone/compare/3c389434ff902b262c6d4e8e1b13e5f264e3f0b1..."$actual" --jq .status)
@@ -54,14 +54,22 @@ jobs:
           echo allowed=true >> "$GITHUB_OUTPUT"
 
   ut-coverage-linux-x86:
-    name: UT Coverage on Ubuntu/x86
+    name: UT Coverage group ${{ matrix.group }} on Ubuntu/x86
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: 0
+            stack: mnl2
+          - group: 1
+            stack: jed
     outputs:
       status: ${{ steps.coverage_status.outputs.status }}
     needs: [check_coverage_eligibility]
     if: ${{ needs.check_coverage_eligibility.outputs.allowed == 'true' }}
     environment: ci
     # Schedule across CS environments; bind S3 to the actual runner below.
-    runs-on: ${{ format('cs-{0}-large-7c14g', inputs.stack) }}
+    runs-on: ${{ format('cs-{0}-large-7c14g', matrix.stack) }}
     # Leave headroom for setup, cache seeding, reports and post-action cleanup.
     # Success paths skip the failure-only steps.
     # The wrapper below enforces the test deadline before this job-level last
@@ -101,6 +109,15 @@ jobs:
         with:
           setup-java: false
           go-version-file: "${{ github.workspace }}/go.mod"
+          cache: false
+      # Cache module download archives only, not the much larger build cache,
+      # workspace, Git credentials, or S3 data. Experiment is trusted dispatch
+      # only; review cache visibility and module sensitivity before production.
+      - name: Restore trusted Go module download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod/cache/download
+          key: cs-two-group-mod-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.sum') }}
       - name: Prepare Python UDF contract tests
         if: ${{ hashFiles('pkg/udf/python/worker/requirements.txt') != '' }}
         timeout-minutes: 5
@@ -120,6 +137,7 @@ jobs:
             scripts/prepare_coverage_cgo.sh
             scripts/run_coverage_ut.py
             scripts/run_coverage_packages.py
+            scripts/coverage_two_groups.py
             scripts/test_run_coverage_packages.py
             scripts/compact_coverage_profile.go
             scripts/summarize_coverage_ut.py
@@ -174,6 +192,7 @@ jobs:
           COVERAGE_UT_PACKAGE_PARALLELISM: "7"
           COVERAGE_UT_DISCOVERY_TIMEOUT_SECONDS: "900"
           COVERAGE_UT_CGO_TIMEOUT_SECONDS: "1800"
+          COVERAGE_GROUP: ${{ matrix.group }}
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
@@ -183,7 +202,7 @@ jobs:
             *) echo '::error::Unknown CS runner environment; refusing to choose another environment storage.'; exit 1 ;;
           esac
           test -n "${TEST_S3FS_CS:-}" || { echo '::error::Missing S3 configuration for the selected CS runner.'; exit 1; }
-          export MO_CI_S3_PREFIX="ci-ut/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          export MO_CI_S3_PREFIX="ci-ut/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/group-${COVERAGE_GROUP}"
           unset endpoint region apikey apisecret bucket TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD
           echo "- Coverage runner environment: ${CS_S3_ENV}; storage: same-environment CS S3; prefix: ${MO_CI_S3_PREFIX}." >> "$GITHUB_STEP_SUMMARY"
           echo '::notice::CS S3 mode: COS and OSS provider integration tests are not executed.'
@@ -293,8 +312,15 @@ jobs:
           phase_end "${phase_status}" "${COVERAGE_UT_DISCOVERY_TIMEOUT_SECONDS}"
           (( phase_status == 0 )) || exit "${phase_status}"
           package_count=$(printf '%s\n' "${test_scope}" | awk 'NF { count++ } END { print count + 0 }')
+          test "${package_count}" -eq 504 || { echo '::error::Unexpected package scope for pinned source'; exit 1; }
           instrumented_package_count=$(printf '%s\n' "${cover_pkgs}" | awk -F, '{ print NF }')
-          echo "coverage_ut package_count=${package_count} package_parallelism=${COVERAGE_UT_PACKAGE_PARALLELISM} instrumented_package_count=${instrumented_package_count}" | tee -a "${phase_timing}"
+          printf '%s\n' "${test_scope}" > "$RUNNER_TEMP/coverage-full-scope.txt"
+          python "$GITHUB_WORKSPACE/.ci-workflow/scripts/coverage_two_groups.py" \
+            --packages "$RUNNER_TEMP/coverage-full-scope.txt" --group "${COVERAGE_GROUP}" \
+            --manifest "$RUNNER_TEMP/coverage-group-plan.json" --selected "$RUNNER_TEMP/coverage-group.txt"
+          test_scope=$(cat "$RUNNER_TEMP/coverage-group.txt")
+          selected_count=$(wc -l < "$RUNNER_TEMP/coverage-group.txt" | tr -d ' ')
+          echo "coverage_ut package_count=${selected_count} full_package_count=${package_count} package_parallelism=${COVERAGE_UT_PACKAGE_PARALLELISM} instrumented_package_count=${instrumented_package_count}" | tee -a "${phase_timing}"
 
           phase_start prepare_cgo
           set +e
@@ -488,12 +514,14 @@ jobs:
           fi
           test -s "${coverage_report}"
           test -s "${coverage_profile}"
-          for required in 'TestObjectStorages/cs-s3/minio/basic' 'TestS3FSFromSpecs/cs-s3/streaming_write'; do
-            jq -e --arg test_name "$required" 'select(.Action == "pass" and .Package == "github.com/matrixorigin/matrixone/pkg/fileservice" and .Test == $test_name)' "${coverage_report}" >/dev/null || {
-              echo "::error::Required CS S3 test did not pass: ${required}"
-              exit 1
-            }
-          done
+          if [[ "${COVERAGE_GROUP}" == '0' ]]; then
+            for required in 'TestObjectStorages/cs-s3/minio/basic' 'TestS3FSFromSpecs/cs-s3/streaming_write'; do
+              jq -e --arg test_name "$required" 'select(.Action == "pass" and .Package == "github.com/matrixorigin/matrixone/pkg/fileservice" and .Test == $test_name)' "${coverage_report}" >/dev/null || {
+                echo "::error::Required CS S3 test did not pass: ${required}"
+                exit 1
+              }
+            done
+          fi
           phase_start compact_profile
           # -coverpkg repeats instrumented blocks for every test package. The
           # Go helper ORs exact block hits with memory proportional to unique
@@ -604,7 +632,7 @@ jobs:
         timeout-minutes: 15
         uses: matrixorigin/CI/actions/upload-artifact-with-retry@main
         with:
-          name: ut-coverage-generation-${{ inputs.bvt_generation || format('{0}-{1}', github.run_id, github.run_attempt) }}-attempt-${{ github.run_attempt }}
+          name: ut-coverage-group-${{ matrix.group }}-generation-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ut-coverage.out
           if-no-files-found: error
           retention-days: 7
@@ -707,8 +735,11 @@ jobs:
         timeout-minutes: 5
         uses: actions/upload-artifact@v7
         with:
-          name: ut-coverage-skips-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ut-coverage-skip-manifest.json
+          name: ut-coverage-skips-group-${{ matrix.group }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/ut-coverage-skip-manifest.json
+            ${{ runner.temp }}/coverage-group-plan.json
+            ${{ runner.temp }}/coverage-group.txt
           if-no-files-found: error
           retention-days: 14
       - id: upload_coverage_report
@@ -718,7 +749,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: ut-coverage-report-attempt-${{ github.run_attempt }}
+          name: ut-coverage-report-group-${{ matrix.group }}-attempt-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/ut-coverage-incident.md
             ${{ runner.temp }}/ut-coverage.stderr.log
@@ -732,7 +763,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: ut-coverage-diagnostics-attempt-${{ github.run_attempt }}
+          name: ut-coverage-diagnostics-group-${{ matrix.group }}-attempt-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/ut-coverage-report.json
             ${{ runner.temp }}/ut-coverage.stderr.log
@@ -755,4 +786,57 @@ jobs:
         if: ${{ always() && !cancelled() && steps.coverage_ut.outcome == 'failure' }}
         timeout-minutes: 5
         run: exit 1
+
+  merge-coverage-groups:
+    needs: [ut-coverage-linux-x86]
+    if: ${{ needs.ut-coverage-linux-x86.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          token: ${{ secrets.TOKEN_ACTION }}
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/coverage_two_groups_merge.py
+            scripts/compact_coverage_profile.go
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: ut-coverage-skips-group-0-${{ github.run_id }}-${{ github.run_attempt }}
+          path: groups/0
+      - uses: actions/download-artifact@v4
+        with:
+          name: ut-coverage-skips-group-1-${{ github.run_id }}-${{ github.run_attempt }}
+          path: groups/1
+      - uses: actions/download-artifact@v4
+        with:
+          name: ut-coverage-group-0-generation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: profiles/0
+      - uses: actions/download-artifact@v4
+        with:
+          name: ut-coverage-group-1-generation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: profiles/1
+      - name: Validate complete package evidence and merge profiles
+        run: |
+          set -euo pipefail
+          python3 scripts/coverage_two_groups_merge.py groups combined-skip-manifest.json
+          test "$(head -n 1 profiles/0/ut-coverage.out)" = 'mode: set'
+          test "$(head -n 1 profiles/1/ut-coverage.out)" = 'mode: set'
+          { cat profiles/0/ut-coverage.out; tail -n +2 profiles/1/ut-coverage.out; } > "$RUNNER_TEMP/ut-coverage.out"
+          go run scripts/compact_coverage_profile.go "$RUNNER_TEMP/ut-coverage.out"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: two-group-merged-coverage-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/ut-coverage.out
+            combined-skip-manifest.json
+          if-no-files-found: error
+          retention-days: 14
 
