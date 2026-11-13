@@ -25,6 +25,10 @@ jobs:
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           path: ./matrixone
+          # pull_request_target otherwise checks out the default branch.
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          # This job only executes after the commit has been merged.
+          allow-unsafe-pr-checkout: true
       - name: Set up Go
         uses: matrixorigin/CI/actions/setup-env@main
         with:
@@ -139,6 +143,8 @@ jobs:
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           path: ./head
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          allow-unsafe-pr-checkout: true
       - name: Set up Go
         uses: matrixorigin/CI/actions/setup-env@main
         with:
