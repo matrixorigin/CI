@@ -6,10 +6,17 @@ import sys
 import tempfile
 import unittest
 
-from scripts.run_coverage_packages import EMBED, groups, run
+from scripts.run_coverage_packages import EARLY_SAFE, EMBED, groups, run
 
 
 class CoveragePackageSchedulingTest(unittest.TestCase):
+    def test_only_allowlisted_packages_overlap_embed(self):
+        safe = sorted(EARLY_SAFE)
+        packages = [safe[0], 'example/cluster', EMBED, safe[1]]
+        self.assertEqual(groups(packages), [[safe[0], EMBED, safe[1]], ['example/cluster']])
+        self.assertEqual(groups([safe[0], 'example/cluster']), [[safe[0], 'example/cluster']])
+        self.assertCountEqual([p for group in groups(packages) for p in group], packages)
+
     def test_partition_preserves_every_package_once(self):
         packages = ["example/a", EMBED, "example/b"]
         plan = groups(packages)

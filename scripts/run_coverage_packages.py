@@ -13,13 +13,17 @@ import tempfile
 
 
 EMBED = "github.com/matrixorigin/matrixone/pkg/embed"
+EARLY_SAFE = frozenset({
+    "github.com/matrixorigin/matrixone/pkg/container/types",
+    "github.com/matrixorigin/matrixone/pkg/fileservice/s3fifo",
+})
 
 
 def groups(packages):
     if not packages or len(packages) != len(set(packages)):
         raise ValueError("coverage package scope must be nonempty and unique")
-    isolated = [package for package in packages if package == EMBED]
-    remainder = [package for package in packages if package != EMBED]
+    isolated = [package for package in packages if package == EMBED or (EMBED in packages and package in EARLY_SAFE)]
+    remainder = [package for package in packages if package not in isolated]
     return [group for group in (isolated, remainder) if group]
 
 
