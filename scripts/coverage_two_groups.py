@@ -40,6 +40,14 @@ def plan(packages):
         index = min(range(3), key=lambda i: (weights[i], i))
         groups[index].append(package)
         weights[index] += WEIGHTS.get(package.removeprefix(ROOT), 5)
+    # Trial one targeted change: service was ~454 s on MNL2, while MTY had
+    # headroom. Move it only when the balanced plan would place it in group 0.
+    service = ROOT + 'pkg/tests/service'
+    if service in groups[0]:
+        groups[0].remove(service)
+        groups[2].append(service)
+        weights[0] -= WEIGHTS['pkg/tests/service']
+        weights[2] += WEIGHTS['pkg/tests/service']
     groups = [sorted(group) for group in groups]
     if not all(groups) or sum(len(set(g)) for g in groups) != len(set().union(*map(set, groups))) or set().union(*map(set, groups)) != set(packages):
         raise ValueError('invalid partition')

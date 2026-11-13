@@ -18,6 +18,13 @@ class CoverageTwoGroupsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             plan([FILE_SERVICE, FILE_SERVICE])
 
+    def test_service_shift_preserves_complete_scope(self):
+        packages = [FILE_SERVICE, EMBED, ROOT+'pkg/tests/service', ROOT+'pkg/tests/sqlintegration', ROOT+'pkg/tests/issues/isolated', ROOT+'pkg/a']
+        result = plan(packages)
+        self.assertEqual(set().union(*map(set, result['groups'])), set(packages))
+        self.assertEqual(sum(map(len, result['groups'])), len(packages))
+        self.assertNotIn(ROOT+'pkg/tests/service', result['groups'][0])
+
 
 if __name__ == '__main__':
     unittest.main()
