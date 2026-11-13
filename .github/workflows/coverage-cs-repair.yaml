@@ -46,7 +46,7 @@ jobs:
           test "$CALLER_REPOSITORY" = matrixorigin/matrixone
           test "$CALLER_REF" = refs/heads/weilu-runner-test
           test "$EVENT_NAME" = workflow_dispatch
-          case "$STACK" in mty|mnl2|ruh) ;; *) exit 1 ;; esac
+          case "$STACK" in mty|mnl2|jed|ruh) ;; *) exit 1 ;; esac
           actual=$(gh api repos/matrixorigin/matrixone/pulls/32590 --jq .head.sha)
           test "$actual" = 9ebafa87748246a5b144a270ecc26b3a1fb2136c
           ancestry=$(gh api repos/matrixorigin/matrixone/compare/3c389434ff902b262c6d4e8e1b13e5f264e3f0b1..."$actual" --jq .status)
