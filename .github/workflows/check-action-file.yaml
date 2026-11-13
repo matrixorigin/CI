@@ -19,6 +19,8 @@ on:
       - 'scripts/select_coverage_artifacts.py'
       - 'scripts/test_select_coverage_artifacts.py'
       - 'scripts/test_coverage_native_runtime.py'
+      - 'scripts/test_coverage_build_mode.py'
+      - 'scripts/run_coverage_ut.py'
       - 'scripts/test_merge_trigger_tke_subject.py'
       - 'scripts/compact_coverage_profile.go'
       - 'scripts/compact_coverage_profile_test.go'
@@ -103,6 +105,8 @@ jobs:
         run: python3 scripts/test_select_coverage_artifacts.py -v
       - name: Test coverage native runtime paths
         run: python3 scripts/test_coverage_native_runtime.py -v
+      - name: Test coverage build mode contracts
+        run: python3 scripts/test_coverage_build_mode.py -v
       - name: Test TKE merge subject identity contract
         run: python3 scripts/test_merge_trigger_tke_subject.py -v
       - name: Test SCA license scope selection
