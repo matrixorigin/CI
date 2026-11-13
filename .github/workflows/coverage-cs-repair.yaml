@@ -60,7 +60,7 @@ jobs:
       matrix:
         include:
           - group: 0
-            stack: mnl2
+            stack: ruh
           - group: 1
             stack: jed
           - group: 2
