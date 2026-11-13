@@ -157,6 +157,7 @@ jobs:
         continue-on-error: true
         env:
           GOPROXY: https://goproxy.cn|https://proxy.golang.org|direct
+          GOMAXPROCS: "7"
           CS_S3_ENV: ${{ startsWith(runner.name, 'cs-mty-') && 'mty' || startsWith(runner.name, 'cs-mnl2-') && 'mnl2' || startsWith(runner.name, 'cs-jed-') && 'jed' || startsWith(runner.name, 'cs-ruh-') && 'ruh' || '' }}
           TEST_S3FS_CS: ${{ startsWith(runner.name, 'cs-mty-') && secrets.CS_S3_MTY_CONFIG || startsWith(runner.name, 'cs-mnl2-') && secrets.CS_S3_MNL2_CONFIG || startsWith(runner.name, 'cs-jed-') && secrets.CS_S3_JED_CONFIG || startsWith(runner.name, 'cs-ruh-') && secrets.CS_S3_RUH_CONFIG || '' }}
           COVERAGE_UT_TEST_TIMEOUT_SECONDS: "3600"
@@ -170,12 +171,13 @@ jobs:
           # Bound cross-process cluster overlap without serializing all eight
           # packages on one admission lock. Same-process exclusion is preserved.
           MO_TEST_CLUSTER_ADMISSION_POOL_SIZE: "2"
-          COVERAGE_UT_PACKAGE_PARALLELISM: "8"
+          COVERAGE_UT_PACKAGE_PARALLELISM: "7"
           COVERAGE_UT_DISCOVERY_TIMEOUT_SECONDS: "900"
           COVERAGE_UT_CGO_TIMEOUT_SECONDS: "1800"
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
+          echo "Coverage comparison: GOMAXPROCS=${GOMAXPROCS}; package parallelism=${COVERAGE_UT_PACKAGE_PARALLELISM}"
           case "${CS_S3_ENV:-}" in
             mty|mnl2|jed|ruh) ;;
             *) echo '::error::Unknown CS runner environment; refusing to choose another environment storage.'; exit 1 ;;
