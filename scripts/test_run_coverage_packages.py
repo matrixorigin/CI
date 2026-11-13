@@ -13,14 +13,14 @@ class CoveragePackageSchedulingTest(unittest.TestCase):
     def test_partition_preserves_every_package_once(self):
         packages = ["example/a", EMBED, "example/b"]
         plan = groups(packages)
-        self.assertEqual(plan, [[EMBED], ["example/a", "example/b"]])
+        self.assertEqual(plan, [packages])
         self.assertCountEqual([p for group in plan for p in group], packages)
         self.assertEqual(groups(["example/a"]), [["example/a"]])
         for invalid in ([], [EMBED, EMBED]):
             with self.assertRaises(ValueError):
                 groups(invalid)
 
-    def test_failure_does_not_skip_remaining_packages_or_hide_failure(self):
+    def test_group_preserves_all_packages_and_failure(self):
         for fail_first in (False, True):
             with self.subTest(fail_first=fail_first), tempfile.TemporaryDirectory() as directory:
                 profile = pathlib.Path(directory) / "combined.out"
@@ -35,17 +35,16 @@ class CoveragePackageSchedulingTest(unittest.TestCase):
 
                 status = run([EMBED, "example/a", "example/b"], profile, "example/instrumented", 8, execute)
                 self.assertEqual(status, int(fail_first))
-                self.assertEqual(len(commands), 2)
-                self.assertEqual(commands[0][-1:], [EMBED])
-                self.assertEqual(commands[1][-2:], ["example/a", "example/b"])
+                self.assertEqual(len(commands), 1)
+                self.assertEqual(commands[0][-3:], [EMBED, "example/a", "example/b"])
                 for command in commands:
                     self.assertIn("-timeout=20m", command)
                     self.assertIn("-coverpkg=example/instrumented", command)
                     self.assertEqual(command[command.index("-p")+1], "8")
                 self.assertEqual(profile.read_text().count("mode: set"), 1)
-                self.assertEqual(len(profile.read_text().splitlines()), 3)
+                self.assertEqual(len(profile.read_text().splitlines()), 2)
                 diagnostics = profile.with_suffix(".stderr.log").read_text()
-                self.assertEqual(diagnostics.count("warning: no packages"), 2)
+                self.assertEqual(diagnostics.count("warning: no packages"), 1)
                 self.assertNotIn("warning:", profile.read_text())
 
     def test_missing_profile_fails(self):
@@ -101,10 +100,10 @@ class CoveragePackageSchedulingTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stderr, '')
             events = [json.loads(line) for line in report.read_text().splitlines()]
-            self.assertEqual([e['Package'] for e in events], [EMBED, 'example/a'])
+            self.assertEqual([e['Package'] for e in events], ['example/a'])
             self.assertTrue(all(e['Action']=='pass' for e in events))
             self.assertEqual(json.loads(status.read_text())['result'], 'passed')
-            self.assertEqual(profile.with_suffix('.stderr.log').read_text().count('warning:'), 2)
+            self.assertEqual(profile.with_suffix('.stderr.log').read_text().count('warning:'), 1)
 
 
 if __name__ == "__main__":

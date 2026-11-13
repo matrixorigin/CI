@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep embed's package deadline independent of other cluster-owner queues.
+"""Run all selected coverage packages in one bounded parallel group.
 
 All selected packages execute once with the same instrumentation and deadlines.
 The outer run_coverage_ut.py retains the whole-suite deadline/process group.
@@ -18,9 +18,7 @@ EMBED = "github.com/matrixorigin/matrixone/pkg/embed"
 def groups(packages):
     if not packages or len(packages) != len(set(packages)):
         raise ValueError("coverage package scope must be nonempty and unique")
-    isolated = [package for package in packages if package == EMBED]
-    remainder = [package for package in packages if package != EMBED]
-    return [group for group in (isolated, remainder) if group]
+    return [packages]
 
 
 def run(packages, profile, coverpkg, parallel, execute=subprocess.run):
