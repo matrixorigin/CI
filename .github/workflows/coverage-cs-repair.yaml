@@ -60,18 +60,15 @@ jobs:
       matrix:
         include:
           - group: 0
-            stack: ruh
           - group: 1
-            stack: jed
           - group: 2
-            stack: mty
     outputs:
       status: ${{ steps.coverage_status.outputs.status }}
     needs: [check_coverage_eligibility]
     if: ${{ needs.check_coverage_eligibility.outputs.allowed == 'true' }}
     environment: ci
     # Schedule across CS environments; bind S3 to the actual runner below.
-    runs-on: ${{ format('cs-{0}-large-7c14g', matrix.stack) }}
+    runs-on: cs-large-7c14g
     # Leave headroom for setup, cache seeding, reports and post-action cleanup.
     # Success paths skip the failure-only steps.
     # The wrapper below enforces the test deadline before this job-level last

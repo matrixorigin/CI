@@ -31,8 +31,8 @@ def plan(packages):
         raise ValueError('empty or duplicate package scope')
     if FILE_SERVICE not in packages or EMBED not in packages:
         raise ValueError('required S3 or embed test package is missing')
-    # Isolated experiment: group 2 runs on MTY, which had headroom in the
-    # previous run. Keep S3 integration in group 0 and move embed off MNL2.
+    # Seed heavy packages into different groups; shared-pool jobs can land in
+    # any environment, so no group is assumed to use a particular runner.
     groups = [[FILE_SERVICE], [], [EMBED]]
     weights = [5, 0, WEIGHTS['pkg/embed']]
     for package in sorted(set(packages) - {FILE_SERVICE, EMBED},
@@ -40,14 +40,6 @@ def plan(packages):
         index = min(range(3), key=lambda i: (weights[i], i))
         groups[index].append(package)
         weights[index] += WEIGHTS.get(package.removeprefix(ROOT), 5)
-    # Trial one targeted change: service was ~454 s on MNL2, while MTY had
-    # headroom. Move it only when the balanced plan would place it in group 0.
-    service = ROOT + 'pkg/tests/service'
-    if service in groups[0]:
-        groups[0].remove(service)
-        groups[2].append(service)
-        weights[0] -= WEIGHTS['pkg/tests/service']
-        weights[2] += WEIGHTS['pkg/tests/service']
     groups = [sorted(group) for group in groups]
     if not all(groups) or sum(len(set(g)) for g in groups) != len(set().union(*map(set, groups))) or set().union(*map(set, groups)) != set(packages):
         raise ValueError('invalid partition')
