@@ -109,14 +109,6 @@ jobs:
           setup-java: false
           go-version-file: "${{ github.workspace }}/go.mod"
           cache: false
-      # Cache module download archives only, not the much larger build cache,
-      # workspace, Git credentials, or S3 data. Experiment is trusted dispatch
-      # only; review cache visibility and module sensitivity before production.
-      - name: Restore trusted Go module download cache
-        uses: actions/cache@v4
-        with:
-          path: ~/go/pkg/mod/cache/download
-          key: cs-two-group-mod-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.sum') }}
       - name: Prepare Python UDF contract tests
         if: ${{ hashFiles('pkg/udf/python/worker/requirements.txt') != '' }}
         timeout-minutes: 5
@@ -145,21 +137,6 @@ jobs:
             scripts/summarize_ut_report.py
           sparse-checkout-cone-mode: false
           path: .ci-workflow
-      # Import completed seed entries, not a directory-emptiness heuristic.
-      # The trusted action records cost/provenance; Go still validates cache keys.
-      - id: seed_caches
-        if: ${{ inputs.cache_seed }}
-        name: Seed Go caches from CI builder image
-        timeout-minutes: 20
-        continue-on-error: true
-        uses: matrixorigin/CI/actions/seed-go-caches@main
-        with:
-          flavor: coverage
-      - name: Record cache seed outcome
-        if: ${{ always() && !cancelled() }}
-        timeout-minutes: 5
-        run: |
-          echo "- Go cache seed outcome: \`${{ steps.seed_caches.outcome }}\`." >> "$GITHUB_STEP_SUMMARY"
       - id: coverage_ut
         name: Run coverage unit tests
         # This step includes bounded package discovery and native preparation
