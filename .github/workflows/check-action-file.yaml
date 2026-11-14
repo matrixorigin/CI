@@ -23,6 +23,7 @@ on:
       - 'scripts/compact_coverage_profile.go'
       - 'scripts/compact_coverage_profile_test.go'
       - 'scripts/*race_seed*.py'
+      - 'scripts/test_release_dictionary_packaging.py'
 
 permissions:
   contents: read
@@ -78,6 +79,9 @@ jobs:
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           npm test -- --runInBand __tests__/platform.test.ts
+      - name: Test Linux release dictionary packaging
+        timeout-minutes: 2
+        run: python3 -m unittest discover -s scripts -p 'test_release_dictionary_packaging.py' -v
       - name: Test macOS release packaging contracts
         timeout-minutes: 2
         run: python3 -m unittest discover -s actions/package-macos-release -p 'test_*.py' -v
