@@ -60,7 +60,8 @@ class CSS3CoverageTest(unittest.TestCase):
             self.assertIn(field + ": ${{ github.event.pull_request." + value + " }}", WORKFLOW)
         self.assertNotRegex(WORKFLOW, r"inputs\.(canary_\w+|runner_label)|weilu-runner-test|pulls/325\d+|minio-source")
         self.assertNotRegex(WORKFLOW, r"secrets\.(TEST_S3FS_(ALIYUN|QCLOUD)|S3\w+)")
-        self.assertIn('COVERAGE_UT_PACKAGE_PARALLELISM: "8"', WORKFLOW)
+        self.assertIn('COVERAGE_UT_PACKAGE_PARALLELISM: "7"', WORKFLOW)
+        self.assertIn('COVERAGE_GROUP: ${{ matrix.group }}', WORKFLOW)
 
     def test_runner_selects_only_its_own_storage(self):
         for stack in (*STACKS, "unknown"):
@@ -86,6 +87,7 @@ class CSS3CoverageTest(unittest.TestCase):
                     summary = Path(directory) / "summary"
                     env = dict(PATH=os.environ["PATH"], GITHUB_WORKSPACE=directory, GITHUB_STEP_SUMMARY=str(summary),
                                GITHUB_RUN_ID="123", GITHUB_RUN_ATTEMPT=attempt, CS_S3_ENV=stack, TEST_S3FS_CS=config,
+                               COVERAGE_GROUP="0", GOMAXPROCS="7", COVERAGE_UT_PACKAGE_PARALLELISM="7",
                                endpoint="legacy", TEST_S3FS_ALIYUN="legacy", TEST_S3FS_QCLOUD="legacy")
                     result = subprocess.run(["bash", "-c", script + '\ntest -z "${endpoint+x}${TEST_S3FS_ALIYUN+x}${TEST_S3FS_QCLOUD+x}"'],
                                             env=env, capture_output=True, text=True)
@@ -96,7 +98,7 @@ class CSS3CoverageTest(unittest.TestCase):
 
     def test_required_s3_tests_cannot_be_missing_skipped_or_failed(self):
         script = step_script("coverage_ut")
-        script = "for required in 'TestObjectStorages/" + script.split("for required in 'TestObjectStorages/", 1)[1].split("phase_start compact_profile", 1)[0]
+        script = 'if [[ "${COVERAGE_GROUP}" == \'0\' ]]; then' + script.split('if [[ "${COVERAGE_GROUP}" == \'0\' ]]; then', 1)[1].split("phase_start compact_profile", 1)[0]
         names = ("TestObjectStorages/cs-s3/minio/basic", "TestS3FSFromSpecs/cs-s3/streaming_write")
         for action in ("pass", "skip", "fail", "missing"):
             with self.subTest(action=action), tempfile.TemporaryDirectory() as directory:
@@ -105,7 +107,7 @@ class CSS3CoverageTest(unittest.TestCase):
                                                           Package="github.com/matrixorigin/matrixone/pkg/fileservice"))
                                            for i, name in enumerate(names) if not (i and action == "missing")))
                 result = subprocess.run(["bash", "-c", script], capture_output=True,
-                                        env=dict(PATH=os.environ["PATH"], coverage_report=str(report)))
+                                        env=dict(PATH=os.environ["PATH"], coverage_report=str(report), COVERAGE_GROUP="0"))
                 self.assertEqual(result.returncode == 0, action == "pass")
 
     def test_skip_manifest_uploaded_for_success_and_failure(self):
