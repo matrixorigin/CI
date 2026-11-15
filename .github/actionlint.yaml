@@ -20,9 +20,6 @@ paths:
     ignore:
       # Reusable-workflow-only contexts are supplied by MatrixOne callers.
       - 'property "workflow_(repository|sha)" is not defined'
-  .github/workflows/coverage-ut-dispatch-canary.yaml:
-    ignore:
-      - 'property "workflow_(repository|sha)" is not defined'
   .github/workflows/e2e-compose-parallel.yaml:
     ignore:
       - 'constant expression "false" in condition'
