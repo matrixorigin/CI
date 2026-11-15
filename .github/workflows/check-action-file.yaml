@@ -19,6 +19,18 @@ on:
       - 'scripts/select_coverage_artifacts.py'
       - 'scripts/test_select_coverage_artifacts.py'
       - 'scripts/test_coverage_native_runtime.py'
+      - 'scripts/coverage_skip_manifest.py'
+      - 'scripts/test_coverage_skip_manifest.py'
+      - 'scripts/test_cs_s3_coverage.py'
+      - 'scripts/coverage_two_groups.py'
+      - 'scripts/coverage_two_groups_merge.py'
+      - 'scripts/coverage_group_collect.py'
+      - 'scripts/run_coverage_packages.py'
+      - 'scripts/coverage_timing.py'
+      - 'scripts/test_coverage_two_groups.py'
+      - 'scripts/test_coverage_two_groups_merge.py'
+      - 'scripts/test_coverage_group_collect.py'
+      - 'scripts/test_run_coverage_packages.py'
       - 'scripts/test_merge_trigger_tke_subject.py'
       - 'scripts/compact_coverage_profile.go'
       - 'scripts/compact_coverage_profile_test.go'
@@ -103,6 +115,12 @@ jobs:
         run: python3 scripts/test_select_coverage_artifacts.py -v
       - name: Test coverage native runtime paths
         run: python3 scripts/test_coverage_native_runtime.py -v
+      - name: Test CS S3 routing and skip comparison contracts
+        timeout-minutes: 3
+        run: python3 -m unittest scripts.test_cs_s3_coverage scripts.test_coverage_skip_manifest scripts.test_summarize_coverage_ut scripts.test_run_coverage_ut -v
+      - name: Test three-group scheduling and artifact selection
+        timeout-minutes: 3
+        run: PYTHONPATH=scripts python3 -m unittest scripts.test_coverage_two_groups scripts.test_coverage_two_groups_merge scripts.test_coverage_group_collect scripts.test_run_coverage_packages -v
       - name: Test TKE merge subject identity contract
         run: python3 scripts/test_merge_trigger_tke_subject.py -v
       - name: Test SCA license scope selection
