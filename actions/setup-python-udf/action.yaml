@@ -1,0 +1,20 @@
+name: Set up Python UDF tests
+description: Install the checked-out MatrixOne worker contract for host Go tests
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - name: Install worker dependencies in a job-owned environment
+      shell: bash
+      run: |
+        set -euo pipefail
+        udf_venv=$(mktemp -d "$RUNNER_TEMP/python-udf.XXXXXX")
+        python3 -m venv "$udf_venv"
+        "$udf_venv/bin/python3" -m pip install --disable-pip-version-check --only-binary=:all: \
+          --retries 2 --timeout 30 -r pkg/udf/python/worker/requirements.txt
+        "$udf_venv/bin/python3" -c 'import sys, pyarrow, pyarrow.flight; print(sys.executable, pyarrow.__version__, pyarrow.__file__)'
+        # Go tests resolve python3 from PATH; child workers must inherit exactly
+        # the interpreter into which this step installed the pinned requirements.
+        echo "$udf_venv/bin" >> "$GITHUB_PATH"

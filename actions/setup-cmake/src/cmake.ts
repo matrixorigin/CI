@@ -85,11 +85,15 @@ function getPlatformData(version: string, platform?: string): PackageInfo {
         case 'mac':
         case 'darwin': {
             const cmakeArch = getCMakeArch('darwin');
+            const packagePlatform =
+                cmakeArch === 'arm64'
+                    ? 'macos-universal'
+                    : `Darwin-${cmakeArch}`;
             return {
                 binPath: 'CMake.app/Contents/bin/',
                 dropSuffix: '.tar.gz',
                 extractFunction: tools.extractTar,
-                url: `https://github.com/Kitware/CMake/releases/download/v${version}/cmake-${version}-Darwin-${cmakeArch}.tar.gz`
+                url: `https://github.com/Kitware/CMake/releases/download/v${version}/cmake-${version}-${packagePlatform}.tar.gz`
             };
         }
         case 'linux': {
@@ -107,9 +111,25 @@ function getPlatformData(version: string, platform?: string): PackageInfo {
 }
 
 const MIN_LINUX_AARCH64_CMAKE = '3.22.6';
+const MIN_DARWIN_ARM64_CMAKE = '3.22.6';
 
 function resolveCMakeVersion(version: string, platform?: string): string {
     const platformStr = platform || process.platform;
+    if (
+        (platformStr === 'mac' || platformStr === 'darwin') &&
+        process.arch === 'arm64'
+    ) {
+        const [major, minor, patch] = version.split('.').map(Number);
+        if (
+            major < 3 ||
+            (major === 3 && (minor < 22 || (minor === 22 && patch < 6)))
+        ) {
+            core.info(
+                `Using CMake ${MIN_DARWIN_ARM64_CMAKE} instead of ${version} for native Apple Silicon support`
+            );
+            return MIN_DARWIN_ARM64_CMAKE;
+        }
+    }
     if (platformStr === 'linux' && process.arch === 'arm64') {
         const [major, minor] = version.split('.').map(Number);
         if (major < 3 || (major === 3 && minor < 19)) {
@@ -139,16 +159,20 @@ export async function cmake(): Promise<string> {
 
     const { pathname } = new URL(data.url);
     const dirName = path.basename(pathname);
-    const outputPath = path.join(
-        cmakePath,
+    const relativeBinPath = path.join(
         dirName.replace(data.dropSuffix, ''),
         data.binPath
     );
+    const outputPath = path.join(cmakePath, relativeBinPath);
 
     const cmakeDir = tools.find('cmake', version);
     if (cmakeDir) {
-        core.addPath(cmakeDir);
-        return path.join(cmakeDir, platform === 'win' ? 'cmake.exe' : 'cmake');
+        const cachedBinPath = path.join(cmakeDir, relativeBinPath);
+        core.addPath(cachedBinPath);
+        return path.join(
+            cachedBinPath,
+            platform === 'win' ? 'cmake.exe' : 'cmake'
+        );
     }
 
     if (!fs.existsSync(cmakePath)) {

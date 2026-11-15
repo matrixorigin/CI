@@ -34,6 +34,12 @@ on:
       ACR_TOKEN: 
         description: 'ACR_TOKEN '
         required: true
+      TCR_USERNAME:
+        description: 'Optional Tencent TCR username for the Shanghai CI-builder mirror'
+        required: false
+      TCR_TOKEN:
+        description: 'Optional Tencent TCR token for the Shanghai CI-builder mirror'
+        required: false
       AWS_ROLE: 
         description: 'AWS_ROLE'
         required: false
@@ -133,6 +139,11 @@ jobs:
             type=registry,ref=${{ steps.prep.outputs.cache_repo }}
             type=registry,ref=${{ steps.prep.outputs.legacy_cache_repo }}
           cache-to: type=registry,ref=${{ steps.prep.outputs.cache_repo }},mode=max
+          # Aliyun ACR rejects OCI attestation manifests
+          # (application/vnd.oci.empty.v1+json); without this every ACR push
+          # fails with "denied: unknown manifest class".
+          provenance: false
+          sbom: false
 
   manifest:
     name: Publish multi-arch manifests
@@ -194,3 +205,147 @@ jobs:
 
           docker buildx imagetools inspect "${DOCKER_IMAGE}:${VERSION}"
           docker buildx imagetools inspect "${ACR_DOCKER_IMAGE}:${VERSION}"
+
+  ci-builder:
+    # Nightly amd64 CI builder image: a Go toolchain carrying every
+    # PR-invariant build input prebuilt (Go module cache, Go build caches
+    # warmed in the flavors PR CI compiles, compiled C thirdparties) for the
+    # shared build (build-mo.yaml) and the UT/coverage-UT cache seeds. The
+    # arm64 SCA job is served by its own actions/cache pipeline (see
+    # matrixorigin/matrixone sca-go-module-cache.yaml), so only amd64 is
+    # published. Skipped for release tags so the caches always track the
+    # default branch. Non-main refs run only the cheap presence gate and
+    # report why publication is skipped.
+    name: Build CI builder image
+    if: ${{ github.event_name != 'release' }}
+    # Best-effort: a builder-image problem must not turn the nightly product
+    # image pipeline red; consumers fall back to cold builds until the next
+    # successful publish.
+    continue-on-error: true
+    environment: ci
+    runs-on: ubuntu-22.04
+    # The coverage and plain Go flavors are each full-tree compiles; leave
+    # enough room for both nightly warms plus the UT cache seed steps.
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.TOKEN_ACTION }}
+          fetch-depth: 1
+
+      - name: Check Dockerfile presence
+        id: gate
+        run: |
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::notice::ci-builder publication is restricted to refs/heads/main; ref=${GITHUB_REF}; skipping"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          elif [ -f optools/images/Dockerfile.ci-builder ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::optools/images/Dockerfile.ci-builder not present; skipping builder image"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Free runner disk space
+        if: ${{ steps.gate.outputs.present == 'true' }}
+        run: |
+          set +e
+          sudo rm -rf /opt/hostedtoolcache/CodeQL /usr/local/lib/android
+          sudo docker builder prune -f -a
+          sudo docker images | grep -v REPOSITORY | awk '{system("sudo docker rmi "$1":"$2)}'
+          sudo df -h /
+
+      - name: Prepare
+        if: ${{ steps.gate.outputs.present == 'true' }}
+        id: prep
+        env:
+          TCR_USERNAME: ${{ secrets.TCR_USERNAME }}
+          TCR_TOKEN: ${{ secrets.TCR_TOKEN }}
+        run: |
+          DOCKER_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/${GITHUB_REPOSITORY#*/}
+          ACR_DOCKER_IMAGE="registry.cn-shanghai.aliyuncs.com/${DOCKER_IMAGE}"
+          TCR_DOCKER_IMAGE="ccr.ccs.tencentyun.com/matrixone-dev/matrixone"
+          IMMUTABLE_TAG="ci-builder-${GITHUB_SHA::12}"
+          echo "docker_image=${DOCKER_IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "tag=${DOCKER_IMAGE}:ci-builder" >> "$GITHUB_OUTPUT"
+          echo "immutable_tag=${DOCKER_IMAGE}:${IMMUTABLE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "acr_tag=${ACR_DOCKER_IMAGE}:ci-builder" >> "$GITHUB_OUTPUT"
+          echo "acr_immutable_tag=${ACR_DOCKER_IMAGE}:${IMMUTABLE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "tcr_tag=${TCR_DOCKER_IMAGE}:ci-builder-amd64" >> "$GITHUB_OUTPUT"
+          echo "tcr_immutable_tag=${TCR_DOCKER_IMAGE}:${IMMUTABLE_TAG}-amd64" >> "$GITHUB_OUTPUT"
+          if [ -n "${TCR_USERNAME}" ] && [ -n "${TCR_TOKEN}" ]; then
+            echo "tcr_enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::TCR credentials are not configured; the TKE ci-builder mirror will remain unavailable and consumers will use the source fallback"
+            echo "tcr_enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx
+        if: ${{ steps.gate.outputs.present == 'true' }}
+        id: buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to DockerHub
+        if: ${{ steps.gate.outputs.present == 'true' }}
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Login to Alicloud Container Registry
+        if: ${{ steps.gate.outputs.present == 'true' }}
+        uses: docker/login-action@v4
+        with:
+          registry: registry.cn-shanghai.aliyuncs.com
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_TOKEN }}
+
+      - name: Login to Tencent Container Registry
+        if: ${{ steps.gate.outputs.present == 'true' && steps.prep.outputs.tcr_enabled == 'true' }}
+        uses: docker/login-action@v4
+        with:
+          registry: ccr.ccs.tencentyun.com
+          username: ${{ secrets.TCR_USERNAME }}
+          password: ${{ secrets.TCR_TOKEN }}
+
+      # No registry layer cache on purpose: COPY . . changes nightly, which
+      # invalidates the expensive warm-build layer anyway, and reusing a stale
+      # cache would defeat the point of refreshing the Go caches.
+      - name: Build and push
+        if: ${{ steps.gate.outputs.present == 'true' }}
+        uses: docker/build-push-action@v7
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          context: .
+          file: ./optools/images/Dockerfile.ci-builder
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.prep.outputs.tag }}
+            ${{ steps.prep.outputs.immutable_tag }}
+            ${{ steps.prep.outputs.acr_tag }}
+            ${{ steps.prep.outputs.acr_immutable_tag }}
+          # Aliyun ACR rejects OCI attestation manifests; see the product
+          # build step above.
+          provenance: false
+          sbom: false
+
+      # TKE runners use the Shanghai Tencent registry. Keep the DockerHub and
+      # ACR publications above for existing consumers, then mirror the exact
+      # immutable image and its stable alias when TCR credentials are
+      # available. This step is optional so other image-build callers are not
+      # forced to provision TCR secrets.
+      - name: Publish Tencent CI-builder mirror
+        if: ${{ steps.gate.outputs.present == 'true' && steps.prep.outputs.tcr_enabled == 'true' }}
+        env:
+          SOURCE_IMAGE: ${{ steps.prep.outputs.acr_immutable_tag }}
+          TCR_IMAGE: ${{ steps.prep.outputs.tcr_immutable_tag }}
+          TCR_ALIAS: ${{ steps.prep.outputs.tcr_tag }}
+        run: |
+          set -euo pipefail
+          docker pull "${SOURCE_IMAGE}"
+          docker tag "${SOURCE_IMAGE}" "${TCR_IMAGE}"
+          docker tag "${SOURCE_IMAGE}" "${TCR_ALIAS}"
+          docker push "${TCR_IMAGE}"
+          docker push "${TCR_ALIAS}"

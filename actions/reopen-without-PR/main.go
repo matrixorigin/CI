@@ -45,9 +45,9 @@ var (
 	closeUser    = config.GetCloseUser()
 )
 
-// task 任务处理函数-- 添加标签-->转交sukki37-->reopen issue
+// task 任务处理函数-- 添加标签-->转交XuPeng-SH-->reopen issue
 func task() {
-	// 如果没有关联的pull request，给issue添加标签并转交给sukki37
+	// 如果没有关联的pull request，给issue添加标签并转交给XuPeng-SH
 	// 添加标签
 	labelURL := fmt.Sprintf("%s/repos/%s/issues/%d/labels", baseURL, repo, issueNumber)
 	labelSlice := strings.Split(addLabelData, ",")
@@ -65,7 +65,7 @@ func task() {
 	defer labelResp.Body.Close()
 	fmt.Printf("Add labels %s successfully.\n", addLabelData)
 
-	// 转交给sukki37
+	// 转交给XuPeng-SH
 	assigneeURL := fmt.Sprintf("%s/repos/%s/issues/%d/assignees", baseURL, repo, issueNumber)
 	assigneeData := map[string]string{"assignees": assignees}
 	jsonData, err = json.Marshal(assigneeData)

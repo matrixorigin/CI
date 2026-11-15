@@ -1,0 +1,114 @@
+name: Race seed canary
+
+on:
+  workflow_call:
+    inputs:
+      ci_sha:
+        description: Same immutable CI commit as the reusable workflow reference
+        required: true
+        type: string
+      matrixone_sha:
+        description: Full SHA reachable from matrixorigin/matrixone main
+        required: true
+        type: string
+      image:
+        description: Builder repository@sha256 digest (never a mutable tag)
+        required: true
+        type: string
+      repetitions:
+        description: One smoke pair per cache state, or three measured pairs
+        type: string
+        default: '1'
+    secrets:
+      S3ENDPOINT:
+        required: true
+      S3REGION:
+        required: true
+      S3APIKEY:
+        required: true
+      S3APISECRET:
+        required: true
+      S3BUCKET:
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: race-seed-canary
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    if: github.repository == 'matrixorigin/matrixone' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: matrixorigin/CI
+          ref: ${{ inputs.ci_sha }}
+          persist-credentials: false
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.matrixone_sha }}
+          SEED_IMAGE: ${{ inputs.image }}
+          REPETITIONS: ${{ inputs.repetitions }}
+          CI_SHA: ${{ inputs.ci_sha }}
+        run: python3 scripts/race_seed_plan.py
+
+  warm-snapshot:
+    needs: plan
+    uses: ./.github/workflows/race-seed-sample.yaml
+    with:
+      ci_sha: ${{ inputs.ci_sha }}
+      matrixone_sha: ${{ inputs.matrixone_sha }}
+      image: ${{ inputs.image }}
+      name: warm-preparation
+      cache_state: prepare
+      seed: false
+    secrets: inherit
+
+  samples:
+    needs: [plan, warm-snapshot]
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    uses: ./.github/workflows/race-seed-sample.yaml
+    with:
+      ci_sha: ${{ inputs.ci_sha }}
+      matrixone_sha: ${{ inputs.matrixone_sha }}
+      image: ${{ inputs.image }}
+      name: ${{ matrix.name }}
+      cache_state: ${{ matrix.cache_state }}
+      seed: ${{ matrix.seed }}
+    secrets: inherit
+
+  compare:
+    needs: [plan, warm-snapshot, samples]
+    if: ${{ always() && needs.plan.result == 'success' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: matrixorigin/CI
+          ref: ${{ inputs.ci_sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: race-*
+          path: results
+      - env:
+          CANARY_REPETITIONS: ${{ inputs.repetitions }}
+        run: python3 scripts/race_seed_canary.py --summarize results
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: comparison
+          path: results/comparison.json
+          if-no-files-found: warn

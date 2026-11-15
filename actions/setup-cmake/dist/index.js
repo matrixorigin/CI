@@ -1479,9 +1479,16 @@ exports.ninja = void 0;
  * Copyright (c) 2020 Luca Cappa.
  */
 const core = __webpack_require__(470);
+const child_process_1 = __webpack_require__(129);
 const fs = __webpack_require__(747);
 const path = __webpack_require__(622);
 const tools = __webpack_require__(533);
+function runCommand(command, args) {
+    const result = child_process_1.spawnSync(command, args, { stdio: 'inherit' });
+    if (result.status !== 0) {
+        throw new Error(`Command failed: ${command} ${args.join(' ')}`);
+    }
+}
 /**
  * Compute an unique number given some text.
  * @param {string} text
@@ -1521,19 +1528,20 @@ function getPlatform(platform) {
 }
 function ninja() {
     return __awaiter(this, void 0, void 0, function* () {
-        const version = core.getInput('ninja', {
+        let version = core.getInput('ninja', {
             required: true
         });
         const platform = getPlatform(core.getInput('platform'));
+        if (platform === 'mac' && process.arch === 'arm64') {
+            const [major, minor, patch] = version.split('.').map(Number);
+            if (major < 1 ||
+                (major === 1 && (minor < 12 || (minor === 12 && patch < 1)))) {
+                core.info(`Using Ninja 1.12.1 instead of ${version} for native Apple Silicon support`);
+                version = '1.12.1';
+            }
+        }
         if (platform === 'linux' && process.arch === 'arm64') {
             yield core.group('Install ninja-build via apt on linux/arm64', () => __awaiter(this, void 0, void 0, function* () {
-                const child_process_1 = __webpack_require__(129);
-                const runCommand = (command, args) => {
-                    const result = child_process_1.spawnSync(command, args, { stdio: 'inherit' });
-                    if (result.status !== 0) {
-                        throw new Error(`Command failed: ${command} ${args.join(' ')}`);
-                    }
-                };
                 runCommand('sudo', ['apt-get', 'update', '-qq']);
                 runCommand('sudo', ['apt-get', 'install', '-y', 'ninja-build']);
             }));
@@ -4827,11 +4835,14 @@ function getPlatformData(version, platform) {
         case 'mac':
         case 'darwin': {
             const cmakeArch = getCMakeArch('darwin');
+            const packagePlatform = cmakeArch === 'arm64'
+                ? 'macos-universal'
+                : `Darwin-${cmakeArch}`;
             return {
                 binPath: 'CMake.app/Contents/bin/',
                 dropSuffix: '.tar.gz',
                 extractFunction: tools.extractTar,
-                url: `https://github.com/Kitware/CMake/releases/download/v${version}/cmake-${version}-Darwin-${cmakeArch}.tar.gz`
+                url: `https://github.com/Kitware/CMake/releases/download/v${version}/cmake-${version}-${packagePlatform}.tar.gz`
             };
         }
         case 'linux': {
@@ -4848,8 +4859,18 @@ function getPlatformData(version, platform) {
     }
 }
 const MIN_LINUX_AARCH64_CMAKE = '3.22.6';
+const MIN_DARWIN_ARM64_CMAKE = '3.22.6';
 function resolveCMakeVersion(version, platform) {
     const platformStr = platform || process.platform;
+    if ((platformStr === 'mac' || platformStr === 'darwin') &&
+        process.arch === 'arm64') {
+        const [major, minor, patch] = version.split('.').map(Number);
+        if (major < 3 ||
+            (major === 3 && (minor < 22 || (minor === 22 && patch < 6)))) {
+            core.info(`Using CMake ${MIN_DARWIN_ARM64_CMAKE} instead of ${version} for native Apple Silicon support`);
+            return MIN_DARWIN_ARM64_CMAKE;
+        }
+    }
     if (platformStr === 'linux' && process.arch === 'arm64') {
         const [major, minor] = version.split('.').map(Number);
         if (major < 3 || (major === 3 && minor < 19)) {
@@ -4871,11 +4892,13 @@ function cmake() {
         const cmakePath = getOutputPath(key);
         const { pathname } = new URL(data.url);
         const dirName = path.basename(pathname);
-        const outputPath = path.join(cmakePath, dirName.replace(data.dropSuffix, ''), data.binPath);
+        const relativeBinPath = path.join(dirName.replace(data.dropSuffix, ''), data.binPath);
+        const outputPath = path.join(cmakePath, relativeBinPath);
         const cmakeDir = tools.find('cmake', version);
         if (cmakeDir) {
-            core.addPath(cmakeDir);
-            return path.join(cmakeDir, platform === 'win' ? 'cmake.exe' : 'cmake');
+            const cachedBinPath = path.join(cmakeDir, relativeBinPath);
+            core.addPath(cachedBinPath);
+            return path.join(cachedBinPath, platform === 'win' ? 'cmake.exe' : 'cmake');
         }
         if (!fs.existsSync(cmakePath)) {
             yield core.group('Download and extract CMake', () => __awaiter(this, void 0, void 0, function* () {

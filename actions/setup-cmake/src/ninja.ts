@@ -61,17 +61,33 @@ function getPlatform(platform?: string) {
 }
 
 export async function ninja(): Promise<string> {
-    const version = core.getInput('ninja', {
+    let version = core.getInput('ninja', {
         required: true
     });
 
     const platform = getPlatform(core.getInput('platform'));
 
+    if (platform === 'mac' && process.arch === 'arm64') {
+        const [major, minor, patch] = version.split('.').map(Number);
+        if (
+            major < 1 ||
+            (major === 1 && (minor < 12 || (minor === 12 && patch < 1)))
+        ) {
+            core.info(
+                `Using Ninja 1.12.1 instead of ${version} for native Apple Silicon support`
+            );
+            version = '1.12.1';
+        }
+    }
+
     if (platform === 'linux' && process.arch === 'arm64') {
-        await core.group('Install ninja-build via apt on linux/arm64', async () => {
-            runCommand('sudo', ['apt-get', 'update', '-qq']);
-            runCommand('sudo', ['apt-get', 'install', '-y', 'ninja-build']);
-        });
+        await core.group(
+            'Install ninja-build via apt on linux/arm64',
+            async () => {
+                runCommand('sudo', ['apt-get', 'update', '-qq']);
+                runCommand('sudo', ['apt-get', 'install', '-y', 'ninja-build']);
+            }
+        );
         return 'ninja';
     }
 

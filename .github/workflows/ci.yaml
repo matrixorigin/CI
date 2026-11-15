@@ -3,6 +3,22 @@ name: MatrixOne CI
 
 on:
   workflow_call:
+    inputs:
+      ut_cache_seed:
+        description: "Opt-in host-ut-v1 cache canary; keep disabled until end-to-end cost is measured"
+        required: false
+        type: boolean
+        default: false
+      ut_parallel:
+        description: "Maximum number of UT packages built and tested concurrently"
+        required: false
+        type: number
+        default: 6
+      ut_sharded:
+        description: "Run the complete race UT suite as four disjoint parallel shards"
+        required: false
+        type: boolean
+        default: false
     secrets:
       TOKEN_ACTION:
         description: "Token for checkout (e.g. pull from fork/private)"
@@ -39,10 +55,19 @@ on:
         required: true
 
 jobs:
-  ut-linux-x86:
+  ut-linux-x86-shard:
+    strategy:
+      fail-fast: false
+      # Bound runner fan-out even if the shard list evolves later.
+      max-parallel: 4
+      matrix:
+        ut_shard: ${{ fromJSON(inputs.ut_sharded && '["light","issues","embedded","heavy-plan"]' || '["all"]') }}
     environment: ci
     runs-on: ${{ vars.UT_RUNNER_LABEL || 'ubuntu-22.04' }}
-    name: UT Test on Ubuntu/x86
+    # Preserve the existing check and execution path for every caller that has
+    # not opted into sharding. In sharded mode only the summary job below owns
+    # the established required-check name.
+    name: ${{ inputs.ut_sharded && format('UT Test shard {0} on Ubuntu/x86', matrix.ut_shard) || 'UT Test on Ubuntu/x86' }}
     steps:
       - name: Pre Clean Some Unneeded Images
         run: |
@@ -104,7 +129,10 @@ jobs:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
+          # Every matrix child must test the immutable commit that triggered
+          # this run. A mutable branch ref can move while sibling shards queue,
+          # producing one green check from tests of different revisions.
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Set up Go
         uses: matrixorigin/CI/actions/setup-env@main
         with:
@@ -119,11 +147,77 @@ jobs:
           echo "bucket=${{ secrets.S3BUCKET }}" >> $GITHUB_ENV
           # set ut workdir
           echo "UT_WORKDIR=${{ github.workspace }}" >> $GITHUB_ENV
+      - name: Configure Shanghai Go proxy
+        if: ${{ contains(vars.UT_RUNNER_LABEL, 'shanghai') }}
+        env:
+          SHANGHAI_GOPROXY: http://goproxy.goproxy.svc.cluster.local|https://goproxy.cn|direct
+        run: |
+          set -euo pipefail
+
+          echo "Runner: ${{ runner.name }}"
+          echo "Runner OS: ${{ runner.os }}"
+
+          proxy_url="${SHANGHAI_GOPROXY%%|*}"
+          proxy_host="${proxy_url#*://}"
+          probe_module="github.com/spf13/cobra"
+          probe_version="$(
+            awk -v module="$probe_module" '
+              $1 == module { print $2; exit }
+              $1 == "require" && $2 == module { print $3; exit }
+            ' go.mod 2>/dev/null || true
+          )"
+          proxy_status=""
+          proxy_enabled="false"
+          probe_result="not-attempted"
+
+          if [[ -z "$probe_version" ]]; then
+            probe_result="module-not-found-in-go.mod"
+          elif ! timeout 20s getent hosts "$proxy_host"; then
+            probe_result="dns-failed-or-timed-out"
+          elif proxy_status="$(curl \
+              --silent \
+              --show-error \
+              --connect-timeout 5 \
+              --max-time 30 \
+              --output /dev/null \
+              --write-out '%{http_code}' \
+              "${proxy_url}/${probe_module}/@v/${probe_version}.info")" && \
+            [[ "$proxy_status" == "200" ]]; then
+            proxy_enabled="true"
+            probe_result="module-http-200"
+            echo "Shanghai internal GOPROXY served ${probe_module}@${probe_version}"
+            echo "Using GOPROXY=${SHANGHAI_GOPROXY}"
+            echo "GOPROXY=${SHANGHAI_GOPROXY}" >> "$GITHUB_ENV"
+          else
+            probe_result="module-http-${proxy_status:-unavailable}"
+          fi
+
+          if [[ "$proxy_enabled" != "true" ]]; then
+            echo "::warning::Shanghai internal GOPROXY probe failed (${probe_result}); leaving GOPROXY unchanged"
+          fi
+      # Import completed seed entries, not a directory-emptiness heuristic.
+      # The trusted action records cost/provenance; Go still validates cache keys.
+      - id: seed_caches
+        if: ${{ inputs.ut_cache_seed }}
+        name: Seed Go caches from CI builder image
+        timeout-minutes: 20
+        continue-on-error: true
+        uses: matrixorigin/CI/actions/seed-go-caches@main
+        with:
+          flavor: race
+      - name: Prepare Python UDF contract tests
+        if: ${{ hashFiles('pkg/udf/python/worker/requirements.txt') != '' }}
+        timeout-minutes: 5
+        uses: matrixorigin/CI/actions/setup-python-udf@main
       - name: Unit Testing
         id: ut
         run: |
-          cd $GITHUB_WORKSPACE && make clean && make config
-          make ut UT_PARALLEL=${{ vars.UT_PARALLEL || 6 }} UT_TIMEOUT=${{ vars.UT_TIMEOUT || 40 }}
+          # Keep the explicit config and time it separately for the proxy canary.
+          cd $GITHUB_WORKSPACE && make clean && time make config
+          # Unsharded callers retain the repository-variable override. An
+          # explicit sharded canary owns its per-runner budget so an inherited
+          # variable cannot silently replace the requested experiment value.
+          time make ut UT_CONFIGURED=1 UT_PARALLEL=${{ inputs.ut_sharded && inputs.ut_parallel || vars.UT_PARALLEL || inputs.ut_parallel }} UT_TIMEOUT=${{ vars.UT_TIMEOUT || 40 }} UT_SHARD=${{ matrix.ut_shard }}
       - name: Print Result(Old)
         if: ${{ always() }}
         continue-on-error: true
@@ -171,55 +265,285 @@ jobs:
         continue-on-error: true
         run: |
           find ./ut-report -name top.txt -exec cat {} \;
-
-  ut-mac-x86:
-    #if: ${{ !github.event.pull_request.draft }}
-    if: ${{ false }}
-    environment: ci
-    runs-on: macos-12
-    name: UT Test on Darwin/x86
-
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          token: ${{ secrets.TOKEN_ACTION }}
-          fetch-depth: "3"
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
-      - name: Set up Go
-        uses: matrixorigin/CI/actions/setup-env@main
-        with:
-          setup-java: true
-          go-version-file: "${{ github.workspace }}/go.mod"
-      - uses: matrixorigin/setup-hdfs@master
-        with:
-          hdfs-download-url: "https://github.com/matrixorigin/CI/releases/download/hadoop-binary-3.4.1/hadoop-3.4.1.tar.gz"
-      - name: Set env
-        run: |
-          echo "endpoint=${{ secrets.S3ENDPOINT }}" >> $GITHUB_ENV
-          echo "region=${{ secrets.S3REGION }}" >> $GITHUB_ENV
-          echo "apikey=${{ secrets.S3APIKEY }}" >> $GITHUB_ENV
-          echo "apisecret=${{ secrets.S3APISECRET }}" >> $GITHUB_ENV
-          echo "bucket=${{ secrets.S3BUCKET }}" >> $GITHUB_ENV
-          # set ut workdir
-          echo "UT_WORKDIR=${{ github.workspace }}" >> $GITHUB_ENV
-      - name: Unit Testing
-        run: |
-          cd $GITHUB_WORKSPACE && make clean && make config
-          make ut UT_PARALLEL=6
-      - name: Print Result
-        if: ${{ always() }}
+      # The runner normally snapshots the main JSON before returning a
+      # failure. If an outer kill reaches cleanup first, recover that one
+      # source from scratch so the artifact still contains the only raw
+      # report, without uploading it twice on the normal failure path.
+      - name: Recover main UT report for diagnostics
+        if: ${{ failure() || cancelled() }}
         continue-on-error: true
+        timeout-minutes: 2
+        shell: bash
         run: |
-          cd $UT_WORKDIR;
-          find scratch -name "**-UT-Count.out" -exec cat {} \;
+          set -euo pipefail
+          destination="${GITHUB_WORKSPACE}/ut-report/ut-report.json"
+          if [ -s "${destination}" ]; then
+            exit 0
+          fi
+          report="$(find "${GITHUB_WORKSPACE}/scratch" -type f -name '*-UT-Report.out' -print -quit 2>/dev/null || true)"
+          if [ -z "${report}" ]; then
+            echo "::warning::No raw UT report was available for diagnostic recovery"
+            exit 0
+          fi
+          mkdir -p "$(dirname "${destination}")"
+          if ! ln "${report}" "${destination}" 2>/dev/null; then
+            cp "${report}" "${destination}"
+          fi
+          echo "::notice::Recovered raw UT report into ${destination}"
+      # Keep failure diagnostics useful without allowing PR-controlled test
+      # output to consume unbounded artifact storage or runner time. The
+      # source reports remain untouched; oversized files in the upload copy
+      # contain a clear head/tail truncation marker and are listed in the
+      # manifest.
+      - name: Bound UT diagnostic artifact
+        if: ${{ failure() || cancelled() }}
+        continue-on-error: true
+        timeout-minutes: 2
+        shell: bash
+        env:
+          UT_DIAGNOSTIC_MAX_BYTES: 262144000
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import shutil
+          from pathlib import Path
 
+          root = Path(os.environ["GITHUB_WORKSPACE"])
+          stage = Path(os.environ["RUNNER_TEMP"]) / "ut-diagnostics"
+          limit = int(os.environ.get("UT_DIAGNOSTIC_MAX_BYTES", "262144000"))
+          manifest_reserve = 65536
+          payload_limit = max(0, limit - manifest_reserve)
+          if stage.exists():
+              shutil.rmtree(stage)
+          stage.mkdir(parents=True)
+
+          files = set()
+          ut_report = root / "ut-report"
+          if ut_report.is_dir():
+              files.update(p for p in ut_report.rglob("*") if p.is_file())
+
+          scratch = root / "scratch"
+          if scratch.is_dir():
+              patterns = (
+                  "**/*-UT.log",
+                  "**/*-light-race-report.out*",
+                  "**/*-engine-race-report.out*",
+                  "**/*-plan-race-report.out*",
+                  "**/*-embedded-prebuild.out*",
+              )
+              for pattern in patterns:
+                  files.update(p for p in scratch.glob(pattern) if p.is_file())
+              snapshot = ut_report / "ut-report.json"
+              if not snapshot.is_file() or snapshot.stat().st_size == 0:
+                  files.update(
+                      p for p in scratch.glob("**/*-UT-Report.out") if p.is_file()
+                  )
+
+          def is_under(path, directory):
+              try:
+                  path.relative_to(directory)
+                  return True
+              except ValueError:
+                  return False
+
+          def priority(path):
+              name = path.name
+              if is_under(path, ut_report):
+                  return {
+                      "top.txt": 0,
+                      "ut-checkpoint.log": 1,
+                      "ut-report.json": 2,
+                      "ut-stderr.log": 3,
+                  }.get(name, 4)
+              return 5
+
+          ordered = sorted(files, key=lambda path: (priority(path), str(path)))
+          entries = []
+          original_total = 0
+          stored_total = 0
+          remaining = payload_limit
+
+          def remove_if_present(path):
+              try:
+                  path.unlink()
+              except FileNotFoundError:
+                  pass
+
+          def copy_limited(source, destination, allowed):
+              if allowed <= 0:
+                  return 0
+              temporary = destination.with_name(destination.name + ".partial")
+              remove_if_present(temporary)
+              written = 0
+              try:
+                  with source.open("rb") as input_file, temporary.open("wb") as output_file:
+                      while written < allowed:
+                          chunk = input_file.read(min(1024 * 1024, allowed - written))
+                          if not chunk:
+                              break
+                          output_file.write(chunk)
+                          written += len(chunk)
+                  temporary.replace(destination)
+                  return written
+              except OSError:
+                  remove_if_present(temporary)
+                  raise
+
+          def copy_head_tail(source, destination, allowed):
+              marker = (
+                  b"\n# UT diagnostic file truncated; "
+                  b"see manifest for original size.\n"
+              )
+              if allowed <= len(marker):
+                  return 0
+              payload = allowed - len(marker)
+              head_limit = payload // 2
+              tail_limit = payload - head_limit
+              temporary = destination.with_name(destination.name + ".partial")
+              remove_if_present(temporary)
+              try:
+                  with source.open("rb") as input_file, temporary.open("wb") as output_file:
+                      output_file.write(marker)
+                      head = input_file.read(head_limit)
+                      output_file.write(head)
+                      tail = b""
+                      if tail_limit:
+                          try:
+                              input_file.seek(-tail_limit, os.SEEK_END)
+                              tail = input_file.read(tail_limit)
+                          except OSError:
+                              tail = b""
+                      output_file.write(tail)
+                  temporary.replace(destination)
+                  return len(marker) + len(head) + len(tail)
+              except OSError:
+                  remove_if_present(temporary)
+                  raise
+
+          for source in ordered:
+              relative = source.relative_to(root)
+              destination = stage / relative
+              try:
+                  size = source.stat().st_size
+                  original_total += size
+                  destination.parent.mkdir(parents=True, exist_ok=True)
+                  if size <= remaining:
+                      stored = copy_limited(source, destination, remaining)
+                      try:
+                          final_size = source.stat().st_size
+                      except OSError:
+                          final_size = size
+                      truncated = stored < final_size
+                  elif remaining >= 128:
+                      stored = copy_head_tail(source, destination, remaining)
+                      truncated = True
+                  else:
+                      stored = 0
+                      truncated = True
+                  stored_total += stored
+                  remaining -= stored
+                  entries.append(
+                      f"{relative}\toriginal_bytes={size}\tstored_bytes={stored}"
+                      f"\ttruncated={str(truncated).lower()}"
+                  )
+              except (OSError, ValueError) as error:
+                  entries.append(f"{relative}\terror={error}")
+
+          manifest = stage / "manifest.txt"
+          truncated_count = sum(
+              1
+              for entry in entries
+              if "truncated=true" in entry or "\terror=" in entry
+          )
+          header = (
+              "UT diagnostic artifact budget\n"
+              f"max_bytes={limit}\n"
+              f"original_bytes={original_total}\n"
+              f"stored_bytes={stored_total}\n"
+              f"truncated_or_skipped={truncated_count}\n"
+          )
+          footer_reserve = 128
+          entry_budget = max(0, manifest_reserve - len(header.encode()) - footer_reserve)
+          included = []
+          omitted = 0
+          used = 0
+          for entry in entries:
+              encoded = (entry + "\n").encode("utf-8", "replace")
+              if used + len(encoded) <= entry_budget:
+                  included.append(entry)
+                  used += len(encoded)
+              else:
+                  omitted += 1
+          footer = f"manifest_entries_omitted={omitted}\n"
+          manifest_text = header + "\n".join(included) + "\n" + footer
+          manifest_bytes = manifest_text.encode("utf-8", "replace")
+          manifest.write_bytes(manifest_bytes[:manifest_reserve])
+          print(
+              f"UT diagnostic artifact: original_bytes={original_total} "
+              f"stored_bytes={stored_total} max_bytes={limit} "
+              f"files={len(entries)}"
+          )
+          PY
+      # A timeout exits before the normal UT analyzer can publish its usual
+      # reports. MatrixOne's runner preserves the partial JSON stream,
+      # checkpoint, stderr, and slow-case summary under this directory. Keep
+      # the raw evidence downloadable while avoiding an artifact on every
+      # successful UT run.
+      - name: Upload UT diagnostics
+        if: ${{ failure() || cancelled() }}
+        continue-on-error: true
+        timeout-minutes: 5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ut-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.ut_shard }}
+          path: ${{ runner.temp }}/ut-diagnostics
+          if-no-files-found: ignore
+          retention-days: 1
+          compression-level: 6
+      # Successful runs keep only the small performance baseline. Raw JSON
+      # and helper streams remain failure/cancellation diagnostics.
+      - name: Upload UT baseline summary
+        if: ${{ success() }}
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ut-summary-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.ut_shard }}
+          path: |
+            ${{ github.workspace }}/ut-report/top.txt
+            ${{ github.workspace }}/ut-report/ut-checkpoint.log
+          if-no-files-found: ignore
+          retention-days: 1
+          compression-level: 6
+
+  # Preserve the established required-check name and make it an AND gate over
+  # every shard. fail-fast=false above ensures one failure cannot hide missing
+  # coverage by cancelling the other shards. Keep this job disabled for the
+  # default single-runner mode: its real UT job already owns the required name,
+  # so merging this workflow has no extra runner cost for existing callers.
+  ut-linux-x86:
+    if: ${{ always() && inputs.ut_sharded }}
+    needs: ut-linux-x86-shard
+    runs-on: ubuntu-22.04
+    name: ${{ inputs.ut_sharded && 'UT Test on Ubuntu/x86' || 'UT shard summary (disabled)' }}
+    steps:
+      - name: Require every UT shard
+        env:
+          UT_SHARD_RESULT: ${{ needs.ut-linux-x86-shard.result }}
+        run: |
+          if [[ "${UT_SHARD_RESULT}" != "success" ]]; then
+            echo "One or more UT shards did not succeed: ${UT_SHARD_RESULT}"
+            exit 1
+          fi
+          echo "Every UT shard succeeded"
   sca:
     environment: ci
     # SCA is CPU-bound but does not run the database or BVT; validate it on
     # the smaller standard ARM runner. A repository variable remains an
     # explicit escape hatch for a larger runner.
     runs-on: ${{ vars.SCA_RUNNER_LABEL || 'arm64-mo-shanghai-4c8g' }}
+    timeout-minutes: 90
     name: SCA Test on Linux/arm64
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -227,7 +551,7 @@ jobs:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
           repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: thiagodnf/yaml-schema-checker@v0.0.12
         name: Check Issue Template
         with:
@@ -235,37 +559,294 @@ jobs:
           yamlFiles: |
             .github/ISSUE_TEMPLATE/*.yml
             .github/ISSUE_TEMPLATE/*.yaml
+      - name: Enable runner Node for incremental SCA
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            core.addPath(require('node:path').dirname(process.execPath));
+            core.info(`SCA Node runtime: ${process.version}`);
+      - name: Configure Shanghai Go proxy
+        if: ${{ !vars.SCA_RUNNER_LABEL || contains(vars.SCA_RUNNER_LABEL, 'shanghai') }}
+        run: |
+          echo "GOPROXY=http://goproxy.goproxy.svc.cluster.local|https://goproxy.cn|direct" >> "$GITHUB_ENV"
       - name: Set up Go
         uses: matrixorigin/CI/actions/setup-env@main
         with:
           setup-java: false
           setup-cmake: true
           go-version-file: "${{ github.workspace }}/go.mod"
+      - name: Clean generated SCA outputs
+        run: |
+          set -euo pipefail
+          make clean
+          rm -rf .sca-static-check-tools .sca-golangci-analysis-cache .sca-onnx-runtime
+      - name: Resolve Go module cache metadata
+        id: go-module-cache-metadata
+        run: |
+          set -euo pipefail
+          cache_dir="$GITHUB_WORKSPACE/.sca-go-module-cache"
+          # Self-hosted runner workspaces can outlive a job. Start from only the
+          # trusted cache archive, not files left by a previous PR.
+          GOMODCACHE="$cache_dir" go clean -modcache
+          echo "GOMODCACHE=$cache_dir" >> "$GITHUB_ENV"
+          echo "version=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
+      - name: Restore Go module cache
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          # A relative path keeps both the hidden cache version and tar entries
+          # identical to the trusted producer across different runner layouts.
+          path: .sca-go-module-cache
+          key: matrixone-go-mod-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-module-cache-metadata.outputs.version }}-${{ hashFiles('go.mod', 'go.sum') }}
+          restore-keys: |
+            matrixone-go-mod-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-module-cache-metadata.outputs.version }}-
+      - name: Resolve Go module cache runtime layout
+        id: go-module-cache-layout
+        run: |
+          set -euo pipefail
+          # golangci-lint includes absolute compiled-file paths in its package
+          # action IDs. The optimized MatrixOne contract explicitly excludes
+          # this stable repository-local module cache from license scans.
+          if grep -q '^static-check-analysis:' Makefile && \
+            grep -Fqx "    - '.sca-go-module-cache/'" .licenserc.yml; then
+            test "$(go env GOMODCACHE)" = "$GITHUB_WORKSPACE/.sca-go-module-cache"
+            echo "analysis-compatible=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Preserve the original out-of-tree behavior for MatrixOne branches
+          # that predate the split SCA/cache contract. Their license config
+          # does not ignore the module cache, so leaving it in the checkout
+          # would make a complete header scan traverse third-party modules.
+          staging_dir="$GOMODCACHE"
+          runtime_root=$(mktemp -d "${RUNNER_TEMP%/}/matrixone-go-mod.XXXXXX")
+          runtime_dir="$runtime_root/cache"
+          if [[ -d "$staging_dir" ]]; then
+            mv "$staging_dir" "$runtime_dir"
+          else
+            mkdir "$runtime_dir"
+          fi
+          echo "GOMODCACHE=$runtime_dir" >> "$GITHUB_ENV"
+          echo "analysis-compatible=false" >> "$GITHUB_OUTPUT"
+      - name: Restore golangci-lint analysis cache
+        if: steps.go-module-cache-layout.outputs.analysis-compatible == 'true'
+        uses: matrixorigin/CI/actions/restore-sca-analysis-cache@main
+      # Keep these metadata outputs and the key schema aligned with
+      # matrixorigin/matrixone:.github/workflows/sca-go-module-cache.yaml.
+      - name: Resolve native cache metadata
+        id: native-cache-metadata
+        run: |
+          set -euo pipefail
+          compiler="$(cc -dumpmachine)-$(cc -dumpfullversion -dumpversion)"
+          cxx_compiler="$(c++ -dumpmachine)-$(c++ -dumpfullversion -dumpversion)"
+          cmake_version="$(cmake --version | sed -n '1p')"
+          echo "compiler=${compiler// /_}" >> "$GITHUB_OUTPUT"
+          echo "cxx-compiler=${cxx_compiler// /_}" >> "$GITHUB_OUTPUT"
+          echo "cmake=${cmake_version// /_}" >> "$GITHUB_OUTPUT"
+      - name: Resolve native SCA requirements
+        id: native-requirements
+        run: |
+          set -euo pipefail
+          # CI@main also serves maintenance branches that predate ONNX support.
+          # Make the restored/built artifact contract follow the checked-out
+          # MatrixOne generation instead of imposing main's dependency set.
+          onnx_required=false
+          if grep -Eq '^onnxruntime[[:space:]]*:' thirdparties/Makefile; then
+            onnx_required=true
+          fi
+          echo "onnx-required=$onnx_required" >> "$GITHUB_OUTPUT"
+      - name: Restore native SCA prerequisites
+        id: native-cache
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            thirdparties/install
+            cgo/*.o
+            cgo/libmo.a
+            cgo/libmo.so
+          key: matrixone-sca-native-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.native-cache-metadata.outputs.compiler }}-${{ steps.native-cache-metadata.outputs.cxx-compiler }}-${{ steps.native-cache-metadata.outputs.cmake }}-${{ hashFiles('Makefile', 'cgo/*.c', 'cgo/*.h', 'cgo/Makefile', 'thirdparties/Makefile', 'thirdparties/*.tar.gz', 'thirdparties/download') }}
+      - name: Validate restored native SCA prerequisites
+        id: native-cache-state
+        run: |
+          set -euo pipefail
+          usable=false
+          onnx_usable=true
+          if [[ "${{ steps.native-requirements.outputs.onnx-required }}" == "true" ]] && \
+            [[ -z "$(find thirdparties/install/lib -maxdepth 1 -type f -name 'onnxruntime*.so' -print -quit)" ]]; then
+            onnx_usable=false
+          fi
+          if [[ "${{ steps.native-cache.outputs.cache-hit }}" == "true" ]] && \
+            [[ -f thirdparties/install/include/xxhash.h ]] && \
+            [[ -f thirdparties/install/include/usearch.h ]] && \
+            [[ -f thirdparties/install/lib/libroaring.a ]] && \
+            [[ -f thirdparties/install/lib/libusearch_c.a ]] && \
+            [[ "$onnx_usable" == "true" ]] && \
+            [[ -f cgo/libmo.a ]] && \
+            [[ -f cgo/libmo.so ]]; then
+            usable=true
+          elif [[ "${{ steps.native-cache.outputs.cache-hit }}" == "true" ]]; then
+            echo "::warning::The exact native SCA cache is incomplete; rebuilding from verified inputs"
+          fi
+          echo "usable=$usable" >> "$GITHUB_OUTPUT"
+      - name: Restore ONNX Runtime fallback
+        id: onnx-cache
+        if: steps.native-cache-state.outputs.usable != 'true' && steps.native-requirements.outputs.onnx-required == 'true'
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: .sca-onnx-runtime
+          key: matrixone-sca-onnx-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('thirdparties/Makefile', 'thirdparties/download') }}
+      - name: Validate restored ONNX Runtime fallback
+        id: onnx-cache-state
+        if: steps.native-cache-state.outputs.usable != 'true' && steps.native-requirements.outputs.onnx-required == 'true'
+        run: |
+          set -euo pipefail
+          usable=false
+          if [[ "${{ steps.onnx-cache.outputs.cache-hit }}" == "true" ]]; then
+            mapfile -t onnx_files < <(find .sca-onnx-runtime -maxdepth 1 -type f -name 'onnxruntime*.so' -print)
+            if [[ "${#onnx_files[@]}" -eq 1 ]] && \
+              [[ -f .sca-onnx-runtime/SHA256SUMS ]] && \
+              (cd .sca-onnx-runtime && sha256sum --check --strict SHA256SUMS); then
+              usable=true
+            else
+              echo "::warning::The ONNX Runtime fallback cache is incomplete or corrupt; using the normal verified download path"
+              rm -rf .sca-onnx-runtime
+            fi
+          fi
+          echo "usable=$usable" >> "$GITHUB_OUTPUT"
+      - name: Resolve static-check tool cache metadata
+        id: static-check-tool-cache-metadata
+        run: |
+          set -euo pipefail
+          recipe_hash="$(sed -n '/^install-static-check-tools:/,/^$/p' Makefile | sha256sum | awk '{print $1}')"
+          test -n "$recipe_hash"
+          echo "recipe-hash=$recipe_hash" >> "$GITHUB_OUTPUT"
+      - name: Restore static-check tools
+        id: static-check-tool-cache
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: .sca-static-check-tools
+          key: matrixone-sca-tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-module-cache-metadata.outputs.version }}-${{ steps.static-check-tool-cache-metadata.outputs.recipe-hash }}
       - name: Prepare ENV
-        env:
-          GOPROXY: http://goproxy.goproxy.svc.cluster.local,https://goproxy.cn,direct
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
-          make clean && make config
-          make thirdparties
+          # The final static-check target owns the single full package-graph
+          # verification. Running config here as a separate make invocation
+          # duplicated `go list -test ./...` on every successful SCA job.
+          if [[ "${{ steps.native-cache-state.outputs.usable }}" == "true" ]]; then
+            echo "Using verified native SCA cache"
+          else
+            # Top-level cgo owns one complete native generation. Running
+            # thirdparties separately is both redundant and unsafe: cgo can
+            # discard that unstamped generation and download ONNX again.
+            if [[ "${{ steps.onnx-cache-state.outputs.usable }}" == "true" ]]; then
+              make ONNX_PREBUILT_DIR="$GITHUB_WORKSPACE/.sca-onnx-runtime" cgo
+            else
+              make cgo
+            fi
+          fi
           test -f thirdparties/install/include/xxhash.h
           test -f thirdparties/install/include/usearch.h
-          make cgo
-          retry_times=5
-          delay=10
-          for ((i = 1; i <= retry_times; i++)); do
-            if make install-static-check-tools; then
-              break
-            fi
-            if [ "$i" -eq "$retry_times" ]; then
-              echo "install-static-check-tools failed after ${retry_times} attempts"
-              exit 1
-            fi
-            echo "install-static-check-tools attempt ${i} failed, retrying in ${delay}s..."
-            sleep $delay
-          done
+          test -f thirdparties/install/lib/libroaring.a
+          test -f thirdparties/install/lib/libusearch_c.a
+          if [[ "${{ steps.native-requirements.outputs.onnx-required }}" == "true" ]]; then
+            find thirdparties/install/lib -maxdepth 1 -type f -name 'onnxruntime*.so' -print -quit | grep -q .
+          fi
+          test -f cgo/libmo.a
+          test -f cgo/libmo.so
+          rm -rf "$GITHUB_WORKSPACE/lib"
+          cp -r thirdparties/install/lib "$GITHUB_WORKSPACE/lib"
+          rm -rf .sca-onnx-runtime
+      - name: Prepare static-check tools
+        run: |
+          set -euo pipefail
+          runtime_dir="$(mktemp -d "${RUNNER_TEMP%/}/matrixone-sca-tools.XXXXXX")"
+          staging_dir="$GITHUB_WORKSPACE/.sca-static-check-tools"
+          if [[ "${{ steps.static-check-tool-cache.outputs.cache-hit }}" == "true" ]] && \
+            [[ -x "$staging_dir/golangci-lint" ]] && \
+            [[ -x "$staging_dir/molint" ]] && \
+            [[ -x "$staging_dir/license-eye" ]]; then
+            mv "$staging_dir"/* "$runtime_dir/"
+          else
+            retry_times=5
+            delay=10
+            for ((i = 1; i <= retry_times; i++)); do
+              if make install-static-check-tools; then
+                break
+              fi
+              if [ "$i" -eq "$retry_times" ]; then
+                echo "install-static-check-tools failed after ${retry_times} attempts"
+                exit 1
+              fi
+              echo "install-static-check-tools attempt ${i} failed, retrying in ${delay}s..."
+              sleep "$delay"
+            done
+            tool_bin="$(go env GOPATH)/bin"
+            cp "$tool_bin/golangci-lint" "$tool_bin/molint" "$tool_bin/license-eye" "$runtime_dir/"
+          fi
+          test -x "$runtime_dir/golangci-lint"
+          test -x "$runtime_dir/molint"
+          test -x "$runtime_dir/license-eye"
+          echo "$runtime_dir" >> "$GITHUB_PATH"
+      - name: Resolve PR license scope
+        id: license-scope
+        if: steps.go-module-cache-layout.outputs.analysis-compatible == 'true'
+        continue-on-error: true
+        uses: matrixorigin/CI/actions/resolve-sca-license-scope@main
+        with:
+          github-token: ${{ secrets.TOKEN_ACTION || github.token }}
       - name: Static Code Analysis
         run: |
-          cd $GITHUB_WORKSPACE
-          make static-check
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          # Keep the legacy path byte-for-byte equivalent during the two-PR
+          # rollout. The optimized path is enabled only after MatrixOne adds
+          # the companion target.
+          if ! grep -q '^static-check-analysis:' Makefile; then
+            echo "Incremental license target is unavailable; using complete static-check"
+            make static-check
+            exit 0
+          fi
+
+          # API/rate-limit/transient failures above must conservatively become
+          # the original complete checks, never a false green or a red gate.
+          license_header_full="${SCA_LICENSE_HEADER_FULL:-true}"
+          license_dependency_check="${SCA_LICENSE_DEPENDENCY_CHECK:-true}"
+          license_paths_file="${SCA_LICENSE_PATHS_FILE:-}"
+          if [[ "$license_header_full" != "true" ]] && \
+            [[ ! -f "$license_paths_file" ]]; then
+            echo "PR license scope is unavailable; using complete header check"
+            license_header_full="true"
+          fi
+          expected_config_hash="0d7fbab69ced8ee9a79ab07a0bcd18b9000b76b6068c417e0ba2ace654409588"
+          expected_tool_recipe_hash="4e79f64050864c9c411fc7a6cc6c206788d5480c8f3164e71ee6993231b2a5cb"
+          config_hash="$(sha256sum .licenserc.yml | awk '{print $1}')"
+          tool_recipe_hash="$(sed -n '/^install-static-check-tools:/,/^$/p' Makefile | sha256sum | awk '{print $1}')"
+          if [[ "$config_hash" != "$expected_config_hash" ]] || \
+            [[ "$tool_recipe_hash" != "$expected_tool_recipe_hash" ]]; then
+            echo "License contract differs from the validated revision (config=${config_hash}, recipe=${tool_recipe_hash}); using complete license checks"
+            license_header_full="true"
+            license_dependency_check="true"
+          fi
+
+          if [[ "$license_header_full" == "true" ]]; then
+            license-eye -c .licenserc.yml header check
+          else
+            mapfile -d '' -t license_paths < "$license_paths_file"
+            if (( ${#license_paths[@]} > 0 )); then
+              license-eye -c .licenserc.yml header check -- "${license_paths[@]}"
+            else
+              echo "No added, copied, modified, or renamed files require a license header check"
+            fi
+          fi
+
+          if [[ "$license_dependency_check" == "true" ]]; then
+            license-eye -c .licenserc.yml dep check
+          else
+            echo "Dependency manifests and license rules are unchanged"
+          fi
+
+          # Run cheap policy checks before the long analyzers so an invalid PR
+          # fails in seconds rather than consuming the full SCA critical path.
+          # Keep room for the runner on the 8 GiB ARM worker. This is a soft
+          # limit per Go process, and an explicit setting takes precedence.
+          GOMEMLIMIT="${GOMEMLIMIT:-5GiB}" make static-check-analysis GOLANGCI_LINT_CONCURRENCY=1
