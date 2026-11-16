@@ -249,7 +249,7 @@ jobs:
             *) echo '::error::Unknown CS runner environment; refusing to choose another environment storage.'; exit 1 ;;
           esac
           test -n "${TEST_S3FS_CS:-}" || { echo '::error::Missing S3 configuration for the selected CS runner.'; exit 1; }
-          export MO_CI_S3_PREFIX="ci-ut/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/group-${COVERAGE_GROUP}"
+          export MO_CI_S3_PREFIX="ci-ut/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/${CACHE_MODE}/group-${COVERAGE_GROUP}"
           unset endpoint region apikey apisecret bucket TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD
           echo "- Coverage runner environment: ${CS_S3_ENV}; storage: same-environment CS S3; prefix: ${MO_CI_S3_PREFIX}." >> "$GITHUB_STEP_SUMMARY"
           echo '::notice::CS S3 mode: COS and OSS provider integration tests are not executed.'
