@@ -1,0 +1,73 @@
+name: Isolated native and Go compile cache probe
+
+on:
+  workflow_call:
+    secrets:
+      TOKEN_ACTION:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  compile-pair:
+    if: ${{ github.repository == 'matrixorigin/matrixone' && github.ref == 'refs/heads/weilu-runner-test' && github.event_name == 'workflow_dispatch' && github.actor == 'Ariznawlll' }}
+    runs-on: cs-mnl2-large-7c14g
+    environment: ci
+    timeout-minutes: 100
+    steps:
+      - name: Check disk before checkout or compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in "$GITHUB_WORKSPACE" "$RUNNER_TEMP"; do
+            available=$(df -Pk "$path" | awk 'NR==2 {print $4}')
+            test "$available" -ge 62914560
+            echo "Available GiB: $((available / 1048576))"
+          done
+          test ! -e "$RUNNER_TEMP/compile-cache-probe-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+      - name: Install compile tools only
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          if ! command -v gcc || ! command -v g++ || ! command -v cmake || ! command -v python3 || ! command -v pkg-config; then
+            sudo apt-get -o Acquire::ForceIPv4=true update
+            sudo apt-get -o Acquire::ForceIPv4=true install -y build-essential cmake pkg-config python3 python-is-python3
+          fi
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          repository: matrixorigin/matrixone
+          ref: c129ff5677ff5a215491ba990167e013d79dcfb9
+          token: ${{ secrets.TOKEN_ACTION }}
+          persist-credentials: false
+      - uses: matrixorigin/CI/actions/setup-env@4670989748419fb169f88282cf05fb690ea91074
+        with:
+          setup-java: false
+          go-version-file: '${{ github.workspace }}/go.mod'
+          cache: false
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          repository: matrixorigin/CI
+          ref: codex/cs-native-gocache-probe
+          path: .compile-probe
+          sparse-checkout: scripts/compile_cache_probe.py
+          sparse-checkout-cone-mode: false
+          token: ${{ secrets.TOKEN_ACTION }}
+          persist-credentials: false
+      - name: Same-runner cold and restored compilation (no tests executed)
+        env:
+          GOPROXY: https://goproxy.cn|https://proxy.golang.org|direct
+        run: |
+          set -euo pipefail
+          python3 .compile-probe/scripts/compile_cache_probe.py \
+            --source "$GITHUB_WORKSPACE" \
+            --output "$RUNNER_TEMP/compile-cache-probe-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+      - name: Upload measurements only (not caches or binaries)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: compile-cache-probe-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/compile-cache-probe-${{ github.run_id }}-${{ github.run_attempt }}/summary.json
+            ${{ runner.temp }}/compile-cache-probe-${{ github.run_id }}-${{ github.run_attempt }}/*.log
+          retention-days: 7
