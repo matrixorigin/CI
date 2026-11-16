@@ -185,13 +185,30 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.TOKEN_ACTION }}
           SEED_RUN_ID: ${{ inputs.seed_run_id }}
-          EXPECTED_CALLER_SHA: ${{ github.sha }}
+          EXPECTED_SEED_CALLER_SHA: 14d4a9f24b429075324b16dc1f4a73a29ea54de2
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$SEED_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          run_metadata=$(gh api "repos/matrixorigin/matrixone/actions/runs/$SEED_RUN_ID")
-          jq -e --arg sha "$EXPECTED_CALLER_SHA" '.head_sha == $sha and .head_branch == "weilu-runner-test" and .event == "workflow_dispatch" and .status == "completed" and .conclusion == "success" and .actor.login == "Ariznawlll"' <<<"$run_metadata" >/dev/null
+          python3 - <<'PY'
+          import json, os, urllib.request
+          run_id = os.environ['SEED_RUN_ID']
+          if run_id != '43793791785':
+              raise SystemExit('Unexpected cold seed run ID')
+          request = urllib.request.Request(
+              f'https://api.github.com/repos/matrixorigin/matrixone/actions/runs/{run_id}',
+              headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                       'Accept': 'application/vnd.github+json', 'User-Agent': 'cs-gomod-comparison'})
+          with urllib.request.urlopen(request, timeout=30) as response:
+              run = json.load(response)
+          valid = (run.get('head_sha') == os.environ['EXPECTED_SEED_CALLER_SHA']
+                   and run.get('head_branch') == 'weilu-runner-test'
+                   and run.get('event') == 'workflow_dispatch'
+                   and run.get('status') == 'completed'
+                   and run.get('conclusion') == 'success'
+                   and run.get('actor', {}).get('login') == 'Ariznawlll')
+          if not valid:
+              raise SystemExit('Cold seed provenance check failed')
+          PY
           echo 'Cold seed provenance verified.'
       - name: Restore Go module download artifact
         if: ${{ inputs.cache_mode == 'warm' }}
