@@ -5,12 +5,85 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
+import signal
 import shutil
 import subprocess
 import tarfile
 import time
 
 from compile_cache_probe import SOURCE, GIB, sha256, members_safe, regular_files
+
+
+def coverage_contract(packages, coverpkg, full_packages):
+    """Pin the exact selected package order and the production instrumentation."""
+    selected = packages.read_text().splitlines()
+    full = full_packages.read_text().splitlines()
+    instrumented = coverpkg.read_text().strip().split(',')
+    for names in (selected, full, instrumented):
+        if (not names or len(names) != len(set(names)) or any(
+                not re.fullmatch(r'github\.com/matrixorigin/matrixone/[A-Za-z0-9_./-]+', n)
+                or '..' in n.split('/') for n in names)):
+            raise ValueError('invalid coverage package scope')
+    if (len(full) != 505 or len(instrumented) != 484
+            or not set(selected) <= set(full) or not set(instrumented) <= set(full)):
+        raise ValueError('unexpected fixed-source coverage scope')
+    return {'packages': selected, 'full_packages': full, 'coverpkg': instrumented,
+            'flags': ['-mod=readonly', '-count=1', '-json', '-short', '-v',
+                      '-tags', 'matrixone_test', '-timeout=20m', '-p', '7', '-covermode=set']}
+
+
+def coverage_compile_command(contract):
+    # -c never executes TestMain, init or tests. The null output permits repeated
+    # package basenames without retaining hundreds of final test executables.
+    return ['go', 'test', *contract['flags'], '-coverpkg=' + ','.join(contract['coverpkg']),
+            '-c', '-o', os.devnull, *contract['packages']]
+
+
+def verify_coverage_contract(manifest, contract):
+    if manifest.get('coverage_contract') != contract:
+        raise ValueError('coverage compile scope/flags mismatch')
+
+
+def run_compile(command, source, env, timeout=1800):
+    """Bound only this experiment's compiler; never signal other workloads."""
+    def check_space():
+        for path in (source, Path(env['RUNNER_TEMP'])):
+            if shutil.disk_usage(path).free < 20 * GIB:
+                raise ValueError('compile disk headroom below 20 GiB')
+    check_space()
+    deadline = time.monotonic() + timeout
+    process = subprocess.Popen(command, cwd=source, env=env, start_new_session=True)
+    try:
+        while True:
+            try:
+                code = process.wait(timeout=10)
+                if code:
+                    raise subprocess.CalledProcessError(code, command)
+                check_space()
+                return
+            except subprocess.TimeoutExpired:
+                check_space()
+                if time.monotonic() >= deadline:
+                    raise TimeoutError('compile-only deadline exceeded')
+    finally:
+        # The pgid is the child created above, not a runner/global selector.
+        # A leader can exit before a compiler descendant, so clean the group.
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        if process.poll() is None:
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        if process.poll() is None:
+            process.wait(timeout=5)
 
 
 def fingerprint(source):
@@ -103,8 +176,11 @@ def verify_native_hashes(source, hashes, allow_stamp_refresh=False):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('mode', choices=['seed', 'restore', 'verify-native'])
+    parser.add_argument('mode', choices=['seed', 'restore', 'verify-native', 'verify-scope'])
     parser.add_argument('--artifact', type=Path, required=True)
+    parser.add_argument('--packages', type=Path)
+    parser.add_argument('--coverpkg-file', type=Path)
+    parser.add_argument('--full-packages', type=Path)
     args = parser.parse_args()
     source = Path(os.environ['GITHUB_WORKSPACE']).resolve()
     cache = Path(os.environ['GOCACHE'])
@@ -113,9 +189,17 @@ def main():
     started = time.monotonic()
     manifest_path = artifact / 'manifest.json'
     archive = artifact / 'build-cache.tar.gz'
+    contract = None
+    if args.mode in ('seed', 'verify-scope'):
+        if not all((args.packages, args.coverpkg_file, args.full_packages)):
+            parser.error('seed and verify-scope require the three scope files')
+        contract = coverage_contract(args.packages, args.coverpkg_file, args.full_packages)
     if args.mode == 'seed':
         if artifact.exists():
             raise ValueError('artifact destination already exists')
+        def terminated(signum, frame):
+            raise SystemExit(128 + signum)
+        signal.signal(signal.SIGTERM, terminated)
         # This runs BEFORE any S3/UT execution. Never copy a test-result cache.
         env = dict(os.environ)
         for key in list(env):
@@ -128,9 +212,14 @@ def main():
         binary = Path(os.environ['RUNNER_TEMP']) / 'cache-seed-fileservice.test'
         if binary.exists():
             raise ValueError('seed binary destination exists')
-        subprocess.run(['go', 'test', '-mod=readonly', '-c', '-count=1', '-short', '-tags',
-                        'matrixone_test', '-p', '7', '-o', str(binary), './pkg/fileservice'],
-                       cwd=source, env=env, check=True, timeout=1800)
+        run_compile(['go', 'test', '-mod=readonly', '-c', '-count=1', '-short', '-tags',
+                     'matrixone_test', '-p', '7', '-o', str(binary), './pkg/fileservice'], source, env)
+        smoke_compile_seconds = time.monotonic() - started
+        # Same group and full -coverpkg list as the real Coverage command. No
+        # result cache exists: this snapshot is still before the first test.
+        coverage_started = time.monotonic()
+        run_compile(coverage_compile_command(contract), source, env)
+        coverage_compile_seconds = time.monotonic() - coverage_started
         compile_seconds = time.monotonic() - started
         native = list(regular_files(source / 'thirdparties/install')) + list(regular_files(source / 'lib'))
         native += sorted(p for p in (source / 'cgo').iterdir()
@@ -154,15 +243,24 @@ def main():
                     'native_inputs': snapshot_native_inputs(source),
                     'unpacked_bytes': size, 'archive_bytes': archive.stat().st_size,
                     'archive_sha256': sha256(archive), 'compile_only': True,
+                    'coverage_contract': contract,
+                    'smoke_compile_seconds': round(smoke_compile_seconds, 3),
+                    'coverage_compile_seconds': round(coverage_compile_seconds, 3),
                     'seed_compile_seconds': round(compile_seconds, 3),
                     'pack_hash_seconds': round(time.monotonic() - started - compile_seconds, 3)}
         manifest_path.write_text(json.dumps(manifest, sort_keys=True) + '\n')
-        print(json.dumps({k: manifest[k] for k in ('unpacked_bytes', 'archive_bytes', 'seed_compile_seconds', 'pack_hash_seconds')}))
+        print(json.dumps({k: manifest[k] for k in ('unpacked_bytes', 'archive_bytes', 'smoke_compile_seconds',
+                         'coverage_compile_seconds', 'seed_compile_seconds', 'pack_hash_seconds')}))
         return
     manifest = json.loads(manifest_path.read_text())
     check_manifest(manifest, expected)
     if not manifest.get('compile_only'):
         raise ValueError('untrusted seed scope')
+    if args.mode == 'verify-scope':
+        verify_coverage_contract(manifest, contract)
+        print(json.dumps({'coverage_compile_scope_valid': True, 'packages': len(contract['packages']),
+                          'instrumented_packages': len(contract['coverpkg'])}))
+        return
     if args.mode == 'restore':
         if shutil.disk_usage(source).free < manifest['unpacked_bytes'] + 20 * GIB:
             raise ValueError('insufficient restore headroom')
