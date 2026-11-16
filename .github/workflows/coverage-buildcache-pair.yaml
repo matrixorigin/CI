@@ -1,0 +1,91 @@
+name: Isolated full Coverage compilation cache cold warm pair
+on:
+  workflow_call:
+    secrets:
+      TOKEN_ACTION:
+        required: true
+      CS_S3_MTY_CONFIG:
+        required: true
+      CS_S3_MNL2_CONFIG:
+        required: true
+      CS_S3_JED_CONFIG:
+        required: true
+      CS_S3_RUH_CONFIG:
+        required: true
+permissions:
+  contents: read
+jobs:
+  cold:
+    uses: matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@5cd223c76e5a3809fe514787ed2adffa16a488cf
+    with:
+      cache_mode: cold
+    secrets: inherit
+  warm:
+    needs: [cold]
+    if: ${{ needs.cold.outputs.coverage_status == 'passed' }}
+    uses: matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@5cd223c76e5a3809fe514787ed2adffa16a488cf
+    with:
+      cache_mode: warm
+    secrets: inherit
+  verify-pair:
+    needs: [cold, warm]
+    if: ${{ !cancelled() && always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Require both complete Coverage arms
+        env:
+          COLD: ${{ needs.cold.outputs.coverage_status }}
+          WARM: ${{ needs.warm.outputs.coverage_status }}
+        run: test "$COLD" = passed && test "$WARM" = passed
+      - uses: actions/download-artifact@v4
+        with:
+          name: cold-ut-coverage-combined-skips-${{ github.run_id }}-${{ github.run_attempt }}
+          path: comparison/cold/skips
+      - uses: actions/download-artifact@v4
+        with:
+          name: warm-ut-coverage-combined-skips-${{ github.run_id }}-${{ github.run_attempt }}
+          path: comparison/warm/skips
+      - uses: actions/download-artifact@v4
+        with:
+          name: cold-ut-coverage-generation-${{ github.run_id }}-${{ github.run_attempt }}-attempt-${{ github.run_attempt }}
+          path: comparison/cold/profile
+      - uses: actions/download-artifact@v4
+        with:
+          name: warm-ut-coverage-generation-${{ github.run_id }}-${{ github.run_attempt }}-attempt-${{ github.run_attempt }}
+          path: comparison/warm/profile
+      - name: Compare every package skip and coverage instrumentation scope
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root=Path('comparison')
+          manifests=[json.loads((root/arm/'skips/combined-skip-manifest.json').read_text()) for arm in ('cold','warm')]
+          for m in manifests:
+              assert m['source_sha']=='c129ff5677ff5a215491ba990167e013d79dcfb9'
+              assert m['storage_mode']=='cs-s3'
+              assert not m['failed'] and not m['package_timeouts'] and not m['malformed_events']
+              assert len(m['started_packages'])==505
+          cold,warm=manifests
+          assert set(cold['started_packages'])==set(warm['started_packages'])
+          key=lambda t:(t['package'],t['test'])
+          assert sorted(cold['skipped_tests'],key=key)==sorted(warm['skipped_tests'],key=key), 'per-test skip mismatch'
+          def blocks(arm):
+              lines=(root/arm/'profile/ut-coverage.out').read_text().splitlines()
+              assert lines[0]=='mode: set' and len(lines)>1
+              return {tuple(line.split()[:2]) for line in lines[1:]}
+          assert blocks('cold')==blocks('warm'), 'instrumentation scope mismatch'
+          result={'source':cold['source_sha'],'packages':505,'skipped_tests':len(cold['skipped_tests']),
+                  'same_packages':True,'same_skips':True,'same_instrumentation_scope':True,
+                  'note':'Tests rerun with count=1. Compare full job times including cache transfer; no half-hour claim.'}
+          (root/'acceptance.json').write_text(json.dumps(result,indent=2)+'\n')
+          print(json.dumps(result,indent=2))
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+              f.write('Both full Coverage arms passed; 505 packages, identical per-test skips and instrumentation scope.\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-cache-pair-acceptance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: comparison/acceptance.json
+          if-no-files-found: error
+          retention-days: 14
