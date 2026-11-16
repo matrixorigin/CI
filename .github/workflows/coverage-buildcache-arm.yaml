@@ -122,7 +122,7 @@ jobs:
           token: ${{ secrets.TOKEN_ACTION }}
           fetch-depth: "3"
           repository: matrixorigin/matrixone
-          ref: c129ff5677ff5a215491ba990167e013d79dcfb9
+          ref: dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca
           persist-credentials: false
       - name: Set up Go
         timeout-minutes: 10
@@ -925,7 +925,7 @@ jobs:
       - name: Validate complete package evidence and merge profiles
         env:
           ARM: ${{ inputs.cache_mode }}
-          EXPECTED_HEAD_SHA: c129ff5677ff5a215491ba990167e013d79dcfb9
+          EXPECTED_HEAD_SHA: dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca
         run: |
           set -euo pipefail
           test -n "$EXPECTED_HEAD_SHA"
