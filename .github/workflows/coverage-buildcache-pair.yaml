@@ -16,14 +16,14 @@ permissions:
   contents: read
 jobs:
   cold:
-    uses: matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@68fb61eeb114161abcece7d1abef344c9040e429
+    uses: matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@a29d79b6b2705ecd476b8333cc7d60534fc476bf
     with:
       cache_mode: cold
     secrets: inherit
   warm:
     needs: [cold]
     if: ${{ needs.cold.outputs.coverage_status == 'passed' }}
-    uses: matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@68fb61eeb114161abcece7d1abef344c9040e429
+    uses: matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@a29d79b6b2705ecd476b8333cc7d60534fc476bf
     with:
       cache_mode: warm
     secrets: inherit
