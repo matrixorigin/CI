@@ -78,7 +78,7 @@ jobs:
     name: UT Coverage group ${{ matrix.group }} on Ubuntu/x86
     strategy:
       fail-fast: false
-      max-parallel: 1
+      max-parallel: 3
       matrix:
         include:
           - group: 0
