@@ -22,7 +22,12 @@ def fingerprint(source):
     for name, command in {'go': ['go', 'version'], 'cc': ['cc', '--version'],
                           'cxx': ['c++', '--version'], 'cmake': ['cmake', '--version']}.items():
         tools[name] = subprocess.check_output(command, text=True).splitlines()[0]
-    return {'schema': 1, 'source': SOURCE, 'tools': tools,
+    cpu = {}
+    for line in Path('/proc/cpuinfo').read_text().split('\n\n', 1)[0].splitlines():
+        key, _, value = line.partition(':')
+        if key.strip() in ('vendor_id', 'cpu family', 'model', 'model name', 'stepping', 'flags'):
+            cpu[key.strip()] = value.strip()
+    return {'schema': 1, 'source': SOURCE, 'tools': tools, 'cpu': cpu,
             'os': sha256(Path('/etc/os-release')),
             'platform': subprocess.check_output(['uname', '-sm'], text=True).strip(),
             'go_env': json.loads(subprocess.check_output(
