@@ -52,6 +52,55 @@ def validate_entries(entries, expected_size):
         raise ValueError('archive size/member budget mismatch')
 
 
+def native_inputs(source):
+    """The tracked input scope used by MO's native provenance protocol."""
+    names = subprocess.check_output(
+        ['git', 'ls-files', '-z', '--', 'Makefile', 'cgo', 'thirdparties'], cwd=source)
+    return [name.decode() for name in names.split(b'\0') if name]
+
+
+def snapshot_native_inputs(source):
+    result = {}
+    for name in native_inputs(source):
+        path = source / name
+        if path.is_symlink() or not path.is_file():
+            raise ValueError('unsupported native input')
+        result[name] = {'sha256': sha256(path), 'mtime_ns': path.stat().st_mtime_ns}
+    if not result:
+        raise ValueError('empty native input scope')
+    return result
+
+
+def restore_native_input_times(source, recorded):
+    """Restore build ordering, never content; validate the entire set first.
+
+    Fresh checkouts assign new mtimes to unchanged sources. Keeping archived
+    object mtimes but not source mtimes makes make rebuild a proven generation.
+    Do not touch outputs or the provenance stamp to hide an actual rebuild.
+    """
+    if set(recorded) != set(native_inputs(source)):
+        raise ValueError('native input scope mismatch')
+    for name, entry in recorded.items():
+        path = source / name
+        if (path.is_symlink() or any(p.is_symlink() for p in path.parents)
+                or not path.is_file() or sha256(path) != entry['sha256']):
+            raise ValueError('native input content mismatch')
+        timestamp = entry['mtime_ns']
+        if type(timestamp) is not int or not 0 < timestamp <= time.time_ns():
+            raise ValueError('invalid native input time')
+    for name, entry in recorded.items():
+        path = source / name
+        os.utime(path, ns=(path.stat().st_atime_ns, entry['mtime_ns']))
+
+
+def verify_native_hashes(source, hashes, allow_stamp_refresh=False):
+    for name, digest in hashes.items():
+        if allow_stamp_refresh and name == 'cgo/.mo-native-provenance':
+            continue
+        if sha256(source / name) != digest:
+            raise ValueError('native bytes changed; refusing Go build-cache reuse')
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('mode', choices=['seed', 'restore', 'verify-native'])
@@ -102,6 +151,7 @@ def main():
             for path in go_files:
                 tar.add(path, arcname='gocache/' + str(path.relative_to(cache)), recursive=False)
         manifest = {'fingerprint': expected, 'native_hashes': hashes,
+                    'native_inputs': snapshot_native_inputs(source),
                     'unpacked_bytes': size, 'archive_bytes': archive.stat().st_size,
                     'archive_sha256': sha256(archive), 'compile_only': True,
                     'seed_compile_seconds': round(compile_seconds, 3),
@@ -134,12 +184,10 @@ def main():
                     shutil.copyfileobj(src, dst)
                 target.chmod(member.mode & 0o777)
                 os.utime(target, (member.mtime, member.mtime))
-    for name, digest in manifest['native_hashes'].items():
-        # make cgo may refresh its provenance stamp, but native content must not change.
-        if args.mode == 'verify-native' and name.endswith('.mo-native-provenance'):
-            continue
-        if sha256(source / name) != digest:
-            raise ValueError('native bytes changed; refusing Go build-cache reuse')
+    verify_native_hashes(source, manifest['native_hashes'], args.mode == 'verify-native')
+    if args.mode == 'restore':
+        # Only after archive, provenance, and every native output hash pass.
+        restore_native_input_times(source, manifest['native_inputs'])
     print(json.dumps({'mode': args.mode, 'seconds': round(time.monotonic() - started, 3),
                       'free_bytes': shutil.disk_usage(source).free, 'native_hashes_valid': True}))
 
