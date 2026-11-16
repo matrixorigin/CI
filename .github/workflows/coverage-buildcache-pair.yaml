@@ -15,15 +15,106 @@ on:
 permissions:
   contents: read
 jobs:
+  validate-cleanup:
+    name: Validate download fixture cleanup before cache comparison
+    if: github.repository == 'matrixorigin/matrixone' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/weilu-runner-test' && github.actor == 'Ariznawlll'
+    runs-on: cs-mnl2-large-7c14g
+    timeout-minutes: 60
+    env:
+      GOMAXPROCS: '7'
+      GOFLAGS: ''
+      GOWORK: 'off'
+      GOPROXY: https://goproxy.cn|https://proxy.golang.org|direct
+    steps:
+      - name: Check isolated runner and disk headroom
+        run: |
+          set -euo pipefail
+          case "$RUNNER_NAME" in cs-mnl2-*) ;; *) exit 1 ;; esac
+          for path in "$GITHUB_WORKSPACE" "$RUNNER_TEMP"; do
+            test "$(df -Pk "$path" | awk 'NR==2 {print $4}')" -ge 62914560
+          done
+          test ! -e "$RUNNER_TEMP/cleanup-gocache"
+          test ! -e "$RUNNER_TEMP/cleanup-gomod"
+          echo "GOCACHE=$RUNNER_TEMP/cleanup-gocache" >> "$GITHUB_ENV"
+          echo "GOMODCACHE=$RUNNER_TEMP/cleanup-gomod" >> "$GITHUB_ENV"
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          repository: matrixorigin/matrixone
+          ref: dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca
+          token: ${{ secrets.TOKEN_ACTION }}
+          persist-credentials: false
+      - uses: matrixorigin/CI/actions/setup-env@4670989748419fb169f88282cf05fb690ea91074
+        with:
+          setup-java: false
+          go-version-file: '${{ github.workspace }}/go.mod'
+          cache: false
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          repository: matrixorigin/CI
+          ref: 4670989748419fb169f88282cf05fb690ea91074
+          token: ${{ secrets.TOKEN_ACTION }}
+          persist-credentials: false
+          path: .ci-workflow
+          sparse-checkout: scripts/prepare_coverage_cgo.sh
+          sparse-checkout-cone-mode: false
+      - name: Install native build dependencies
+        run: |
+          set -euo pipefail
+          if ! (command -v gcc && command -v g++ && command -v make && command -v pkg-config && command -v cmake); then
+            sudo apt-get -o Acquire::ForceIPv4=true update
+            sudo apt-get -o Acquire::ForceIPv4=true install -y build-essential cmake pkg-config
+          fi
+      - name: Prepare native libraries with original provenance checks
+        timeout-minutes: 30
+        run: |
+          set -euo pipefail
+          timeout --kill-after=30s 1700s .ci-workflow/scripts/prepare_coverage_cgo.sh > "$RUNNER_TEMP/cleanup-native.log" 2>&1
+      - name: Repeat actual cancellation and cleanup regressions
+        timeout-minutes: 25
+        run: |
+          set -euo pipefail
+          test "$(df -Pk "$RUNNER_TEMP" | awk 'NR==2 {print $4}')" -ge 20971520
+          export CGO_CFLAGS="-I$GITHUB_WORKSPACE/cgo -I$GITHUB_WORKSPACE/thirdparties/install/include"
+          export CGO_LDFLAGS="-L$GITHUB_WORKSPACE/cgo -lmo -Wl,-rpath,$GITHUB_WORKSPACE/cgo -L$GITHUB_WORKSPACE/thirdparties/install/lib -lusearch_c -Wl,-rpath,$GITHUB_WORKSPACE/thirdparties/install/lib -lm"
+          # No S3 configuration is passed to this job. These tests only use
+          # owned temporary directories and pipe-backed download fixtures.
+          timeout --kill-after=30s 1100s go test -mod=readonly -count=100 -json -short -tags matrixone_test -timeout=10m -p 2 \
+            ./pkg/fileservice -run '^(TestDiskCacheReadOfDownloadStopsOnCancel|TestDiskCacheDownloadCleanupWaitsForWriter)$' > "$RUNNER_TEMP/cleanup-repeat.json"
+          timeout --kill-after=30s 300s go test -mod=readonly -count=10 -json -short -tags matrixone_test -timeout=4m -p 2 \
+            ./pkg/fileservice -run '^(TestDiskCacheReadWaitsForDownloadedBytes|TestDiskCacheReadFallsBackWhenDownloadFails|TestDiskCacheReadBeyondDownloadedObject|TestObjectDownloadReadableAfterPublishOrRemoval|TestDiskCacheReadKeepsWaitingForChosenDownload)$' > "$RUNNER_TEMP/cleanup-neighbours.json"
+          python3 - <<'PY'
+          import collections, json, os
+          from pathlib import Path
+          checks = [
+              ('cleanup-repeat.json', 100, ['TestDiskCacheReadOfDownloadStopsOnCancel', 'TestDiskCacheDownloadCleanupWaitsForWriter']),
+              ('cleanup-neighbours.json', 10, ['TestDiskCacheReadWaitsForDownloadedBytes', 'TestDiskCacheReadFallsBackWhenDownloadFails', 'TestDiskCacheReadBeyondDownloadedObject', 'TestObjectDownloadReadableAfterPublishOrRemoval', 'TestDiskCacheReadKeepsWaitingForChosenDownload']),
+          ]
+          for filename, repeats, tests in checks:
+              events = [json.loads(line) for line in (Path(os.environ['RUNNER_TEMP']) / filename).read_text().splitlines()]
+              assert not any(e['Action'] in ('fail', 'skip') for e in events), filename
+              passes = collections.Counter(e.get('Test') for e in events if e['Action'] == 'pass')
+              assert all(passes[test] == repeats for test in tests), (filename, passes)
+              print(filename, 'verified', len(tests), 'tests x', repeats)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: cleanup-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/cleanup-repeat.json
+            ${{ runner.temp }}/cleanup-neighbours.json
+            ${{ runner.temp }}/cleanup-native.log
+          retention-days: 14
   cold:
-    uses: matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@7aae7c5e832a956de7724b2e1b6fc9e87909088c
+    needs: [validate-cleanup]
+    uses: matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@f227f762558ee5d80d4b612999cba6c45f405000
     with:
       cache_mode: cold
     secrets: inherit
   warm:
     needs: [cold]
     if: ${{ needs.cold.outputs.coverage_status == 'passed' }}
-    uses: matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@7aae7c5e832a956de7724b2e1b6fc9e87909088c
+    uses: matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@f227f762558ee5d80d4b612999cba6c45f405000
     with:
       cache_mode: warm
     secrets: inherit
@@ -62,7 +153,7 @@ jobs:
           root=Path('comparison')
           manifests=[json.loads((root/arm/'skips/combined-skip-manifest.json').read_text()) for arm in ('cold','warm')]
           for m in manifests:
-              assert m['source_sha']=='c129ff5677ff5a215491ba990167e013d79dcfb9'
+              assert m['source_sha']=='dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca'
               assert m['storage_mode']=='cs-s3'
               assert not m['failed'] and not m['package_timeouts'] and not m['malformed_events']
               assert len(m['started_packages'])==505
