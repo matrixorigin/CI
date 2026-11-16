@@ -2,6 +2,10 @@
 import pathlib
 import re
 import subprocess
+import json
+import os
+import tempfile
+import textwrap
 import unittest
 
 ARM = pathlib.Path(__file__).resolve().parents[1] / '.github/workflows/coverage-buildcache-arm.yaml'
@@ -38,6 +42,42 @@ class BaselineContract(unittest.TestCase):
                           'baseline-environment.json', 'ut-coverage-phase-timing.txt']:
             self.assertIn(invariant, self.text)
         self.assertNotIn('uses: actions/cache', self.text)
+
+    def test_comparison_accepts_matching_evidence_rejects_changed_source_or_environment(self):
+        wrapper = ARM.with_name('coverage-uncached-baseline.yaml').read_text()
+        code = wrapper.split('- name: Compare source environment all packages skips and instrumentation', 1)[1]
+        code = textwrap.dedent(code.split("python3 - <<'PY'\n", 1)[1].split('\n          PY', 1)[0])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp) / 'comparison'
+            manifest = {'source_sha': 'dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca', 'storage_mode': 'cs-s3',
+                        'failed': [], 'package_timeouts': [], 'malformed_events': [],
+                        'started_packages': [str(i) for i in range(505)], 'skipped_tests': []}
+            for arm in ('baseline', 'warm'):
+                (root/arm/'skips').mkdir(parents=True)
+                (root/arm/'profile').mkdir()
+                (root/arm/'skips/combined-skip-manifest.json').write_text(json.dumps(manifest))
+                (root/arm/'profile/ut-coverage.out').write_text('mode: set\na.go:1.1,2.1 1 1\n')
+            for group in range(3):
+                current = root/'baseline/reports'/f'baseline-ut-coverage-report-group-{group}-attempt-1/baseline-environment.json'
+                current.parent.mkdir(parents=True)
+                reference = root/'warm/reports'/f'warm-ut-coverage-report-group-{group}-attempt-1/build-cache-artifact/manifest.json'
+                reference.parent.mkdir(parents=True)
+                fp = {'source': manifest['source_sha'], 'group': str(group), 'tools': {'go': 'same'}, 'run': '1', 'attempt': '1'}
+                reference.write_text(json.dumps({'fingerprint': fp}))
+                fp['run'] = '2'
+                current.write_text(json.dumps({'mode': 'baseline', 'restored_cache': False, 'seed_precompile': False, 'fingerprint': fp}))
+            def check():
+                return subprocess.run(['python3', '-c', code], cwd=tmp, env={**os.environ, 'GITHUB_RUN_ID': '2'}, capture_output=True)
+            self.assertEqual(check().returncode, 0, check().stderr.decode())
+            changed = json.loads(current.read_text())
+            changed['fingerprint']['tools']['go'] = 'different'
+            current.write_text(json.dumps(changed))
+            self.assertNotEqual(check().returncode, 0)
+            changed['fingerprint']['tools']['go'] = 'same'
+            current.write_text(json.dumps(changed))
+            manifest['source_sha'] = '0' * 40
+            (root/'baseline/skips/combined-skip-manifest.json').write_text(json.dumps(manifest))
+            self.assertNotEqual(check().returncode, 0)
 
 
 if __name__ == '__main__':

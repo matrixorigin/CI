@@ -1,0 +1,135 @@
+name: Isolated uncached concurrent Coverage baseline
+on:
+  workflow_call:
+    secrets:
+      TOKEN_ACTION:
+        required: true
+      CS_S3_MTY_CONFIG:
+        required: true
+      CS_S3_MNL2_CONFIG:
+        required: true
+      CS_S3_JED_CONFIG:
+        required: true
+      CS_S3_RUH_CONFIG:
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  validate-versions:
+    if: github.repository == 'matrixorigin/matrixone' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/weilu-runner-test' && github.actor == 'Ariznawlll'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          repository: matrixorigin/CI
+          ref: d9e3905b2cf866966175de58ea86620161a12c53
+          token: ${{ secrets.TOKEN_ACTION }}
+          persist-credentials: false
+          fetch-depth: 0
+      - run: python3 scripts/check_buildcache_versions.py --arm-ref d9e3905b2cf866966175de58ea86620161a12c53 --expected-source dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca
+  baseline:
+    needs: [validate-versions]
+    uses: matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@d9e3905b2cf866966175de58ea86620161a12c53
+    with:
+      cache_mode: baseline
+    secrets: inherit
+  verify-against-completed-warm:
+    needs: [baseline]
+    if: ${{ !cancelled() && always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Require complete uncached Coverage
+        env:
+          STATUS: ${{ needs.baseline.outputs.coverage_status }}
+        run: test "$STATUS" = passed
+      - name: Verify the fixed successful reference run
+        env:
+          GH_READ_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          req = urllib.request.Request('https://api.github.com/repos/matrixorigin/matrixone/actions/runs/43870157584', headers={'Authorization': 'Bearer ' + os.environ['GH_READ_TOKEN'], 'Accept': 'application/vnd.github+json'})
+          with urllib.request.urlopen(req, timeout=30) as response:
+              run = json.load(response)
+          assert run['id'] == 43870157584 and run['conclusion'] == 'success' and run['status'] == 'completed'
+          assert run['head_sha'] == '0ec3f10ec4a7534a5942399c572717630408a36e'
+          assert run['head_branch'] == 'weilu-runner-test' and run['event'] == 'workflow_dispatch'
+          assert run['repository']['full_name'] == 'matrixorigin/matrixone'
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          name: baseline-ut-coverage-combined-skips-${{ github.run_id }}-${{ github.run_attempt }}
+          path: comparison/baseline/skips
+      - uses: actions/download-artifact@v4
+        with:
+          name: baseline-ut-coverage-generation-${{ github.run_id }}-${{ github.run_attempt }}-attempt-${{ github.run_attempt }}
+          path: comparison/baseline/profile
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: baseline-ut-coverage-report-group-*-attempt-${{ github.run_attempt }}
+          path: comparison/baseline/reports
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 43870157584
+          github-token: ${{ github.token }}
+          name: warm-ut-coverage-combined-skips-43870157584-1
+          path: comparison/warm/skips
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 43870157584
+          github-token: ${{ github.token }}
+          name: warm-ut-coverage-generation-43870157584-1-attempt-1
+          path: comparison/warm/profile
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 43870157584
+          github-token: ${{ github.token }}
+          pattern: warm-ut-coverage-report-group-*-attempt-1
+          path: comparison/warm/reports
+      - name: Compare source environment all packages skips and instrumentation
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path('comparison')
+          manifests = [json.loads((root/arm/'skips/combined-skip-manifest.json').read_text()) for arm in ('baseline', 'warm')]
+          for m in manifests:
+              assert m['source_sha'] == 'dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca'
+              assert m['storage_mode'] == 'cs-s3'
+              assert not m['failed'] and not m['package_timeouts'] and not m['malformed_events']
+              assert len(m['started_packages']) == 505
+          baseline, warm = manifests
+          assert set(baseline['started_packages']) == set(warm['started_packages'])
+          key = lambda t: (t['package'], t['test'])
+          assert sorted(baseline['skipped_tests'], key=key) == sorted(warm['skipped_tests'], key=key)
+          def blocks(arm):
+              lines = (root/arm/'profile/ut-coverage.out').read_text().splitlines()
+              assert lines[0] == 'mode: set' and len(lines) > 1
+              return {tuple(line.split()[:2]) for line in lines[1:]}
+          assert blocks('baseline') == blocks('warm')
+          for group in range(3):
+              candidates = list((root/'baseline/reports').glob(f'baseline-ut-coverage-report-group-{group}-attempt-*/baseline-environment.json'))
+              assert len(candidates) == 1
+              evidence = json.loads(candidates[0].read_text())
+              assert evidence['mode'] == 'baseline' and evidence['restored_cache'] is False and evidence['seed_precompile'] is False
+              current = evidence['fingerprint']
+              reference = json.loads((root/'warm/reports'/f'warm-ut-coverage-report-group-{group}-attempt-1/build-cache-artifact/manifest.json').read_text())['fingerprint']
+              # Run identity intentionally differs. All other source/toolchain,
+              # CPU/OS/path/helper-policy/group fields must still match exactly.
+              assert {k:v for k,v in current.items() if k not in ('run','attempt')} == {k:v for k,v in reference.items() if k not in ('run','attempt')}
+          result = {'source': baseline['source_sha'], 'reference_run': 43870157584, 'baseline_run': os.environ['GITHUB_RUN_ID'],
+                    'packages': 505, 'skipped_tests': len(baseline['skipped_tests']), 'same_environment_fingerprints': True,
+                    'same_packages': True, 'same_skips': True, 'same_instrumentation_scope': True,
+                    'note': 'No cache restore, seed precompilation or cache export in baseline. Timing and first-use amortization require separate accounting.'}
+          (root/'acceptance.json').write_text(json.dumps(result, indent=2)+'\n')
+          print(json.dumps(result, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uncached-baseline-acceptance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: comparison/acceptance.json
+          if-no-files-found: error
+          retention-days: 14
