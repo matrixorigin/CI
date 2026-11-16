@@ -1,4 +1,4 @@
-name: Isolated full Coverage compilation cache cold warm pair
+name: Isolated all-package Coverage compilation cache cold warm pair
 on:
   workflow_call:
     secrets:
@@ -16,14 +16,14 @@ permissions:
   contents: read
 jobs:
   cold:
-    uses: matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@8b1e65eae19be581b1b17ba59c4529ebe5f2cfdb
+    uses: matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@7aae7c5e832a956de7724b2e1b6fc9e87909088c
     with:
       cache_mode: cold
     secrets: inherit
   warm:
     needs: [cold]
     if: ${{ needs.cold.outputs.coverage_status == 'passed' }}
-    uses: matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@8b1e65eae19be581b1b17ba59c4529ebe5f2cfdb
+    uses: matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@7aae7c5e832a956de7724b2e1b6fc9e87909088c
     with:
       cache_mode: warm
     secrets: inherit
