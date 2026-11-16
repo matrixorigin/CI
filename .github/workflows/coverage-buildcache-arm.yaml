@@ -163,7 +163,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
           repository: matrixorigin/CI
-          ref: 7dd7d2aeef34faafcafd914a2d37d799386ae909
+          ref: 6f8d5f0c76ea314b7760a13062ada67f2ed586dc
           token: ${{ secrets.TOKEN_ACTION }}
           persist-credentials: false
           path: .build-cache-helper
