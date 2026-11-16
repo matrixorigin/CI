@@ -48,7 +48,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
           repository: matrixorigin/CI
-          ref: codex/cs-native-gocache-probe
+          ref: 4cb2eddfcbe00753c101e816e1a27caaa8b9d36d
           path: .compile-probe
           sparse-checkout: scripts/compile_cache_probe.py
           sparse-checkout-cone-mode: false
