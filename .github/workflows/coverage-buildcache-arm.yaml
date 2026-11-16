@@ -1,4 +1,4 @@
-name: Isolated full Coverage build-cache arm
+name: Isolated all-package Coverage compilation-cache arm
 
 on:
   workflow_call:
@@ -163,7 +163,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
           repository: matrixorigin/CI
-          ref: 6f8d5f0c76ea314b7760a13062ada67f2ed586dc
+          ref: 7c3eafea078c3b47943f55c532e0876a2bc7426f
           token: ${{ secrets.TOKEN_ACTION }}
           persist-credentials: false
           path: .build-cache-helper
@@ -267,11 +267,26 @@ jobs:
           rm -f "${coverage_progress}" "${coverage_status}" "${timeout_diagnostics}" "${runner_pid_file}" "${phase_failure}"
           rm -f "${package_error}" "${cgo_log}"
           : > "${phase_timing}"
+          resource_snapshot() {
+            {
+              echo "phase=${phase_name} boundary=$1 epoch=$(date +%s)"
+              df -Pk "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+              for resource in /sys/fs/cgroup/cpu.stat /sys/fs/cgroup/cpu.max \
+                /sys/fs/cgroup/cpu.pressure /sys/fs/cgroup/io.pressure \
+                /sys/fs/cgroup/memory.current /sys/fs/cgroup/memory.events; do
+                if [ -r "$resource" ]; then
+                  echo "resource=$resource"
+                  cat "$resource"
+                fi
+              done
+            } >> "$RUNNER_TEMP/coverage-resource-boundaries.txt"
+          }
 
           phase_start() {
             phase_name="$1"
             phase_started_at=$(date +%s)
             echo "phase=${phase_name} status=started" >> "${phase_timing}"
+            resource_snapshot start
           }
           phase_end() {
             raw_phase_status="$1"
@@ -292,6 +307,7 @@ jobs:
               phase_status_suffix=" raw_status=${raw_phase_status}"
             fi
             echo "phase=${phase_name} status=${phase_status} elapsed_seconds=${phase_elapsed_seconds}${phase_status_suffix}" >> "${phase_timing}"
+            resource_snapshot end
             if [ "${phase_status}" = '124' ]; then
               {
                 echo "Coverage UT phase exceeded its internal deadline: ${phase_name}"
@@ -361,12 +377,20 @@ jobs:
           package_count=$(printf '%s\n' "${test_scope}" | awk 'NF { count++ } END { print count + 0 }')
           instrumented_package_count=$(printf '%s\n' "${cover_pkgs}" | awk -F, '{ print NF }')
           printf '%s\n' "${test_scope}" > "$RUNNER_TEMP/coverage-full-scope.txt"
+          printf '%s\n' "${cover_pkgs}" > "$RUNNER_TEMP/coverage-instrumented-scope.txt"
           python "$GITHUB_WORKSPACE/.ci-workflow/scripts/coverage_two_groups.py" \
             --packages "$RUNNER_TEMP/coverage-full-scope.txt" --group "${COVERAGE_GROUP}" \
             --manifest "$RUNNER_TEMP/coverage-group-plan.json" --selected "$RUNNER_TEMP/coverage-group.txt"
           test_scope=$(cat "$RUNNER_TEMP/coverage-group.txt")
           selected_count=$(wc -l < "$RUNNER_TEMP/coverage-group.txt" | tr -d ' ')
           echo "coverage_ut package_count=${selected_count} full_package_count=${package_count} package_parallelism=${COVERAGE_UT_PACKAGE_PARALLELISM} instrumented_package_count=${instrumented_package_count}" | tee -a "${phase_timing}"
+          if [ "$CACHE_MODE" = warm ]; then
+            python3 .build-cache-helper/scripts/coverage_build_cache.py verify-scope \
+              --artifact "$RUNNER_TEMP/build-cache-artifact" \
+              --packages "$RUNNER_TEMP/coverage-group.txt" \
+              --full-packages "$RUNNER_TEMP/coverage-full-scope.txt" \
+              --coverpkg-file "$RUNNER_TEMP/coverage-instrumented-scope.txt"
+          fi
 
           phase_start prepare_cgo
           set +e
@@ -391,7 +415,10 @@ jobs:
             phase_start compile_cache_seed
             set +e
             timeout --kill-after=30s 1800s python3 .build-cache-helper/scripts/coverage_build_cache.py seed \
-              --artifact "$RUNNER_TEMP/build-cache-artifact"
+              --artifact "$RUNNER_TEMP/build-cache-artifact" \
+              --packages "$RUNNER_TEMP/coverage-group.txt" \
+              --full-packages "$RUNNER_TEMP/coverage-full-scope.txt" \
+              --coverpkg-file "$RUNNER_TEMP/coverage-instrumented-scope.txt"
             seed_status=$?
             set -e
             phase_end "$seed_status" 1800
@@ -486,6 +513,8 @@ jobs:
             ${test_scope} &
           coverage_runner_pid=$!
           fallback_deadline=$((SECONDS + COVERAGE_UT_FALLBACK_TIMEOUT_SECONDS))
+          phase_name=coverage_ut
+          resource_snapshot start
           while runner_alive "${coverage_runner_pid}"; do
             if (( SECONDS >= fallback_deadline )); then
               fallback_triggered=1
@@ -504,6 +533,7 @@ jobs:
             fi
             sleep 5
           done
+          resource_snapshot end
           if (( fallback_triggered )); then
             wait_runner_bounded "${coverage_runner_pid}" 2>/dev/null || true
             fallback_elapsed="${COVERAGE_UT_FALLBACK_TIMEOUT_SECONDS}"
@@ -829,6 +859,7 @@ jobs:
             ${{ runner.temp }}/ut-coverage.stderr.log
             ${{ runner.temp }}/ut-coverage-timing.json
             ${{ runner.temp }}/build-cache-artifact/manifest.json
+            ${{ runner.temp }}/coverage-resource-boundaries.txt
           if-no-files-found: warn
           retention-days: 7
       - id: upload_coverage_diagnostics
