@@ -9,7 +9,7 @@ on:
         type: boolean
         default: false
       cache_mode:
-        description: Cold or warm compile-cache comparison arm
+        description: Cold seed, warm reuse, or fully uncached baseline arm
         required: true
         type: string
       bvt_generation:
@@ -65,6 +65,7 @@ jobs:
           case "$CACHE_MODE" in
             cold) ;;
             warm) ;;
+            baseline) ;;
             *) echo 'Invalid comparison mode'; exit 1 ;;
           esac
           for key in MTY MNL2 JED RUH; do
@@ -197,6 +198,21 @@ jobs:
           echo 'GOFLAGS=' >> "$GITHUB_ENV"
           echo 'GOWORK=off' >> "$GITHUB_ENV"
           echo 'CGO_ENABLED=1' >> "$GITHUB_ENV"
+      - name: Record uncached baseline environment without populating caches
+        if: ${{ inputs.cache_mode == 'baseline' }}
+        run: |
+          set -euo pipefail
+          PYTHONPATH="$GITHUB_WORKSPACE/.build-cache-helper/scripts" python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          from coverage_build_cache import fingerprint
+          result = {'mode': 'baseline', 'restored_cache': False, 'seed_precompile': False,
+                    'fingerprint': fingerprint(Path(os.environ['GITHUB_WORKSPACE']))}
+          for name in ('GOCACHE', 'GOMODCACHE'):
+              path = Path(os.environ[name])
+              assert not path.exists() or not any(path.iterdir()), name + ' is not empty'
+          (Path(os.environ['RUNNER_TEMP']) / 'baseline-environment.json').write_text(json.dumps(result, indent=2) + '\n')
+          PY
       - name: Download this run group compile-only artifact
         if: ${{ inputs.cache_mode == 'warm' }}
         uses: actions/download-artifact@v4
@@ -397,7 +413,7 @@ jobs:
 
           phase_start prepare_cgo
           set +e
-          if [ "$CACHE_MODE" = cold ]; then
+          if [ "$CACHE_MODE" = cold ] || [ "$CACHE_MODE" = baseline ]; then
             timeout --kill-after=30s "${COVERAGE_UT_CGO_TIMEOUT_SECONDS}s" \
               "$GITHUB_WORKSPACE/.ci-workflow/scripts/prepare_coverage_cgo.sh" > "${cgo_log}" 2>&1
           else
@@ -862,6 +878,8 @@ jobs:
             ${{ runner.temp }}/ut-coverage.stderr.log
             ${{ runner.temp }}/ut-coverage-timing.json
             ${{ runner.temp }}/build-cache-artifact/manifest.json
+            ${{ runner.temp }}/baseline-environment.json
+            ${{ runner.temp }}/ut-coverage-phase-timing.txt
             ${{ runner.temp }}/coverage-resource-boundaries.txt
           if-no-files-found: warn
           retention-days: 7
