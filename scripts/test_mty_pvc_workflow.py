@@ -24,6 +24,12 @@ class MtyWorkflow(unittest.TestCase):
         import json
         c = json.loads((ROOT/'config/coverage-cache-catalog.json').read_text())
         self.assertEqual(c['schema'], 1)
+        self.assertEqual({e['environment'] for e in c['entries']}, {'mty','jed'})
+        jed = [e for e in c['entries'] if e['environment']=='jed']
+        self.assertEqual({e['artifact']['id'] for e in jed}, {14311103808,14312425656,14310499999})
+        self.assertEqual({e['producer']['id'] for e in jed}, {44040765865})
+        self.assertEqual({e['producer']['head_sha'] for e in jed}, {'5555635094f3ebb36291f29a615968548b2d6223'})
+        c = dict(c, entries=[e for e in c['entries'] if e['environment']=='mty'])
         self.assertEqual(len(c['entries']), 3)
         self.assertEqual({e['group'] for e in c['entries']}, {'0','1','2'})
         self.assertEqual({e['artifact']['id'] for e in c['entries']}, {14310968185,14310263300,14310002919})
