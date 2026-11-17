@@ -1,4 +1,4 @@
-name: Isolated all-package Coverage compilation-cache arm
+name: MTY two-group compile-only cache preparation and full Coverage
 
 on:
   workflow_call:
@@ -67,11 +67,9 @@ jobs:
           test "$CALLER_REF" = refs/heads/weilu-runner-test
           test "$EVENT_NAME" = workflow_dispatch
           test "$ACTOR" = Ariznawlll
-          case "$TARGET_ENV" in mty|jed) ;; *) exit 1 ;; esac
+          test "$TARGET_ENV" = mty
           case "$CACHE_MODE" in
             cold) ;;
-            warm) ;;
-            baseline) ;;
             *) echo 'Invalid comparison mode'; exit 1 ;;
           esac
           key="${TARGET_ENV^^}"
@@ -86,18 +84,17 @@ jobs:
     name: UT Coverage group ${{ matrix.group }} on Ubuntu/x86
     strategy:
       fail-fast: false
-      max-parallel: 3
+      max-parallel: 2
       matrix:
         include:
           - group: 0
           - group: 1
-          - group: 2
     outputs:
       status: ${{ steps.coverage_status.outputs.status }}
     needs: [check_coverage_eligibility]
     if: ${{ needs.check_coverage_eligibility.outputs.allowed == 'true' }}
     environment: ci
-    # Schedule across CS environments; bind S3 to the actual runner below.
+    # Reuse only the two idle experiment pools; original runner pools are unchanged.
     runs-on: ${{ format('cs-{0}-pvc-g{1}-cpe8k', inputs.target_environment, matrix.group) }}
     env:
       CS_CACHE_ENV: ${{ inputs.target_environment }}
@@ -173,7 +170,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
           repository: matrixorigin/CI
-          ref: 625dd1471ec0de4853ad083e2d054c23bc190ea8
+          ref: 1ec5f6c98fdf628e1d3bc52a5cf7c5b515185b14
           token: ${{ secrets.TOKEN_ACTION }}
           persist-credentials: false
           path: .build-cache-helper
@@ -181,6 +178,7 @@ jobs:
             scripts/coverage_build_cache.py
             scripts/compile_cache_probe.py
             scripts/check_buildcache_versions.py
+            scripts/coverage_two_groups.py
           sparse-checkout-cone-mode: false
       - name: Verify actual source and helper version before native compilation
         run: python3 .build-cache-helper/scripts/check_buildcache_versions.py --source-dir "$GITHUB_WORKSPACE" --expected-source dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca
@@ -407,8 +405,8 @@ jobs:
           instrumented_package_count=$(printf '%s\n' "${cover_pkgs}" | awk -F, '{ print NF }')
           printf '%s\n' "${test_scope}" > "$RUNNER_TEMP/coverage-full-scope.txt"
           printf '%s\n' "${cover_pkgs}" > "$RUNNER_TEMP/coverage-instrumented-scope.txt"
-          python "$GITHUB_WORKSPACE/.ci-workflow/scripts/coverage_two_groups.py" \
-            --packages "$RUNNER_TEMP/coverage-full-scope.txt" --group "${COVERAGE_GROUP}" \
+          python "$GITHUB_WORKSPACE/.build-cache-helper/scripts/coverage_two_groups.py" \
+            --packages "$RUNNER_TEMP/coverage-full-scope.txt" --group-count 2 --group "${COVERAGE_GROUP}" \
             --manifest "$RUNNER_TEMP/coverage-group-plan.json" --selected "$RUNNER_TEMP/coverage-group.txt"
           test_scope=$(cat "$RUNNER_TEMP/coverage-group.txt")
           selected_count=$(wc -l < "$RUNNER_TEMP/coverage-group.txt" | tr -d ' ')
@@ -933,7 +931,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
           repository: matrixorigin/CI
-          ref: 4670989748419fb169f88282cf05fb690ea91074
+          ref: 1ec5f6c98fdf628e1d3bc52a5cf7c5b515185b14
           token: ${{ secrets.TOKEN_ACTION }}
           persist-credentials: false
           sparse-checkout: |
@@ -969,12 +967,11 @@ jobs:
                   if not path.name.startswith(prefix): raise SystemExit('unexpected artifact arm')
                   path.rename(path.with_name(path.name[len(prefix):]))
           PYCODE
-          python3 scripts/coverage_group_collect.py --groups raw/groups --profiles raw/profiles --output selected --run-id "$GITHUB_RUN_ID"
-          python3 scripts/coverage_two_groups_merge.py selected/groups combined-skip-manifest.json --expected-sha "$EXPECTED_HEAD_SHA"
+          python3 scripts/coverage_group_collect.py --groups raw/groups --profiles raw/profiles --output selected --run-id "$GITHUB_RUN_ID" --group-count 2
+          python3 scripts/coverage_two_groups_merge.py selected/groups combined-skip-manifest.json --expected-sha "$EXPECTED_HEAD_SHA" --group-count 2
           test "$(head -n 1 selected/profiles/0/ut-coverage.out)" = 'mode: set'
           test "$(head -n 1 selected/profiles/1/ut-coverage.out)" = 'mode: set'
-          test "$(head -n 1 selected/profiles/2/ut-coverage.out)" = 'mode: set'
-          { cat selected/profiles/0/ut-coverage.out; tail -n +2 selected/profiles/1/ut-coverage.out; tail -n +2 selected/profiles/2/ut-coverage.out; } > "$RUNNER_TEMP/ut-coverage.out"
+          { cat selected/profiles/0/ut-coverage.out; tail -n +2 selected/profiles/1/ut-coverage.out; } > "$RUNNER_TEMP/ut-coverage.out"
           go run scripts/compact_coverage_profile.go "$RUNNER_TEMP/ut-coverage.out"
       - name: Upload combined UT coverage for existing consumer
         uses: matrixorigin/CI/actions/upload-artifact-with-retry@4670989748419fb169f88282cf05fb690ea91074
