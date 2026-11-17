@@ -55,6 +55,13 @@ class ControlTest(unittest.TestCase):
                        'containerStatuses':[{'restartCount':2}]}}
         policy['workloads']=[p.workload(pod)];s['pods']['items']=[pod]
         p.guard(policy,s,at=NOW)
+        pod['spec']['initContainers']=[{'name':'init','resources':{'limits':{'cpu':'1'}}}]
+        pod['status']['initContainerStatuses']=[{'name':'init','restartCount':1,'state':{'terminated':{'exitCode':0}}}]
+        initial=p.guard(policy,s,at=NOW)
+        policy['initial_init_restarts']=initial['init_restarts']
+        pod['status']['initContainerStatuses'][0]['restartCount']=2
+        with self.assertRaises(ValueError):p.guard(policy,s,at=NOW)
+        pod['status']['initContainerStatuses'][0]['restartCount']=1
         pod['status']['containerStatuses'][0]['restartCount']=3
         with self.assertRaises(ValueError):p.guard(policy,s,at=NOW)
         pod['status']['containerStatuses'][0]['restartCount']=2

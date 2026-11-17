@@ -51,8 +51,10 @@ def pod_budget(pod):
 def workload(pod):
     return {'namespace':pod['metadata']['namespace'],'name':pod['metadata']['name'],
             'owners':[x['kind'] for x in pod['metadata'].get('ownerReferences',[])],
-            'restarts':sum(x.get('restartCount',0) for key in ('containerStatuses','initContainerStatuses')
-                           for x in pod.get('status',{}).get(key,[]))}
+            # Inventory policies historically count regular containers. Keep
+            # the same meaning; init restart history is independently frozen
+            # at the first fresh pre-write observation and checked thereafter.
+            'restarts':sum(x.get('restartCount',0) for x in pod.get('status',{}).get('containerStatuses',[]))}
 
 
 def guard(policy,snapshot,own_uid=None,after_allocation=False,at=None):
@@ -83,7 +85,7 @@ def guard(policy,snapshot,own_uid=None,after_allocation=False,at=None):
                   d['status'].get('status')=='Ready' and
                   d['status'].get('freeCapacity',0)>=(64 if after_allocation else 128)*c.GIB
                   for d in snapshot['drives']['items']),'physical disk reserve')
-    baseline={(x['namespace'],x['name']):x for x in policy['workloads']};seen=set();cpu=1.;memory=c.GIB
+    baseline={(x['namespace'],x['name']):x for x in policy['workloads']};seen=set();cpu=1.;memory=c.GIB;init_counts={}
     for pod in snapshot['pods']['items']:
         status=pod.get('status',{})
         if status.get('phase') in ('Succeeded','Failed'):continue
@@ -96,14 +98,22 @@ def guard(policy,snapshot,own_uid=None,after_allocation=False,at=None):
         c.require(key in baseline and observed==baseline[key] and status.get('phase')=='Running' and
                   any(x['type']=='Ready' and x['status']=='True' for x in status.get('conditions',[])),
                   'target workload changed, restarted or unready')
+        init=status.get('initContainerStatuses',[])
+        c.require(len(init)==len(pod['spec'].get('initContainers',[])) and
+                  all(x.get('state',{}).get('terminated',{}).get('exitCode')==0 for x in init),
+                  'init container incomplete or failed')
+        init_counts['/'.join(key)]=sum(x.get('restartCount',0) for x in init)
         seen.add(key);a,b=pod_budget(pod);cpu+=a;memory+=b
     c.require(seen==set(baseline),'target workload disappeared')
+    if 'initial_init_restarts' in policy:
+        c.require(init_counts==policy['initial_init_restarts'],'init restart changed during publication')
     alloc=nodes[target]['status']['allocatable']
     c.require(cpu+2<=quantity(alloc['cpu']) and memory+4*c.GIB<=quantity(alloc['memory']),
               'declared resource reserve')
     return {'checked_at':at.isoformat(),'node':target,'node_uid':nodes[target]['metadata']['uid'],
             'cpu_cores':stat['cpu']['usageNanoCores']/1e9,'root_free_bytes':stat['fs']['availableBytes'],
-            'memory_available_bytes':stat['memory']['availableBytes'],'existing_workloads_unchanged':True}
+            'memory_available_bytes':stat['memory']['availableBytes'],'init_restarts':init_counts,
+            'existing_workloads_unchanged':True}
 
 
 def objects(policy,entry):
@@ -213,6 +223,7 @@ def run(policy,entry,config,report_path):
         authorization();job.validate_url(transport.signed_archive_url(entry))
         result['artifact_access_verified']=True
         snap=snapshot();result['preflight']=guard(policy,snap);journal()
+        policy={**policy,'initial_init_restarts':result['preflight']['init_restarts']}
         resources=objects(policy,entry)
         for obj in resources:
             c.require(call(['get',obj['kind'],name,'-n','cicd','--ignore-not-found','-o','json']) is None,
