@@ -24,7 +24,7 @@ permissions:
   actions: read
 jobs:
   validate-versions:
-    if: github.repository == 'matrixorigin/matrixone' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/weilu-runner-test' && github.actor == 'Ariznawlll'
+    if: github.repository == 'matrixorigin/matrixone' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/mty-pvc-caller' && github.actor == 'Ariznawlll'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -33,19 +33,19 @@ jobs:
           TARGET: ${{ inputs.target_environment }}
           MODE: ${{ inputs.cache_mode }}
         run: |
-          case "$TARGET" in mty|jed) ;; *) exit 1 ;; esac
-          case "$MODE" in baseline|cold) ;; *) exit 1 ;; esac
+          test "$TARGET" = mty
+          test "$MODE" = cold
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
           repository: matrixorigin/CI
-          ref: 1a50169ef45ba2a79f4709109343d568fb85aba7
+          ref: f6ca6b867013bae09a6b03503527f2a3dcdb7596
           token: ${{ secrets.TOKEN_ACTION }}
           persist-credentials: false
           fetch-depth: 0
-      - run: python3 scripts/check_buildcache_versions.py --arm-ref 1a50169ef45ba2a79f4709109343d568fb85aba7 --expected-source dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca
+      - run: python3 scripts/check_buildcache_versions.py --arm-ref f6ca6b867013bae09a6b03503527f2a3dcdb7596 --expected-source dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca
   coverage:
     needs: [validate-versions]
-    uses: matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@1a50169ef45ba2a79f4709109343d568fb85aba7
+    uses: matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@f6ca6b867013bae09a6b03503527f2a3dcdb7596
     with:
       target_environment: ${{ inputs.target_environment }}
       cache_mode: ${{ inputs.cache_mode }}
