@@ -41,7 +41,7 @@ def verify(root):
     assert set(base['started_packages']) == set(candidate['started_packages'])
     key = lambda t: (t['package'], t['test'])
     assert sorted(base['skipped_tests'], key=key) == sorted(candidate['skipped_tests'], key=key)
-    assert sorted(base['packages_without_tests']) == sorted(candidate['packages_without_tests'])
+    assert sorted(base['packages_without_tests'], key=key) == sorted(candidate['packages_without_tests'], key=key)
     assert profile(root/'baseline/profile/ut-coverage.out') == profile(root/'candidate/profile/ut-coverage.out')
     reports = sorted((root/'candidate/reports').glob('cold-ut-coverage-report-group-*-attempt-*'))
     assert len(reports) == 2
