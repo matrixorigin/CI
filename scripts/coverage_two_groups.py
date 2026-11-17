@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministically partition a complete Go package list into three groups.
+"""Deterministically partition a complete Go package list into two or three groups.
 
 Weights are approximate elapsed seconds from one MNL2 Coverage run; they are
 only scheduling hints, never an allowlist. Unknown packages are still tested.
@@ -26,18 +26,20 @@ FILE_SERVICE = ROOT + 'pkg/fileservice'
 EMBED = ROOT + 'pkg/embed'
 
 
-def plan(packages):
+def plan(packages, group_count=3):
+    if type(group_count) is not int or group_count not in (2, 3):
+        raise ValueError('group count must be two or three')
     if not packages or len(set(packages)) != len(packages):
         raise ValueError('empty or duplicate package scope')
     if FILE_SERVICE not in packages or EMBED not in packages:
         raise ValueError('required S3 or embed test package is missing')
     # Seed heavy packages into different groups; shared-pool jobs can land in
     # any environment, so no group is assumed to use a particular runner.
-    groups = [[FILE_SERVICE], [], [EMBED]]
-    weights = [5, 0, WEIGHTS['pkg/embed']]
+    groups = [[FILE_SERVICE], [EMBED]] if group_count == 2 else [[FILE_SERVICE], [], [EMBED]]
+    weights = [5, WEIGHTS['pkg/embed']] if group_count == 2 else [5, 0, WEIGHTS['pkg/embed']]
     for package in sorted(set(packages) - {FILE_SERVICE, EMBED},
                           key=lambda p: (-WEIGHTS.get(p.removeprefix(ROOT), 5), p)):
-        index = min(range(3), key=lambda i: (weights[i], i))
+        index = min(range(group_count), key=lambda i: (weights[i], i))
         groups[index].append(package)
         weights[index] += WEIGHTS.get(package.removeprefix(ROOT), 5)
     groups = [sorted(group) for group in groups]
@@ -53,10 +55,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--packages', required=True, type=Path)
     parser.add_argument('--group', required=True, type=int, choices=(0, 1, 2))
+    parser.add_argument('--group-count', type=int, choices=(2, 3), default=3)
     parser.add_argument('--manifest', required=True, type=Path)
     parser.add_argument('--selected', required=True, type=Path)
     args = parser.parse_args()
-    result = plan(args.packages.read_text().splitlines())
+    if args.group >= args.group_count:
+        parser.error('selected group is outside group count')
+    result = plan(args.packages.read_text().splitlines(), args.group_count)
     result['selected_group'] = args.group
     args.manifest.write_text(json.dumps(result, sort_keys=True) + '\n')
     args.selected.write_text('\n'.join(result['groups'][args.group]) + '\n')

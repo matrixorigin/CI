@@ -6,6 +6,24 @@ from coverage_group_collect import collect
 
 
 class CollectTest(unittest.TestCase):
+    def test_two_groups_and_reject_extra_group(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            groups, profiles = root / 'groups', root / 'profiles'
+            groups.mkdir(); profiles.mkdir()
+            for group in range(2):
+                evidence = groups / f'ut-coverage-skips-group-{group}-123-1'
+                profile = profiles / f'ut-coverage-group-{group}-generation-123-1'
+                evidence.mkdir(); profile.mkdir()
+                for name in ('coverage-group-plan.json', 'ut-coverage-skip-manifest.json'):
+                    (evidence / name).write_text('{}')
+                (profile / 'ut-coverage.out').write_text('mode: set\n')
+            collect(groups, profiles, root / 'selected', '123', 2)
+            self.assertEqual({p.name for p in (root / 'selected/groups').iterdir()}, {'0','1'})
+            (groups / 'ut-coverage-skips-group-2-123-1').mkdir()
+            with self.assertRaisesRegex(ValueError, 'unexpected group'):
+                collect(groups, profiles, root / 'refused', '123', 2)
+
     def test_latest_matching_attempts_per_group(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

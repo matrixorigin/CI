@@ -5,11 +5,19 @@ import re
 from pathlib import Path
 
 
-def collect(raw_groups, raw_profiles, output, run_id):
+def collect(raw_groups, raw_profiles, output, run_id, group_count=3):
+    if type(group_count) is not int or group_count not in (2, 3):
+        raise ValueError('group count must be two or three')
     if not str(run_id).isdigit():
         raise ValueError('invalid run ID')
+    for directory, prefix in ((raw_groups, 'ut-coverage-skips-group'), (raw_profiles, 'ut-coverage-group')):
+        pattern = re.compile(rf'^{prefix}-([0-9]+)-(?:generation-)?{run_id}-[1-9][0-9]*$')
+        for path in Path(directory).iterdir():
+            match = pattern.fullmatch(path.name)
+            if match and int(match.group(1)) >= group_count:
+                raise ValueError('unexpected group for declared partition count')
     root = Path(output)
-    for group in range(3):
+    for group in range(group_count):
         def candidates(directory, prefix):
             pattern = re.compile(rf'^{prefix}-{group}-(?:generation-)?{run_id}-([1-9][0-9]*)$')
             return {int(match.group(1)): p for p in Path(directory).iterdir()
@@ -41,5 +49,6 @@ if __name__ == '__main__':
     parser.add_argument('--profiles', required=True)
     parser.add_argument('--output', required=True)
     parser.add_argument('--run-id', required=True)
+    parser.add_argument('--group-count', type=int, choices=(2, 3), default=3)
     args = parser.parse_args()
-    collect(args.groups, args.profiles, args.output, args.run_id)
+    collect(args.groups, args.profiles, args.output, args.run_id, args.group_count)
