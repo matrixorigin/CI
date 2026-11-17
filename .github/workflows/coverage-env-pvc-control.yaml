@@ -1,0 +1,78 @@
+name: Isolated environment PVC baseline or trusted seed
+on:
+  workflow_call:
+    inputs:
+      target_environment:
+        required: true
+        type: string
+      cache_mode:
+        required: true
+        type: string
+    secrets:
+      TOKEN_ACTION:
+        required: true
+      CS_S3_MTY_CONFIG:
+        required: false
+      CS_S3_MNL2_CONFIG:
+        required: false
+      CS_S3_JED_CONFIG:
+        required: false
+      CS_S3_RUH_CONFIG:
+        required: false
+permissions:
+  contents: read
+  actions: read
+jobs:
+  validate-versions:
+    if: github.repository == 'matrixorigin/matrixone' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/weilu-runner-test' && github.actor == 'Ariznawlll'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Enforce explicit experimental environment and arm
+        env:
+          TARGET: ${{ inputs.target_environment }}
+          MODE: ${{ inputs.cache_mode }}
+        run: |
+          case "$TARGET" in mty|jed) ;; *) exit 1 ;; esac
+          case "$MODE" in baseline|cold) ;; *) exit 1 ;; esac
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          repository: matrixorigin/CI
+          ref: 1a50169ef45ba2a79f4709109343d568fb85aba7
+          token: ${{ secrets.TOKEN_ACTION }}
+          persist-credentials: false
+          fetch-depth: 0
+      - run: python3 scripts/check_buildcache_versions.py --arm-ref 1a50169ef45ba2a79f4709109343d568fb85aba7 --expected-source dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca
+  coverage:
+    needs: [validate-versions]
+    uses: matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@1a50169ef45ba2a79f4709109343d568fb85aba7
+    with:
+      target_environment: ${{ inputs.target_environment }}
+      cache_mode: ${{ inputs.cache_mode }}
+    secrets: inherit
+  verify-complete:
+    needs: [coverage]
+    if: ${{ !cancelled() && always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require all groups and merged Coverage
+        env:
+          STATUS: ${{ needs.coverage.outputs.coverage_status }}
+        run: test "$STATUS" = passed
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.cache_mode }}-ut-coverage-combined-skips-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence
+      - name: Require complete fixed-source package evidence
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          m=json.loads(Path('evidence/combined-skip-manifest.json').read_text())
+          assert m['source_sha']=='dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca'
+          assert m['storage_mode']=='cs-s3'
+          assert len(set(m['started_packages']))==505
+          assert not m['failed'] and not m['package_timeouts'] and not m['malformed_events']
+          print('All 505 packages and merged Coverage accepted; cross-arm timing/skip comparison remains separate.')
+          PY
