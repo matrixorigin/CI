@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       target_environment:
-        description: Explicit environment for isolated MTY/JED PVC comparison
+        description: Explicit RUH environment for isolated PVC comparison
         required: true
         type: string
       cache_seed:
@@ -67,7 +67,7 @@ jobs:
           test "$CALLER_REF" = refs/heads/weilu-runner-test
           test "$EVENT_NAME" = workflow_dispatch
           test "$ACTOR" = Ariznawlll
-          case "$TARGET_ENV" in mty|jed) ;; *) exit 1 ;; esac
+          test "$TARGET_ENV" = ruh
           case "$CACHE_MODE" in
             cold) ;;
             warm) ;;
@@ -98,7 +98,7 @@ jobs:
     if: ${{ needs.check_coverage_eligibility.outputs.allowed == 'true' }}
     environment: ci
     # Schedule across CS environments; bind S3 to the actual runner below.
-    runs-on: ${{ format('cs-{0}-pvc-g{1}-cpe8k', inputs.target_environment, matrix.group) }}
+    runs-on: ${{ format('cs-ruh-pvc-g{0}-rhprep', matrix.group) }}
     env:
       CS_CACHE_ENV: ${{ inputs.target_environment }}
     # Leave headroom for setup, cache seeding, reports and post-action cleanup.
@@ -173,7 +173,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
           repository: matrixorigin/CI
-          ref: 625dd1471ec0de4853ad083e2d054c23bc190ea8
+          ref: cbdee25907acd66aa2f6a56bf592dc5d6e1a9276
           token: ${{ secrets.TOKEN_ACTION }}
           persist-credentials: false
           path: .build-cache-helper
