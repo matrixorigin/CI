@@ -1,6 +1,7 @@
 import copy
 import hashlib
 import io
+import os
 from pathlib import Path
 import shutil
 import tarfile
@@ -15,6 +16,16 @@ from test_node_compile_cache import approval
 
 
 class MigrationTests(unittest.TestCase):
+    def test_diagnostics_redact_exception_messages_and_preserve_phase(self):
+        def fail(progress):
+            progress('artifact_api')
+            raise PermissionError('PRIVATE-TOKEN https://private.invalid?secret=PRIVATE')
+        with patch.object(job,'main',side_effect=fail),patch.dict(os.environ,{'RUNNER_TEMP':str(self.root)}):
+            with patch('sys.stdout',new_callable=io.StringIO) as captured:self.assertEqual(job.execute(),1)
+        report=c.read_json(self.root/'node-cache-migration-diagnostic.json')
+        self.assertEqual(report['phase'],'artifact_api')
+        self.assertEqual(report['error_type'],'PermissionError')
+        self.assertNotIn('PRIVATE',captured.getvalue()+str(report))
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name).resolve(); self.artifact = self.root/'artifact'; self.artifact.mkdir()
@@ -76,6 +87,30 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(before, {p.name: c.digest(p) for p in self.artifact.iterdir()})
         self.assertEqual(c.read_json(self.root/'candidate/index.json')['actions'][self.action]['output_id'], self.obj)
         with self.assertRaises(ValueError): self.migrate()
+
+    def test_put_executable_covdata_layout_is_content_verified_and_flattened(self):
+        self.members=[(name+'/covdata' if name.endswith('-d') else name,data) for name,data in self.members]
+        self.pack()
+        with patch('subprocess.run',side_effect=AssertionError('executable cache must never run')):
+            result=self.migrate()
+        self.assertEqual(result['action_count'],1)
+        target=self.root/'candidate/objects'/self.obj[:2]/self.obj
+        self.assertEqual(c.digest(target),self.obj)
+        self.assertFalse(target.stat().st_mode & 0o111)
+        self.assertEqual(result['compiler_invocations'],0)
+
+    def test_executable_alias_corruption_and_nested_paths_rejected(self):
+        original=list(self.members)
+        for name,data in [(f'gocache/{self.obj[:2]}/{self.obj}-d/covdata',self.data),
+                          (f'gocache/{self.obj[:2]}/{self.obj}-d/sub/covdata',self.data),
+                          (f'gocache/{self.obj[:2]}/{self.obj}-d/../escape',self.data)]:
+            self.members=original+[(name,data)];self.pack()
+            with self.assertRaises(ValueError):self.migrate()
+            self.assertFalse((self.root/'candidate').exists())
+        self.members=[(name+'/covdata',b'corrupt') if name.endswith('-d') else (name,data) for name,data in original]
+        self.pack()
+        with self.assertRaises(ValueError):self.migrate()
+        self.assertFalse((self.root/'candidate/index.json').exists())
 
     def test_corrupt_transport_manifest_archive_provenance_rejected_before_stage(self):
         for target in ('transport.zip', 'manifest.json', 'build-cache.tar.gz'):

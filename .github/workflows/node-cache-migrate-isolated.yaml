@@ -88,6 +88,13 @@ jobs:
           export GOCACHE="$RUNNER_TEMP/cs-buildcache-go"
           python3 .ci-workflow/scripts/node_cache_migration_job.py
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: ${{ always() }}
+        with:
+          name: node-cache-migration-diagnostic-${{ inputs.target_environment }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/node-cache-migration-diagnostic.json
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         timeout-minutes: 15
         with:
           name: node-cache-migration-${{ inputs.target_environment }}-${{ github.run_id }}

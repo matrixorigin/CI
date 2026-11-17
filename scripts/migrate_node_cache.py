@@ -21,17 +21,31 @@ import node_compile_cache as n
 
 RUNTIME_FIELDS = ('tools', 'cpu', 'os', 'platform', 'go_env', 'workspace', 'gomodcache')
 DISK_NAME = re.compile(r'gocache/([0-9a-f]{2})/([0-9a-f]{64})-([ad])')
+# DiskCache.PutExecutable stores a content-addressed executable inside its
+# -d directory (e.g. covdata). Normalize that one bounded child to the same
+# immutable output ID. Never execute it or trust the child name as an address.
+EXECUTABLE_NAME = re.compile(r'gocache/([0-9a-f]{2})/([0-9a-f]{64})-d/[A-Za-z0-9][A-Za-z0-9_.+-]{0,127}')
 HEADER = re.compile(rb'v1 ([0-9a-f]{64}) ([0-9a-f]{64}) ([ 0-9]{20}) ([ 0-9]{20})\n')
 
 
-def reviewed_archive(directory, entry, current, api=n.legacy.api, now=None):
+def disk_member(name):
+    match = DISK_NAME.fullmatch(name)
+    if match and match[1] == match[2][:2]: return match[2], match[3]
+    match = EXECUTABLE_NAME.fullmatch(name)
+    if match and match[1] == match[2][:2]: return match[2], 'd'
+    raise ValueError('unsupported Go cache member')
+
+
+def reviewed_archive(directory, entry, current, api=n.legacy.api, now=None, progress=lambda stage: None):
     """Revalidate pinned transport, manifest, archive and original producer."""
     directory = c.safe_path(directory)
     now = now or dt.datetime.now(dt.timezone.utc)
     p = entry['producer']
     c.require(p['repository'] == 'matrixorigin/matrixone' and
               p['event'] in ('push', 'workflow_dispatch'), 'untrusted legacy producer')
+    progress('producer_api')
     run = api(f"repos/{p['repository']}/actions/runs/{p['id']}")
+    progress('artifact_api')
     artifact = api(f"repos/{p['repository']}/actions/artifacts/{entry['artifact']['id']}")
     n.legacy.validate_provenance(entry, run, artifact)
     c.require(artifact.get('expired') is False, 'legacy artifact expired or unknown')
@@ -42,9 +56,11 @@ def reviewed_archive(directory, entry, current, api=n.legacy.api, now=None):
         expires = dt.datetime.fromisoformat(value.replace('Z', '+00:00'))
         c.require(expires.tzinfo is not None and expires > now, 'legacy artifact expired')
         expiries.append(expires)
+    progress('transport_digest')
     transport = directory / 'transport.zip'
     c.require(transport.stat().st_size == artifact['size_in_bytes'] and
               'sha256:' + c.digest(transport) == artifact['digest'], 'legacy ZIP differs')
+    progress('manifest_digest')
     path = directory / 'manifest.json'
     c.require(c.digest(path) == entry['manifest_sha256'], 'legacy manifest differs')
     m = c.read_json(path)
@@ -58,10 +74,12 @@ def reviewed_archive(directory, entry, current, api=n.legacy.api, now=None):
     # schema which did not include cs_environment in its fingerprint.
     c.require(fp.get('cs_environment', entry['environment']) == current['environment'],
               'legacy fingerprint environment differs')
+    progress('legacy_runtime_compatibility')
     c.require(all(fp[k] == current[k] for k in RUNTIME_FIELDS), 'legacy Go runtime incompatible')
     c.require(type(m['unpacked_bytes']) is int and 0 < m['unpacked_bytes'] <= 8*c.GIB and
               type(m['archive_bytes']) is int and 0 < m['archive_bytes'] <= 8*c.GIB,
               'legacy archive exceeds budget')
+    progress('archive_digest')
     archive = directory / 'build-cache.tar.gz'
     c.require(archive.stat().st_size == m['archive_bytes'] and
               c.digest(archive) == m['archive_sha256'], 'legacy archive differs')
@@ -92,10 +110,9 @@ def scan(archive, manifest):
             if member.name in ('gocache/README', 'gocache/trim.txt'):
                 c.require(member.size <= 4096, 'legacy housekeeping file too large')
                 continue
-            match = DISK_NAME.fullmatch(member.name)
-            c.require(match and match[1] == match[2][:2], 'unsupported Go cache member')
-            ident, kind = match[2], match[3]
+            ident, kind = disk_member(member.name)
             if kind == 'd':
+                c.require(ident not in objects, 'duplicate Go output address')
                 objects[ident] = member.size
                 continue
             c.require(member.size == 175, 'unsupported Go cache action format')
@@ -117,24 +134,26 @@ def scan(archive, manifest):
     return actions, trimmed
 
 
-def migrate(directory, entry, current, candidate, api=n.legacy.api):
+def migrate(directory, entry, current, candidate, api=n.legacy.api, progress=lambda stage: None):
     started = time.monotonic()
     directory = c.safe_path(directory); candidate = c.safe_path(candidate)
     c.require(not candidate.exists() and directory not in candidate.parents and
               candidate not in directory.parents, 'migration must use fresh isolated stage')
-    archive, manifest, expires = reviewed_archive(directory, entry, current, api)
+    archive, manifest, expires = reviewed_archive(directory, entry, current, api, progress=progress)
+    progress('archive_scan')
     actions, trimmed = scan(archive, manifest)
     needed = {r['output_id']: r['size'] for r in actions.values()}
     c.require(shutil.disk_usage(candidate.parent).free >= sum(needed.values()) + 20*c.GIB,
               'migration disk reserve insufficient')
     # No native files, modules, test results, source files or credentials are
     # copied. A crash retains a private partial stage; it never publishes it.
+    progress('private_object_conversion')
     candidate.mkdir()
     with c.safe_open(archive) as body, tarfile.open(fileobj=body, mode='r:gz') as tar:
         for member in tar:
-            match = DISK_NAME.fullmatch(member.name)
-            if not match or match[3] != 'd' or match[2] not in needed: continue
-            ident = match[2]
+            if member.name.startswith('native/') or member.name in ('gocache/README','gocache/trim.txt'): continue
+            ident, kind = disk_member(member.name)
+            if kind != 'd' or ident not in needed: continue
             with tar.extractfile(member) as src:
                 c.atomic_file(candidate/'objects'/ident[:2]/ident, src, needed[ident], ident)
     index = {'schema': 2, 'runtime': current, 'actions': actions}

@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import tarfile
 import time
+import traceback
 
 import incremental_cache as c
 import migrate_node_cache as m
@@ -57,7 +58,8 @@ def package(candidate, receipt, entry, destination):
     return manifest
 
 
-def main():
+def main(progress=lambda stage: None):
+    progress('runner_scope')
     env = os.environ['CS_CACHE_ENV']; runner = os.environ['RUNNER_NAME']
     c.require(env in POOLS and runner.startswith(POOLS[env]+'-'), 'unexpected isolated migration runner')
     source = Path(os.environ['GITHUB_WORKSPACE']).resolve(); tmp = Path(os.environ['RUNNER_TEMP']).resolve()
@@ -67,19 +69,38 @@ def main():
     c.require(len(selected) == 1, 'ambiguous migration entry'); entry = selected[0]
     c.require(n.command(['git', 'rev-parse', 'HEAD'], source) == entry['source'], 'migration source differs')
     shared = Path('/ci-cache'); n.readonly_mount(shared)
+    progress('runtime_fingerprint')
     runtime = n.runtime(source, env, 'matrixorigin/matrixone')
     c.atomic_json(tmp/'node-cache-migration-runtime.json', runtime)
     directory = shared/('reviewed-'+str(entry['artifact']['id']))
     candidate = tmp/'node-cache-converted'
-    receipt = m.migrate(directory, entry, runtime, candidate)
+    receipt = m.migrate(directory, entry, runtime, candidate, progress=progress)
+    progress('private_bundle_packaging')
     manifest = package(candidate, receipt, entry, tmp/'node-cache-migration-bundle')
     print(c.canonical({'environment': env, 'compiler_invocations': 0, 'native_imported': False,
                        'object_count': manifest['object_count'], 'object_bytes': manifest['object_bytes'],
                        'index_sha256': manifest['index_sha256']}).decode())
 
 
+def execute():
+    # Exception messages / commands / URLs can contain credentials. Retain only
+    # fixed phase IDs, source locations and exception type, never their content.
+    started=time.monotonic(); report={'schema':1,'compiler_invocations':0,'shared_writable':False,'phases':[]}
+    def progress(stage):
+        report['phase']=stage
+        report['phases'].append({'stage':stage,'seconds':round(time.monotonic()-started,6)})
+    code=0
+    try:
+        main(progress);report['success']=True
+    except Exception as error:
+        code=1;report['success']=False;report['error_type']=type(error).__name__
+        report['frames']=[{'file':Path(f.filename).name,'line':f.lineno}
+            for f in traceback.extract_tb(error.__traceback__) if Path(f.filename).name in
+            ('node_cache_migration_job.py','migrate_node_cache.py','node_compile_cache.py','incremental_cache.py','cs_coverage_cache.py')]
+    c.atomic_json(Path(os.environ['RUNNER_TEMP'])/'node-cache-migration-diagnostic.json',report)
+    print(c.canonical(report).decode())
+    return code
+
+
 if __name__ == '__main__':
-    try: main()
-    except Exception:
-        print('Isolated migration stopped; existing PVC/cache untouched.', file=__import__('sys').stderr)
-        raise SystemExit(1)
+    raise SystemExit(execute())
