@@ -14,7 +14,7 @@ class MtyWorkflow(unittest.TestCase):
                        "manifest['coverage_contract']['coverpkg']))==484",
                        "manifest['coverage_contract']['full_packages']))==505",
                        "test \"$HIT\" = true", "'PVC must be read-only'",
-                       'ref: f6f2424c2e76a41b15b09ef007444d8def9c65b1'):
+                       'ref: 6e7b6b697a71774f85642abe6aeaeaa181eab2ec'):
             self.assertIn(marker, t)
         for stale in ('43897279982', '43870157584', 'cs-mnl2-pvc-g'):
             self.assertNotIn(stale, t)
