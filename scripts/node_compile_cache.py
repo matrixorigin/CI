@@ -139,6 +139,33 @@ def catalog_for_node(catalog, binding):
     return {'entries': entries}
 
 
+def native_authorities(catalog, binding, selected):
+    """Choose a separately reviewed native generation, never silently resolve conflicts.
+
+    Two independent compile-only jobs can produce different timestamp metadata
+    for identical inputs. An immutable catalog may explicitly choose ONE of
+    those fully reviewed/published manifests; no hashes or provenance are
+    discarded. If its producer is expired/unavailable, native compilation is a
+    cold miss while other compatible Go objects can still be reused.
+    """
+    approved=catalog_for_node(catalog,binding)['entries']
+    active={e['index_sha256'] for e in selected};result={}
+    identity={k:binding[k] for k in ('environment','node','node_uid','pvc_uid','pv_uid')}
+    rows=catalog.get('native_authorities',[])
+    c.require(isinstance(rows,list) and len(rows)<=1000,'invalid native authority catalog')
+    for row in rows:
+        c.require(isinstance(row,dict) and set(row)==set(identity)|{'native_key','manifest_sha256','index_sha256'},
+                  'invalid native authority identity')
+        if any(row[k]!=v for k,v in identity.items()):continue
+        key=row['native_key'];mid=row['manifest_sha256'];index=row['index_sha256']
+        c.require(all(c.HEX.fullmatch(x) for x in (key,mid,index)) and key not in result,
+                  'invalid or duplicate native authority')
+        matches=[e for e in approved if e['index_sha256']==index and e.get('native_manifests',{}).get(key)==mid]
+        c.require(len(matches)==1,'native authority is not a reviewed published generation')
+        result[key]=mid if index in active else None
+    return result
+
+
 def configure(catalog_path,shared,source,local,environment,repository):
     started=time.monotonic()
     shared=c.safe_path(shared);local=c.safe_path(local)
@@ -148,7 +175,7 @@ def configure(catalog_path,shared,source,local,environment,repository):
     current=runtime(source,environment,repository)
     # A new/uncached node can cold-build. An advertised bound volume must be
     # correct; corruption and identity mismatch are NOT silent misses.
-    entries=[]
+    entries=[];authorities={}
     node=os.environ.get('CS_CACHE_NODE','')
     if shared.exists():
         readonly_mount(shared)
@@ -156,12 +183,13 @@ def configure(catalog_path,shared,source,local,environment,repository):
         binding=verify_binding(catalog,shared,environment,node,
             {k:os.environ.get('CS_CACHE_'+k.upper(),'') for k in ('node_uid','pvc_uid','pv_uid')})
         entries=reviewed_entries(catalog_for_node(catalog,binding),current)
+        authorities=native_authorities(catalog,binding,entries)
     cfg={'schema':2,'local':str(local/'objects-private'),'shared':str(shared) if shared.exists() else None,
          'indexes':[e['index_sha256'] for e in entries], 'runtime':current}
     cache=c.Cache(cfg)  # Verify every selected index before executing Go.
     key,inputs=native_key(source,current)
     state={'schema':2,'config':cfg,'native_key':key,'native_inputs':inputs,
-           'entries':entries,'source':str(source),'configured_seconds':round(time.monotonic()-started,6)}
+           'entries':entries,'native_authorities':authorities,'source':str(source),'configured_seconds':round(time.monotonic()-started,6)}
     c.atomic_json(local/'config.json',cfg)
     c.atomic_json(local/'state.json',state)
     helper=Path(__file__).with_name('incremental_cache.py').resolve()
@@ -176,9 +204,16 @@ def configure(catalog_path,shared,source,local,environment,repository):
 def native_manifest(state):
     ids={e.get('native_manifests',{}).get(state['native_key']) for e in state['entries']}
     ids.discard(None)
-    c.require(len(ids)<=1, 'conflicting reviewed native generation')
-    if not ids:return None
-    ident=ids.pop();c.require(c.HEX.fullmatch(ident), 'invalid native manifest ID')
+    authorities=state.get('native_authorities',{})
+    if state['native_key'] in authorities:
+        ident=authorities[state['native_key']]
+        if ident is None:return None
+        c.require(ident in ids,'selected native authority no longer reviewed')
+    else:
+        c.require(len(ids)<=1, 'conflicting reviewed native generation')
+        if not ids:return None
+        ident=ids.pop()
+    c.require(c.HEX.fullmatch(ident), 'invalid native manifest ID')
     path=Path(state['config']['shared'])/'native'/(ident+'.json')
     c.require(c.digest(path)==ident, 'native manifest checksum differs')
     m=c.read_json(path)
