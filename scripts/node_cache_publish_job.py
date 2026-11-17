@@ -59,6 +59,12 @@ def validate_url(url):
     return url
 
 
+def read_approval(root=Path('/probe')):
+    approval=(root/'reviewed-entry.json').resolve(strict=True)
+    c.require(root in approval.parents,'approval escaped ConfigMap mount')
+    return c.read_json(approval)
+
+
 def execute(phase,entry,request):
     api=authorize(entry,request)
     identity=binding(request,os.environ['CS_CACHE_ENV'],os.environ['ACTUAL_NODE'])
@@ -105,7 +111,10 @@ def execute(phase,entry,request):
 if __name__=='__main__':
     try:
         request=json.load(sys.stdin)
-        print(c.canonical(execute(sys.argv[1],c.read_json('/probe/reviewed-entry.json'),request)).decode())
+        # Kubernetes projects an immutable ConfigMap through an atomic ..data
+        # symlink. Resolve ONLY this controller-owned approval path; cache data
+        # and archives keep their strict no-symlink checks unchanged.
+        print(c.canonical(execute(sys.argv[1],read_approval(),request)).decode())
     except Exception as error:
         import traceback
         print(c.canonical({'success':False,'error_type':type(error).__name__,

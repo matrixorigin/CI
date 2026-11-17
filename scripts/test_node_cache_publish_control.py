@@ -1,5 +1,11 @@
 import copy
 import datetime as dt
+import io
+import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
 import unittest
 from unittest import mock
 import node_cache_publish_control as p
@@ -29,6 +35,63 @@ def fixture():
 
 
 class ControlTest(unittest.TestCase):
+    def test_mutable_receipt_and_projected_immutable_approval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp).resolve();receipt=root/'receipt.json'
+            p.write_journal(receipt,{'stage':'preflight'})
+            p.write_journal(receipt,{'stage':'created','uid':U})
+            self.assertEqual(p.c.read_json(receipt)['stage'],'created')
+            version=root/'..version';version.mkdir()
+            (version/'reviewed-entry.json').write_text('{"approved":true}')
+            (root/'..data').symlink_to(version.name,target_is_directory=True)
+            (root/'reviewed-entry.json').symlink_to('..data/reviewed-entry.json')
+            self.assertEqual(p.job.read_approval(root),{'approved':True})
+
+    def test_complete_controller_journal_and_uid_cleanup(self):
+        policy,s=fixture();live={};mutations=[]
+        def call(cmd,**kw):
+            args=cmd[4:] if cmd[3].startswith('--request-timeout') else cmd[3:]
+            if 'wait' in args:return subprocess.CompletedProcess(cmd,0,'','')
+            verb=args[0];result=None
+            if verb=='create':
+                obj=json.loads(kw['input']);kind=obj['kind'];obj['metadata']['uid']=U
+                live[kind]=obj;mutations.append(('create',kind))
+                if kind=='Pod':
+                    obj['spec']['nodeName']=policy['node'];obj['status']={'phase':'Running','conditions':[{'type':'Ready','status':'True'}]}
+                    live['PersistentVolumeClaim']['status']={'phase':'Bound','capacity':{'storage':'64Gi'}}
+                    live['PersistentVolumeClaim']['spec']['volumeName']='new-pv'
+                result=obj
+            elif verb=='get':
+                kind=args[1]
+                if kind=='namespace':result=s['namespaces']
+                elif kind=='nodes':result=s['nodes']
+                elif kind=='node':result=s['nodes']['items'][0]
+                elif kind=='sc':result=s['sc']
+                elif kind=='directpvdrives':result=s['drives']
+                elif kind=='pods':result={'items':[live['Pod']] if 'Pod' in live else []}
+                elif kind=='--raw':result=s['stats']
+                elif kind=='pv':result={'metadata':{'name':'new-pv','uid':U},'status':{'phase':'Bound'},'spec':{
+                    'claimRef':{'name':policy['name'],'namespace':'cicd','uid':U},'csi':{'driver':'directpv-min-io'},
+                    'accessModes':['ReadWriteOnce'],'nodeAffinity':{'required':{'nodeSelectorTerms':[{
+                        'matchExpressions':[{'key':k,'operator':'In','values':[v]} for k,v in s['nodes']['items'][0]['metadata']['labels'].items()]}]}}}}
+                else:result=live.get({'pod':'Pod','pvc':'PersistentVolumeClaim','configmap':'ConfigMap'}.get(kind,kind))
+            elif verb=='exec':result={'success':True,'phase':args[-1]}
+            elif verb=='delete':
+                self.assertEqual(json.loads(kw['input'])['preconditions']['uid'],U)
+                live.pop('Pod');mutations.append(('delete','Pod'));result={'status':'Success'}
+            else:raise AssertionError(args)
+            return subprocess.CompletedProcess(cmd,0,'' if result is None else json.dumps(result),'')
+        opener=mock.MagicMock();opener.open.side_effect=lambda *a,**k:io.BytesIO(b'{}')
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(p.subprocess,'run',side_effect=call), \
+             mock.patch.object(p.urllib.request,'build_opener',return_value=opener), \
+             mock.patch.object(p.job,'authorize'),mock.patch.object(p.transport,'signed_archive_url',return_value='https://fixture.blob.core.windows.net/object'), \
+             mock.patch.dict(os.environ,{'CS_CACHE_READ_TOKEN':'fixture'}):
+            result=p.run(policy,{'runtime':{'environment':'mty'},'bindings':[],
+                                'producer':{'id':1},'artifact':{'id':2}},'fixture',Path(tmp).resolve()/'receipt.json')
+            self.assertTrue(result['complete']);self.assertEqual(len(result['created']),3)
+            self.assertEqual(mutations,[('create','ConfigMap'),('create','PersistentVolumeClaim'),('create','Pod'),('delete','Pod')])
+            self.assertIn('PersistentVolumeClaim',live);self.assertNotIn('Pod',live)
+
     def test_fresh_identity_capacity(self):
         policy,s=fixture();self.assertTrue(p.guard(policy,s,at=NOW)['existing_workloads_unchanged'])
 

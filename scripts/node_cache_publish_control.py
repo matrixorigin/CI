@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 
@@ -28,6 +29,18 @@ FILES=('incremental_cache.py','cs_coverage_cache.py','node_compile_cache.py',
 
 
 def now():return dt.datetime.now(dt.timezone.utc)
+
+
+def write_journal(path,result):
+    """Mutable controller-owned receipt, NOT the immutable cache object API."""
+    path=c.safe_path(path)
+    fd,name=tempfile.mkstemp(prefix='.publication-journal-',dir=path.parent)
+    try:
+        with os.fdopen(fd,'wb') as out:
+            out.write(c.canonical(result));out.flush();os.fsync(out.fileno())
+        os.replace(name,path)
+    finally:
+        Path(name).unlink(missing_ok=True)  # only this call's unique temporary receipt
 
 
 def quantity(value):
@@ -191,9 +204,10 @@ def bound_identity(policy,pod,pvc,pv,created,node):
 
 def run(policy,entry,config,report_path):
     c.require(entry['runtime']['environment']==policy['environment'] and not entry['bindings'],'approval scope')
+    c.require(not Path(report_path).exists(),'fresh controller receipt path required')
     name=policy['name'];result={'complete':False,'environment':policy['environment'],'created':[],
                                'started_at':now().isoformat(),'compiler_invocations':0}
-    def journal():c.atomic_json(report_path,result)
+    def journal():write_journal(report_path,result)
     def call(args,data=None,timeout=60):
         proc=subprocess.run(['kubectl','--kubeconfig',str(config),'--request-timeout=30s',*args],
                             input=None if data is None else c.canonical(data).decode(),capture_output=True,text=True,timeout=timeout)
@@ -240,6 +254,10 @@ def run(policy,entry,config,report_path):
         c.require(proc.returncode==0,'publisher scheduling incomplete')
         uid=next(x['uid'] for x in result['created'] if x['kind']=='Pod')
         def identity():
+            cm=call(['get','configmap',name,'-n','cicd','-o','json'])
+            c.require(cm['metadata']['uid']==next(x['uid'] for x in result['created'] if x['kind']=='ConfigMap')
+                      and cm.get('immutable') is True and cm['data']==resources[0]['data'],
+                      'immutable publisher code or approval changed')
             pod=call(['get','pod',name,'-n','cicd','-o','json'])
             pvc=call(['get','pvc',name,'-n','cicd','-o','json'])
             pv=call(['get','pv',pvc['spec']['volumeName'],'-o','json'])
