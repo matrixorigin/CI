@@ -22,6 +22,9 @@ on:
       - 'scripts/coverage_skip_manifest.py'
       - 'scripts/test_coverage_skip_manifest.py'
       - 'scripts/test_cs_s3_coverage.py'
+      - 'scripts/cs_coverage_cache.py'
+      - 'scripts/test_cs_coverage_cache.py'
+      - 'config/coverage-cache-catalog.json'
       - 'scripts/coverage_two_groups.py'
       - 'scripts/coverage_two_groups_merge.py'
       - 'scripts/coverage_group_collect.py'
@@ -121,6 +124,9 @@ jobs:
       - name: Test three-group scheduling and artifact selection
         timeout-minutes: 3
         run: PYTHONPATH=scripts python3 -m unittest scripts.test_coverage_two_groups scripts.test_coverage_two_groups_merge scripts.test_coverage_group_collect scripts.test_run_coverage_packages -v
+      - name: Test reviewed Coverage cache provenance and fail-closed restoration
+        timeout-minutes: 3
+        run: PYTHONPATH=.:scripts python3 -m unittest scripts.test_cs_coverage_cache -v
       - name: Test TKE merge subject identity contract
         run: python3 scripts/test_merge_trigger_tke_subject.py -v
       - name: Test SCA license scope selection

@@ -8,6 +8,11 @@ on:
         required: false
         type: boolean
         default: false
+      coverage_compile_cache:
+        description: Reuse an exact-version reviewed compile-only artifact; never create a seed on a cache miss
+        required: false
+        type: boolean
+        default: true
       bvt_generation:
         description: "Shared CI generation used to select this run's coverage artifacts"
         required: false
@@ -21,6 +26,9 @@ on:
         description: "Terminal UT coverage producer status"
         value: ${{ jobs['coverage-final-status'].outputs.status }}
     secrets:
+      CS_COVERAGE_CACHE_READ_TOKEN:
+        description: Optional repository Actions-read-only token; otherwise use the caller GITHUB_TOKEN
+        required: false
       CS_S3_MTY_CONFIG:
         required: false
       CS_S3_MNL2_CONFIG:
@@ -128,6 +136,7 @@ jobs:
     name: UT Coverage group ${{ matrix.group }} on Ubuntu/x86
     strategy:
       fail-fast: false
+      max-parallel: 3
       matrix:
         include:
           - group: 0
@@ -140,7 +149,7 @@ jobs:
     environment: ci
     # Schedule across CS environments; bind S3 to the actual runner below.
     runs-on: cs-large-7c14g
-    # Leave headroom for setup, cache seeding, reports and post-action cleanup.
+    # Leave headroom for setup, reviewed cache download, reports and cleanup.
     # Success paths skip the failure-only steps.
     # The wrapper below enforces the test deadline before this job-level last
     # resort; the job timeout is never the diagnostic mechanism for a stuck
@@ -151,11 +160,11 @@ jobs:
         timeout-minutes: 10
         run: |
           set -euo pipefail
-          if command -v gcc && command -v g++ && command -v make && command -v pkg-config && command -v python; then
+          if command -v gcc && command -v g++ && command -v make && command -v pkg-config && command -v cmake && command -v python; then
             echo 'Build dependencies are already available.'
           else
             sudo apt-get -o Acquire::ForceIPv4=true update
-            sudo apt-get -o Acquire::ForceIPv4=true install -y build-essential pkg-config python3 python-is-python3
+            sudo apt-get -o Acquire::ForceIPv4=true install -y build-essential cmake pkg-config python3 python-is-python3
           fi
       - name: Checkout MatrixOne source
         # Low-speed limits apply after connection; proxy CONNECT/TLS stalls
@@ -175,7 +184,7 @@ jobs:
           persist-credentials: false
       - name: Set up Go
         timeout-minutes: 10
-        uses: matrixorigin/CI/actions/setup-env@main
+        uses: matrixorigin/CI/actions/setup-env@4670989748419fb169f88282cf05fb690ea91074
         with:
           setup-java: false
           go-version-file: "${{ github.workspace }}/go.mod"
@@ -183,7 +192,7 @@ jobs:
       - name: Prepare Python UDF contract tests
         if: ${{ hashFiles('pkg/udf/python/worker/requirements.txt') != '' }}
         timeout-minutes: 5
-        uses: matrixorigin/CI/actions/setup-python-udf@main
+        uses: matrixorigin/CI/actions/setup-python-udf@4670989748419fb169f88282cf05fb690ea91074
       - name: Checkout CI coverage helper
         # Use the same bounded retry budget on this runner's network path.
         timeout-minutes: 10
@@ -195,6 +204,7 @@ jobs:
           token: ${{ secrets.TOKEN_ACTION }}
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
+          persist-credentials: false
           sparse-checkout: |
             scripts/prepare_coverage_cgo.sh
             scripts/run_coverage_ut.py
@@ -206,8 +216,72 @@ jobs:
             scripts/coverage_timing.py
             scripts/coverage_skip_manifest.py
             scripts/summarize_ut_report.py
+            scripts/cs_coverage_cache.py
+            config/coverage-cache-catalog.json
           sparse-checkout-cone-mode: false
           path: .ci-workflow
+      - name: Prepare fresh per-job compilation paths
+        env:
+          GROUP: ${{ matrix.group }}
+        run: |
+          set -euo pipefail
+          for path in "$RUNNER_TEMP/cs-buildcache-gomod" "$RUNNER_TEMP/cs-buildcache-go" "$RUNNER_TEMP/cs-reviewed-artifact" "$RUNNER_TEMP/cs-reviewed-entry.json"; do
+            test ! -e "$path"
+          done
+          echo "GOMODCACHE=$RUNNER_TEMP/cs-buildcache-gomod" >> "$GITHUB_ENV"
+          echo "GOCACHE=$RUNNER_TEMP/cs-buildcache-go" >> "$GITHUB_ENV"
+          echo "COVERAGE_GROUP=$GROUP" >> "$GITHUB_ENV"
+          echo 'GOFLAGS=' >> "$GITHUB_ENV"
+          echo 'GOWORK=off' >> "$GITHUB_ENV"
+          echo 'CGO_ENABLED=1' >> "$GITHUB_ENV"
+          echo 'GOMAXPROCS=7' >> "$GITHUB_ENV"
+      - id: reviewed_cache
+        name: Select exact-version reviewed cache and validate provenance
+        if: ${{ inputs.coverage_compile_cache }}
+        timeout-minutes: 3
+        env:
+          CS_CACHE_READ_TOKEN: ${{ secrets.CS_COVERAGE_CACHE_READ_TOKEN || github.token }}
+          CS_CACHE_SOURCE_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        run: python3 .ci-workflow/scripts/cs_coverage_cache.py select --catalog .ci-workflow/config/coverage-cache-catalog.json --state "$RUNNER_TEMP/cs-reviewed-entry.json"
+      - id: download_reviewed_cache
+        name: Download reviewed compile-only artifact without publishing
+        if: ${{ steps.reviewed_cache.outputs.candidate == 'true' }}
+        timeout-minutes: 15
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          artifact-ids: ${{ steps.reviewed_cache.outputs.artifact_id }}
+          run-id: ${{ steps.reviewed_cache.outputs.run_id }}
+          repository: ${{ steps.reviewed_cache.outputs.repository }}
+          github-token: ${{ secrets.CS_COVERAGE_CACHE_READ_TOKEN || github.token }}
+          path: ${{ runner.temp }}/cs-reviewed-artifact
+          merge-multiple: true
+      - id: restore_reviewed_cache
+        name: Verify reviewed manifest archive native inputs and restore
+        if: ${{ steps.download_reviewed_cache.outcome == 'success' }}
+        timeout-minutes: 10
+        run: python3 .ci-workflow/scripts/cs_coverage_cache.py restore --state "$RUNNER_TEMP/cs-reviewed-entry.json" --artifact "$RUNNER_TEMP/cs-reviewed-artifact"
+      - name: Record reviewed cache outcome
+        if: ${{ always() && !cancelled() }}
+        env:
+          HIT: ${{ steps.restore_reviewed_cache.outputs.hit }}
+          SELECT: ${{ steps.reviewed_cache.outcome }}
+          CANDIDATE: ${{ steps.reviewed_cache.outputs.candidate }}
+          DOWNLOAD: ${{ steps.download_reviewed_cache.outcome }}
+          RESTORE: ${{ steps.restore_reviewed_cache.outcome }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          (Path(os.environ['RUNNER_TEMP'])/'cs-cache-status.json').write_text(json.dumps({key.lower(): os.environ.get(key, '') for key in ('HIT','SELECT','CANDIDATE','DOWNLOAD','RESTORE')}, indent=2)+'\n')
+          PY
+          if [ "$SELECT" = failure ] || [ "$RESTORE" = failure ]; then
+            echo '- Reviewed compilation cache: validation failed; tests are blocked, not a cold fallback.' >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$HIT" = true ]; then
+            echo '- Reviewed exact-version compilation cache: hit; tests still execute with count=1.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '- Reviewed compilation cache: not restored; normal cold compilation, no automatic seed creation.' >> "$GITHUB_STEP_SUMMARY"
+          fi
       - id: coverage_ut
         name: Run coverage unit tests
         # This step includes bounded package discovery and native preparation
@@ -222,6 +296,7 @@ jobs:
         continue-on-error: true
         env:
           GOPROXY: https://goproxy.cn|https://proxy.golang.org|direct
+          CS_COMPILE_CACHE_HIT: ${{ steps.restore_reviewed_cache.outputs.hit }}
           GOMAXPROCS: "7"
           CS_S3_ENV: ${{ startsWith(runner.name, 'cs-mty-') && 'mty' || startsWith(runner.name, 'cs-mnl2-') && 'mnl2' || startsWith(runner.name, 'cs-jed-') && 'jed' || startsWith(runner.name, 'cs-ruh-') && 'ruh' || '' }}
           TEST_S3FS_CS: ${{ startsWith(runner.name, 'cs-mty-') && secrets.CS_S3_MTY_CONFIG || startsWith(runner.name, 'cs-mnl2-') && secrets.CS_S3_MNL2_CONFIG || startsWith(runner.name, 'cs-jed-') && secrets.CS_S3_JED_CONFIG || startsWith(runner.name, 'cs-ruh-') && secrets.CS_S3_RUH_CONFIG || '' }}
@@ -361,17 +436,29 @@ jobs:
           package_count=$(printf '%s\n' "${test_scope}" | awk 'NF { count++ } END { print count + 0 }')
           instrumented_package_count=$(printf '%s\n' "${cover_pkgs}" | awk -F, '{ print NF }')
           printf '%s\n' "${test_scope}" > "$RUNNER_TEMP/coverage-full-scope.txt"
+          printf '%s\n' "${cover_pkgs}" > "$RUNNER_TEMP/coverage-instrumented-scope.txt"
           python "$GITHUB_WORKSPACE/.ci-workflow/scripts/coverage_two_groups.py" \
             --packages "$RUNNER_TEMP/coverage-full-scope.txt" --group "${COVERAGE_GROUP}" \
             --manifest "$RUNNER_TEMP/coverage-group-plan.json" --selected "$RUNNER_TEMP/coverage-group.txt"
           test_scope=$(cat "$RUNNER_TEMP/coverage-group.txt")
           selected_count=$(wc -l < "$RUNNER_TEMP/coverage-group.txt" | tr -d ' ')
           echo "coverage_ut package_count=${selected_count} full_package_count=${package_count} package_parallelism=${COVERAGE_UT_PACKAGE_PARALLELISM} instrumented_package_count=${instrumented_package_count}" | tee -a "${phase_timing}"
+          if [ "${CS_COMPILE_CACHE_HIT:-}" = true ]; then
+            python3 .ci-workflow/scripts/cs_coverage_cache.py verify-scope \
+              --state "$RUNNER_TEMP/cs-reviewed-entry.json" --artifact "$RUNNER_TEMP/cs-reviewed-artifact" \
+              --packages "$RUNNER_TEMP/coverage-group.txt" --full-packages "$RUNNER_TEMP/coverage-full-scope.txt" \
+              --coverpkg-file "$RUNNER_TEMP/coverage-instrumented-scope.txt"
+          fi
 
           phase_start prepare_cgo
           set +e
-          timeout --kill-after=30s "${COVERAGE_UT_CGO_TIMEOUT_SECONDS}s" \
-            "$GITHUB_WORKSPACE/.ci-workflow/scripts/prepare_coverage_cgo.sh" > "${cgo_log}" 2>&1
+          if [ "${CS_COMPILE_CACHE_HIT:-}" = true ]; then
+            timeout --kill-after=30s "${COVERAGE_UT_CGO_TIMEOUT_SECONDS}s" \
+              bash -e -c 'make config; make cgo; python3 .ci-workflow/scripts/cs_coverage_cache.py verify-native --state "$RUNNER_TEMP/cs-reviewed-entry.json" --artifact "$RUNNER_TEMP/cs-reviewed-artifact"' > "${cgo_log}" 2>&1
+          else
+            timeout --kill-after=30s "${COVERAGE_UT_CGO_TIMEOUT_SECONDS}s" \
+              "$GITHUB_WORKSPACE/.ci-workflow/scripts/prepare_coverage_cgo.sh" > "${cgo_log}" 2>&1
+          fi
           phase_status=$?
           set -e
           phase_end "${phase_status}" "${COVERAGE_UT_CGO_TIMEOUT_SECONDS}"
@@ -800,6 +887,10 @@ jobs:
             ${{ runner.temp }}/ut-coverage-incident.md
             ${{ runner.temp }}/ut-coverage.stderr.log
             ${{ runner.temp }}/ut-coverage-timing.json
+            ${{ runner.temp }}/ut-coverage-phase-timing.txt
+            ${{ runner.temp }}/cs-cache-status.json
+            ${{ runner.temp }}/cs-reviewed-entry.json
+            ${{ runner.temp }}/cs-reviewed-artifact/manifest.json
           if-no-files-found: warn
           retention-days: 7
       - id: upload_coverage_diagnostics
