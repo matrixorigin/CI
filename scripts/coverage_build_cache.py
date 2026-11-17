@@ -88,7 +88,7 @@ def run_compile(command, source, env, timeout=1800):
 
 def cache_environment():
     value = os.environ.get('CS_CACHE_ENV', '')
-    if value not in ('mty', 'jed'):
+    if value != 'ruh':
         raise ValueError('explicit authorized cache environment required')
     return value
 
