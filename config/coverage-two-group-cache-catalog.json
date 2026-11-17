@@ -1,1 +1,147 @@
-{"schema":1,"entries":[]}
+{
+  "schema": 1,
+  "entries": [
+    {
+      "source_repository": "matrixorigin/matrixone",
+      "source": "dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca",
+      "environment": "mty",
+      "group": "0",
+      "producer": {
+        "id": 44062673282,
+        "head_sha": "e9a95a92b955cd4f5a5732ad8659787518be87fb",
+        "head_branch": "weilu-runner-test",
+        "event": "workflow_dispatch",
+        "path": ".github/workflows/race-seed-canary.yaml",
+        "workflow_id": 362431071,
+        "run_attempt": 1,
+        "repository": "matrixorigin/matrixone",
+        "actor": "Ariznawlll",
+        "referenced_workflows": [
+          {
+            "path": "matrixorigin/CI/.github/workflows/coverage-mty-two-group.yaml@72a69160f7ad36ad17e73b1ca7e1b26c791a3a40",
+            "sha": "72a69160f7ad36ad17e73b1ca7e1b26c791a3a40"
+          },
+          {
+            "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@90b78e12e49093b07c651a723a2b71a091d1fe81",
+            "sha": "90b78e12e49093b07c651a723a2b71a091d1fe81"
+          }
+        ]
+      },
+      "artifact": {
+        "id": 14322160882,
+        "name": "cs-buildcache-44062673282-1-0",
+        "size_in_bytes": 1715684819,
+        "digest": "sha256:c8a4e583179b2a2e975bd6816f15ce5f0b50bab170c99c2d4c801fbc8e340dd0"
+      },
+      "manifest_sha256": "68665b7cc2e4bd1c377993fd794c2ea53875ae0c878a4f6b056897728ca5a947",
+      "fingerprint": {
+        "attempt": "1",
+        "cpu": {
+          "cpu family": "6",
+          "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl xtopology cpuid tsc_known_freq pni pclmulqdq ssse3 fma cx16 pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault ssbd ibrs ibpb stibp ibrs_enhanced fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid mpx avx512f avx512dq rdseed adx smap clflushopt clwb avx512cd avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves arat umip pku ospke avx512_vnni md_clear arch_capabilities",
+          "model": "85",
+          "model name": "Intel(R) Xeon(R) Gold 5218R CPU @ 2.10GHz",
+          "stepping": "7",
+          "vendor_id": "GenuineIntel"
+        },
+        "cs_environment": "mty",
+        "go_env": {
+          "CGO_ENABLED": "1",
+          "GOAMD64": "v1",
+          "GOARCH": "amd64",
+          "GOEXPERIMENT": "",
+          "GOOS": "linux"
+        },
+        "gocache": "/home/runner/_work/_temp/cs-buildcache-go",
+        "gomodcache": "/home/runner/_work/_temp/cs-buildcache-gomod",
+        "group": "0",
+        "group_count": 2,
+        "os": "87458b3b1f1ca0e5c693ade771de7007c3783bdc692fa6b39eb6414bf2af2763",
+        "partition_policy": "e557d2afbe81f863a518c5429e0d95dbadb27705795bba3a90c0d50b3d63846a",
+        "platform": "Linux x86_64",
+        "policy": "ed35d4df6afc12671b3ab903e2811842230fa705422e1dc885b4e3428603fcc4",
+        "run": "44062673282",
+        "schema": 1,
+        "source": "dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca",
+        "tools": {
+          "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+          "cmake": "cmake version 3.17.2",
+          "cxx": "c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+          "go": "go version go1.27.1 linux/amd64"
+        },
+        "workspace": "/home/runner/_work/matrixone/matrixone"
+      }
+    },
+    {
+      "source_repository": "matrixorigin/matrixone",
+      "source": "dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca",
+      "environment": "mty",
+      "group": "1",
+      "producer": {
+        "id": 44062673282,
+        "head_sha": "e9a95a92b955cd4f5a5732ad8659787518be87fb",
+        "head_branch": "weilu-runner-test",
+        "event": "workflow_dispatch",
+        "path": ".github/workflows/race-seed-canary.yaml",
+        "workflow_id": 362431071,
+        "run_attempt": 1,
+        "repository": "matrixorigin/matrixone",
+        "actor": "Ariznawlll",
+        "referenced_workflows": [
+          {
+            "path": "matrixorigin/CI/.github/workflows/coverage-mty-two-group.yaml@72a69160f7ad36ad17e73b1ca7e1b26c791a3a40",
+            "sha": "72a69160f7ad36ad17e73b1ca7e1b26c791a3a40"
+          },
+          {
+            "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@90b78e12e49093b07c651a723a2b71a091d1fe81",
+            "sha": "90b78e12e49093b07c651a723a2b71a091d1fe81"
+          }
+        ]
+      },
+      "artifact": {
+        "id": 14321007529,
+        "name": "cs-buildcache-44062673282-1-1",
+        "size_in_bytes": 1463858976,
+        "digest": "sha256:83b2debace9d8ff92d2926f6056e11650267fe65a22200dc35e2df2144a18579"
+      },
+      "manifest_sha256": "1bb904ffca90194b9ef0940ca1c62f2441b4e1a50e4a815f142bc63277f58c59",
+      "fingerprint": {
+        "attempt": "1",
+        "cpu": {
+          "cpu family": "6",
+          "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl xtopology cpuid tsc_known_freq pni pclmulqdq vmx ssse3 fma cx16 pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault ssbd ibrs ibpb stibp ibrs_enhanced tpr_shadow flexpriority ept vpid ept_ad fsgsbase tsc_adjust sgx bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves wbnoinvd arat vnmi avx512vbmi umip pku ospke avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq la57 rdpid sgx_lc fsrm md_clear arch_capabilities",
+          "model": "106",
+          "model name": "Intel(R) Xeon(R) Gold 6348 CPU @ 2.60GHz",
+          "stepping": "6",
+          "vendor_id": "GenuineIntel"
+        },
+        "cs_environment": "mty",
+        "go_env": {
+          "CGO_ENABLED": "1",
+          "GOAMD64": "v1",
+          "GOARCH": "amd64",
+          "GOEXPERIMENT": "",
+          "GOOS": "linux"
+        },
+        "gocache": "/home/runner/_work/_temp/cs-buildcache-go",
+        "gomodcache": "/home/runner/_work/_temp/cs-buildcache-gomod",
+        "group": "1",
+        "group_count": 2,
+        "os": "87458b3b1f1ca0e5c693ade771de7007c3783bdc692fa6b39eb6414bf2af2763",
+        "partition_policy": "e557d2afbe81f863a518c5429e0d95dbadb27705795bba3a90c0d50b3d63846a",
+        "platform": "Linux x86_64",
+        "policy": "ed35d4df6afc12671b3ab903e2811842230fa705422e1dc885b4e3428603fcc4",
+        "run": "44062673282",
+        "schema": 1,
+        "source": "dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca",
+        "tools": {
+          "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+          "cmake": "cmake version 3.17.2",
+          "cxx": "c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+          "go": "go version go1.27.1 linux/amd64"
+        },
+        "workspace": "/home/runner/_work/matrixone/matrixone"
+      }
+    }
+  ]
+}
