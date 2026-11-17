@@ -92,6 +92,37 @@ class CacheTests(unittest.TestCase):
 
 
 class RealGoIncrementalTests(unittest.TestCase):
+    def test_compile_only_batches_reuse_actions_without_executing_tests(self):
+        import node_cache_candidate as candidate
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory(prefix='go-batch-proof-') as tmp:
+            root=Path(tmp).resolve();source=root/'source'
+            shutil.copytree(Path(__file__).parent/'fixtures/incremental-go',source)
+            config=root/'config.json'
+            config.write_bytes(c.canonical({'schema':2,'local':str(root/'private'),
+                'shared':str(root/'shared'),'indexes':[],'runtime':{'environment':'fixture'},'reserve_bytes':0}))
+            env={k:v for k,v in os.environ.items() if k not in ('GOROOT','GOFLAGS','GOCACHEPROG','GOTOOLCHAIN')}
+            env.update(GOTOOLCHAIN='local',GOMAXPROCS='2',GOWORK='off',GOPROXY='off',GOSUMDB='off',
+                TEST_MARKER=str(root/'test-executions'),EXPECTED_VALUE='wrong-if-tests-execute',
+                GOCACHE=str(root/'fallback'),GOCACHEPROG=f'{sys.executable} {Path(c.__file__).resolve()} --config {config}')
+            packages=['example.test/cachefixture/'+x for x in ('stable','changed','app')]
+            contract={'packages':packages,'coverpkg':packages,'flags':['-p','2','-count=1','-x','-covermode=set']}
+            def run(commands):
+                logs=''
+                for command in commands:
+                    proc=subprocess.run(command,cwd=source,env=env,capture_output=True,text=True,timeout=300)
+                    self.assertEqual(proc.returncode,0,proc.stderr[-3000:]);logs+=proc.stderr
+                self.assertFalse((root/'private/validation-failed.json').exists())
+                self.assertFalse((root/'test-executions').exists())
+                return logs
+            # Initial single invocation and then three bounded invocations:
+            # unchanged packages must retain the same compile action IDs.
+            run(candidate.compile_commands(contract)[1:])
+            with patch.object(candidate,'COVERAGE_BATCH_PACKAGES',1):
+                logs=run(candidate.compile_commands(contract)[1:])
+            self.assertFalse(any('/compile ' in line and '-p example.test/cachefixture/' in line
+                                 for line in logs.splitlines()),logs[-3000:])
+
     def test_real_disk_cache_migrates_without_recompiling(self):
         import publish_node_cache as publisher
         with tempfile.TemporaryDirectory(prefix='go-cache-migration-') as tmp:

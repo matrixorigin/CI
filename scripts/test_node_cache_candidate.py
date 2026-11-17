@@ -66,7 +66,8 @@ class CandidateTests(unittest.TestCase):
                                           'CS_S3_SECRET': 'fixture-only', 'CS_CACHE_READ_TOKEN': 'fixture-only'})]
         for item in patches: item.start(); self.addCleanup(item.stop)
 
-    def build(self, command, source, env):
+    def build(self, command, source, env, timeout=1800):
+        self.assertGreater(timeout, 0); self.assertLessEqual(timeout, 1800)
         self.assertIn('-c', command); self.assertEqual(command[command.index('-o')+1], os.devnull)
         self.assertNotIn('CS_S3_SECRET', env); self.assertNotIn('CS_CACHE_READ_TOKEN', env)
         cache = c.Cache(self.cfg); cache.get('a'*64)
@@ -112,11 +113,37 @@ class CandidateTests(unittest.TestCase):
         self.assertFalse((self.root/'no').exists())
 
     def test_failed_compile_or_corruption_cannot_complete_candidate(self):
-        def failed(*args): raise ValueError('compile failed')
+        def failed(*args, **kwargs): raise ValueError('compile failed')
         with self.assertRaises(ValueError): k.freeze(self.state, self.contract, self.stage, execute=failed)
         self.assertFalse(self.stage.exists())
         self.local.mkdir(exist_ok=True); c.atomic_json(self.local/'validation-failed.json', {'failed': True})
-        with self.assertRaises(ValueError): k.freeze(self.state, self.contract, self.stage, execute=lambda *args: None)
+        with self.assertRaises(ValueError): k.freeze(self.state, self.contract, self.stage, execute=lambda *args, **kwargs: None)
+        self.assertFalse(self.stage.exists())
+
+    def test_bounded_batches_cover_every_selected_package_once_with_same_flags(self):
+        packages = [f'github.com/matrixorigin/matrixone/pkg/p{i}' for i in range(254)]
+        contract = {**self.contract, 'packages': packages}
+        commands = k.compile_commands(contract)
+        self.assertEqual(len(commands), 9)
+        selected = []
+        for cmd in commands[1:]:
+            actual = cmd[cmd.index('-o')+2:]
+            self.assertLessEqual(len(actual), 32); selected += actual
+            self.assertEqual(cmd[:2+len(contract['flags'])], ['go','test',*contract['flags']])
+            self.assertIn('-coverpkg='+','.join(contract['coverpkg']), cmd)
+            self.assertIn('-c', cmd); self.assertEqual(cmd[cmd.index('-o')+1], os.devnull)
+        self.assertEqual(selected, packages)
+
+    def test_batches_share_original_coverage_deadline_and_do_not_export_on_expiry(self):
+        self.contract['packages'] *= 65  # Executor fixture only; real scope rejects duplicates.
+        elapsed = [0.]; timeouts = []
+        def execute(command, source, env, timeout):
+            timeouts.append(timeout)
+            elapsed[0] += 1000.
+        with patch.object(k.time, 'monotonic', side_effect=lambda:elapsed[0]):
+            with self.assertRaisesRegex(ValueError, 'incremental compile deadline'):
+                k.freeze(self.state, self.contract, self.stage, execute=execute)
+        self.assertEqual(timeouts, [1800,1800,800])
         self.assertFalse(self.stage.exists())
 
     def test_scope_changes_do_not_relax_membership_or_execute_test_binaries(self):

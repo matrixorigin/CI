@@ -20,6 +20,11 @@ import incremental_cache as c
 import node_compile_cache as n
 import publish_node_cache as p
 
+# go test -c retains linked binaries in its temporary work tree until the
+# whole invocation exits, even with -o /dev/null. Bound that lifetime while
+# keeping the same private GOCACHEPROG and complete coverpkg for every batch.
+COVERAGE_BATCH_PACKAGES = 32
+
 
 def scope(selected, full, cover):
     lists = [path.read_text().strip().splitlines() for path in (selected, full)]
@@ -36,9 +41,11 @@ def scope(selected, full, cover):
 
 def compile_commands(contract):
     common = ['go', 'test', '-mod=readonly', '-count=1', '-short', '-tags', 'matrixone_test', '-p', '7']
-    return [common + ['-c', '-o', os.devnull, './pkg/fileservice'],
-            ['go', 'test', *contract['flags'], '-coverpkg='+','.join(contract['coverpkg']),
-             '-c', '-o', os.devnull, *contract['packages']]]
+    packages = contract['packages']
+    return [common + ['-c', '-o', os.devnull, './pkg/fileservice']] + [
+        ['go', 'test', *contract['flags'], '-coverpkg='+','.join(contract['coverpkg']),
+         '-c', '-o', os.devnull, *packages[start:start+COVERAGE_BATCH_PACKAGES]]
+        for start in range(0, len(packages), COVERAGE_BATCH_PACKAGES)]
 
 
 def run_compile(command, source, env, timeout=1800):
@@ -84,11 +91,16 @@ def freeze(state_path, contract, destination, execute=run_compile):
             env.pop(name)
     c.require(env.get('GOCACHEPROG') and '-DMO_NATIVE_CACHE_'+native['native_output_sha256']+'=1'
               in env.get('CGO_CFLAGS', ''), 'private incremental cache/native flag missing')
-    timings = []
+    timings = []; coverage_deadline = None
     for number, command in enumerate(compile_commands(contract)):
+        # Splitting an invocation must not multiply its original 30min budget.
+        if number == 1:
+            coverage_deadline = time.monotonic()+1800
+        timeout = 1800 if number == 0 else coverage_deadline-time.monotonic()
+        c.require(timeout > 0, 'incremental compile deadline')
         c.atomic_json(Path(state_path).parent/f'compile-phase-{number}-started.json',
                       {'phase': number, 'compile_only': True})
-        before = time.monotonic(); execute(command, source, env)
+        before = time.monotonic(); execute(command, source, env, timeout=timeout)
         timings.append(round(time.monotonic()-before, 6))
         c.atomic_json(Path(state_path).parent/f'compile-phase-{number}-completed.json',
                       {'phase': number, 'seconds': timings[-1], 'compile_only': True})
@@ -133,6 +145,7 @@ def freeze(state_path, contract, destination, execute=run_compile):
                 'object_count': len(objects), 'object_bytes': sum(objects.values()),
                 'archive_bytes': archive.stat().st_size, 'archive_sha256': c.digest(archive),
                 'unpacked_bytes': total, 'compile_seconds': timings,
+                'coverage_batch_packages': COVERAGE_BATCH_PACKAGES,
                 'freeze_seconds': round(time.monotonic()-started, 6)}
     # Completion marker is last. Partial archives never become valid candidates.
     c.atomic_json(destination/'manifest.json', manifest)
