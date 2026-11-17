@@ -148,7 +148,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
           repository: matrixorigin/CI
-          ref: 6e7b6b697a71774f85642abe6aeaeaa181eab2ec
+          ref: fed6c51e09e48f4d5a2a686e471dcc17647e76fa
           token: ${{ secrets.TOKEN_ACTION }}
           persist-credentials: false
           path: .cache-consumer
@@ -1061,7 +1061,7 @@ jobs:
               assert pvc['read_only_mount'] is True and pvc['network_download'] is False
               assert pvc['artifact_id']==entry['artifact']['id']
               ids.append(entry['artifact']['id'])
-          result={'source':a['source_sha'],'consumer_run':os.environ['GITHUB_RUN_ID'],'producer_run':44041833471,'baseline_run':44035926394,'artifact_ids':ids,'three_reviewed_hits':True,'packages':505,'skips':len(b['skipped_tests']),'same_package_skip_profile_scope':True,'cache_published':False,'storage':'independent-readonly-pvc','cross_sha_validated':False,'reviewed_consumer_commit':'6e7b6b697a71774f85642abe6aeaeaa181eab2ec'}
+          result={'source':a['source_sha'],'consumer_run':os.environ['GITHUB_RUN_ID'],'producer_run':44041833471,'baseline_run':44035926394,'artifact_ids':ids,'three_reviewed_hits':True,'packages':505,'skips':len(b['skipped_tests']),'same_package_skip_profile_scope':True,'cache_published':False,'storage':'independent-readonly-pvc','cross_sha_validated':False,'reviewed_consumer_commit':'fed6c51e09e48f4d5a2a686e471dcc17647e76fa'}
           (root/'acceptance.json').write_text(json.dumps(result,indent=2)+'\n')
           print(json.dumps(result,indent=2))
           PY
