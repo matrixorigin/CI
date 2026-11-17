@@ -86,6 +86,13 @@ def run_compile(command, source, env, timeout=1800):
             process.wait(timeout=5)
 
 
+def cache_environment():
+    value = os.environ.get('CS_CACHE_ENV', '')
+    if value not in ('mty', 'jed'):
+        raise ValueError('explicit authorized cache environment required')
+    return value
+
+
 def fingerprint(source):
     if subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip() != SOURCE:
         raise ValueError('unexpected source')
@@ -100,7 +107,7 @@ def fingerprint(source):
         key, _, value = line.partition(':')
         if key.strip() in ('vendor_id', 'cpu family', 'model', 'model name', 'stepping', 'flags'):
             cpu[key.strip()] = value.strip()
-    return {'schema': 1, 'source': SOURCE, 'tools': tools, 'cpu': cpu,
+    return {'schema': 1, 'source': SOURCE, 'cs_environment': cache_environment(), 'tools': tools, 'cpu': cpu,
             'os': sha256(Path('/etc/os-release')),
             'platform': subprocess.check_output(['uname', '-sm'], text=True).strip(),
             'go_env': json.loads(subprocess.check_output(
