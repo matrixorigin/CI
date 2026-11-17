@@ -13,6 +13,16 @@ on:
         required: false
         type: boolean
         default: true
+      node_compile_cache:
+        description: Opt in to reviewed incremental objects on isolated node-cache pools; never publishes from a test job
+        required: false
+        type: boolean
+        default: false
+      node_cache_environment:
+        description: Environment for the isolated node-cache routing label (mty, mnl2, jed, ruh)
+        required: false
+        type: string
+        default: ""
       bvt_generation:
         description: "Shared CI generation used to select this run's coverage artifacts"
         required: false
@@ -49,6 +59,12 @@ jobs:
     outputs:
       allowed: ${{ steps.eligibility.outputs.allowed }}
     steps:
+      - name: Validate opt-in node-cache routing
+        if: ${{ inputs.node_compile_cache }}
+        env:
+          CACHE_ENVIRONMENT: ${{ inputs.node_cache_environment }}
+        run: |
+          case "$CACHE_ENVIRONMENT" in mty|mnl2|jed|ruh) ;; *) exit 1 ;; esac
       - id: check_in_org
         name: Check organization membership
         env:
@@ -148,7 +164,7 @@ jobs:
     if: ${{ needs.check_coverage_eligibility.outputs.allowed == 'true' }}
     environment: ci
     # Schedule across CS environments; bind S3 to the actual runner below.
-    runs-on: cs-large-7c14g
+    runs-on: ${{ inputs.node_compile_cache && format('cs-{0}-node-cache-7c14g', inputs.node_cache_environment) || 'cs-large-7c14g' }}
     # Leave headroom for setup, reviewed cache download, reports and cleanup.
     # Success paths skip the failure-only steps.
     # The wrapper below enforces the test deadline before this job-level last
@@ -217,6 +233,9 @@ jobs:
             scripts/coverage_skip_manifest.py
             scripts/summarize_ut_report.py
             scripts/cs_coverage_cache.py
+            scripts/incremental_cache.py
+            scripts/node_compile_cache.py
+            config/node-compile-cache-catalog.json
             config/coverage-cache-catalog.json
           sparse-checkout-cone-mode: false
           path: .ci-workflow
@@ -235,9 +254,22 @@ jobs:
           echo 'GOWORK=off' >> "$GITHUB_ENV"
           echo 'CGO_ENABLED=1' >> "$GITHUB_ENV"
           echo 'GOMAXPROCS=7' >> "$GITHUB_ENV"
+      - id: node_cache
+        name: Configure reviewed node cache with private incremental writes
+        if: ${{ inputs.node_compile_cache }}
+        timeout-minutes: 5
+        env:
+          CS_CACHE_READ_TOKEN: ${{ secrets.CS_COVERAGE_CACHE_READ_TOKEN || github.token }}
+          CS_CACHE_SOURCE_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          REQUESTED_CACHE_ENV: ${{ inputs.node_cache_environment }}
+        run: |
+          set -euo pipefail
+          test "${CS_CACHE_ENV:-}" = "$REQUESTED_CACHE_ENV"
+          python3 .ci-workflow/scripts/node_compile_cache.py configure \
+            --catalog .ci-workflow/config/node-compile-cache-catalog.json
       - id: reviewed_cache
         name: Select exact-version reviewed cache and validate provenance
-        if: ${{ inputs.coverage_compile_cache }}
+        if: ${{ inputs.coverage_compile_cache && !inputs.node_compile_cache }}
         timeout-minutes: 3
         env:
           CS_CACHE_READ_TOKEN: ${{ secrets.CS_COVERAGE_CACHE_READ_TOKEN || github.token }}
@@ -262,7 +294,7 @@ jobs:
         timeout-minutes: 10
         run: python3 .ci-workflow/scripts/cs_coverage_cache.py restore --state "$RUNNER_TEMP/cs-reviewed-entry.json" --artifact "$RUNNER_TEMP/cs-reviewed-artifact"
       - name: Record reviewed cache outcome
-        if: ${{ always() && !cancelled() }}
+        if: ${{ always() && !cancelled() && !inputs.node_compile_cache }}
         env:
           HIT: ${{ steps.restore_reviewed_cache.outputs.hit }}
           SELECT: ${{ steps.reviewed_cache.outcome }}
@@ -452,7 +484,11 @@ jobs:
 
           phase_start prepare_cgo
           set +e
-          if [ "${CS_COMPILE_CACHE_HIT:-}" = true ]; then
+          if [ -n "${CS_NODE_CACHE_STATE:-}" ]; then
+            timeout --kill-after=30s "${COVERAGE_UT_CGO_TIMEOUT_SECONDS}s" \
+              python3 .ci-workflow/scripts/node_compile_cache.py prepare-native \
+                --state "$CS_NODE_CACHE_STATE" > "${cgo_log}" 2>&1
+          elif [ "${CS_COMPILE_CACHE_HIT:-}" = true ]; then
             timeout --kill-after=30s "${COVERAGE_UT_CGO_TIMEOUT_SECONDS}s" \
               bash -e -c 'make config; make cgo; python3 .ci-workflow/scripts/cs_coverage_cache.py verify-native --state "$RUNNER_TEMP/cs-reviewed-entry.json" --artifact "$RUNNER_TEMP/cs-reviewed-artifact"' > "${cgo_log}" 2>&1
           else
@@ -465,6 +501,10 @@ jobs:
           (( phase_status == 0 )) || exit "${phase_status}"
           thirdparties_install_dir="$GITHUB_WORKSPACE/thirdparties/install"
           cgo_cflags="-I${GITHUB_WORKSPACE}/cgo -I${thirdparties_install_dir}/include"
+          if [ -n "${CS_NODE_CACHE_STATE:-}" ]; then
+            native_id=$(jq -er '.native_output_sha256 | select(test("^[0-9a-f]{64}$"))' "$RUNNER_TEMP/cs-node-cache/native-result.json")
+            cgo_cflags="$cgo_cflags -DMO_NATIVE_CACHE_${native_id}=1"
+          fi
           cgo_ldflags="-L${GITHUB_WORKSPACE}/cgo -lmo -Wl,-rpath,${GITHUB_WORKSPACE}/cgo -L${thirdparties_install_dir}/lib -lusearch_c -Wl,-rpath,${thirdparties_install_dir}/lib -lm"
 
           # Fail early on the real restricted-account SDK path before the suite.
@@ -769,6 +809,11 @@ jobs:
           path: ${{ runner.temp }}/ut-coverage.out
           if-no-files-found: error
           retention-days: 7
+      - id: node_cache_acceptance
+        name: Fail closed on any incremental cache validation error
+        if: ${{ always() && !cancelled() && inputs.node_compile_cache && steps.node_cache.outcome == 'success' }}
+        timeout-minutes: 5
+        run: python3 .ci-workflow/scripts/node_compile_cache.py accept --state "$RUNNER_TEMP/cs-node-cache/state.json"
       - id: coverage_status
         name: Record final UT coverage producer status
         if: ${{ always() && !cancelled() }}
@@ -807,6 +852,10 @@ jobs:
           if [ "${result}" = 'passed' ] && [ "${{ steps.upload_coverage_profile.outcome }}" != 'success' ]; then
             result=failed
             reason=coverage_profile_artifact_upload_failure
+          fi
+          if [ '${{ inputs.node_compile_cache }}' = true ] && [ '${{ steps.node_cache_acceptance.outcome }}' != success ]; then
+            result=failed
+            reason=incremental_cache_validation_failure
           fi
           status_tmp="${status_file}.final"
           if [ -s "${status_file}" ]; then
@@ -891,6 +940,8 @@ jobs:
             ${{ runner.temp }}/cs-cache-status.json
             ${{ runner.temp }}/cs-reviewed-entry.json
             ${{ runner.temp }}/cs-reviewed-artifact/manifest.json
+            ${{ runner.temp }}/cs-node-cache/native-result.json
+            ${{ runner.temp }}/cs-node-cache/acceptance.json
           if-no-files-found: warn
           retention-days: 7
       - id: upload_coverage_diagnostics
