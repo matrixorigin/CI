@@ -64,10 +64,10 @@ jobs:
         run: |
           set -euo pipefail
           test "$CALLER_REPOSITORY" = matrixorigin/matrixone
-          test "$CALLER_REF" = refs/heads/weilu-runner-test
+          test "$CALLER_REF" = refs/heads/codex/mty-pvc-caller
           test "$EVENT_NAME" = workflow_dispatch
           test "$ACTOR" = Ariznawlll
-          case "$TARGET_ENV" in mty|jed) ;; *) exit 1 ;; esac
+          test "$TARGET_ENV" = mty
           case "$CACHE_MODE" in
             cold) ;;
             warm) ;;
