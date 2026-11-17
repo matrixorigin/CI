@@ -24,8 +24,10 @@ def pool(policy,binding,original):
     c.require(original_spec['githubConfigUrl']=='https://github.com/matrixorigin/matrixone' and
               isinstance(secret,str) and secret.startswith(original['metadata']['name']+'-'),'original auth reference differs')
     template=original_spec['template']['spec']
+    # Existing pools use the official mutable tag. Do not inherit that tag:
+    # every NEW pool below is always pinned to the audited image digest.
     c.require(len(template['containers'])==1 and template['containers'][0]['name']=='runner' and
-              template['containers'][0]['image']==pub.IMAGE and not template.get('initContainers'),
+              template['containers'][0]['image'] in (pub.IMAGE,'ghcr.io/actions/actions-runner:latest') and not template.get('initContainers'),
               'requires reviewed plain runner image')
     resources={'requests':{'cpu':'7','memory':'12Gi'},'limits':{'cpu':'7','memory':'14Gi'}}
     c.require(template['containers'][0]['resources']==resources,'original resource template differs')
