@@ -119,6 +119,26 @@ def reviewed_entries(catalog,current,api=legacy.api,now=None):
     return selected
 
 
+def catalog_for_node(catalog, binding):
+    """Only generations actually reviewed as published on THIS volume.
+
+    An environment-wide generation is not evidence that every node already has
+    its bytes. Unpopulated nodes cold-build; advertised-but-corrupt data fails.
+    Marker identity stays immutable when generations are added to the catalog.
+    """
+    identity = {key: binding[key] for key in ('node_uid', 'pvc_uid', 'pv_uid')}
+    entries = []
+    for entry in catalog['entries']:
+        bindings = entry.get('bindings', [])
+        c.require(isinstance(bindings, list) and len(bindings) <= 1000, 'invalid publication bindings')
+        for published in bindings:
+            c.require(isinstance(published, dict) and set(published) == set(identity),
+                      'invalid published volume identity')
+        if identity in bindings:
+            entries.append(entry)
+    return {'entries': entries}
+
+
 def configure(catalog_path,shared,source,local,environment,repository):
     started=time.monotonic()
     shared=c.safe_path(shared);local=c.safe_path(local)
@@ -133,9 +153,9 @@ def configure(catalog_path,shared,source,local,environment,repository):
     if shared.exists():
         readonly_mount(shared)
         c.require(node and node==os.environ.get('CS_CACHE_EXPECTED_NODE'), 'node identity missing')
-        verify_binding(catalog,shared,environment,node,
+        binding=verify_binding(catalog,shared,environment,node,
             {k:os.environ.get('CS_CACHE_'+k.upper(),'') for k in ('node_uid','pvc_uid','pv_uid')})
-        entries=reviewed_entries(catalog,current)
+        entries=reviewed_entries(catalog_for_node(catalog,binding),current)
     cfg={'schema':2,'local':str(local/'objects-private'),'shared':str(shared) if shared.exists() else None,
          'indexes':[e['index_sha256'] for e in entries], 'runtime':current}
     cache=c.Cache(cfg)  # Verify every selected index before executing Go.

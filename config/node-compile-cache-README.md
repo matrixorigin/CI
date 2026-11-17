@@ -75,11 +75,29 @@ This is a one-time format migration of existing valid caches, **not another full
 precompile**. Do not import arbitrary test-result caches from ordinary runners.
 `export_native` freezes native outputs after Make without compiling again.
 
-The protected publisher invocation, runtime catalog population and automatic
-promotion from successful trusted main-branch builds still require rollout
-wiring. The default workflow does not auto-publish unreviewed PR objects. The
-current implementation is not evidence that all existing runner pools are live
-on this path.
+`migrate_node_cache.py` now stages the existing reviewed PVC archives directly:
+live producer/API/expiry, ZIP, manifest, native inventory and tar digests are
+rechecked before conversion. No compiler runs; originals remain unchanged.
+Legacy native output is deliberately **not** relabeled as a v2 native hit: old
+manifests lack v2 tool-binary/system-package hashes. Native misses rebuild only
+that part, while compatible Go ActionIDs remain reusable.
+
+For trusted push/manual jobs, opt-in `node_cache_candidate` checks the Go build
+graph using compile-only `go test -c`, freezes **only new action mappings and
+objects before any S3/UT execution**, and uploads after full group success and
+the corruption gate. The archive is immutable even when later tests add local
+entries. This is not a fresh-cache build: GOCACHEPROG retains approved parents.
+No shared writes or automatic catalog approval occur in a test job.
+`node_cache_bundle.py` checks an independently reviewed producer/artifact,
+transport/manifest/archive and the exact object inventory before protected
+staging. The existing publisher then copies new objects and publishes the index
+last. Generations have explicit reviewed node/PVC/PV `bindings`; an unpopulated
+node cold-builds instead of trying to load another node's absent index.
+
+Protected-cluster invocation, live catalog population and automatic promotion
+from successful trusted main-branch builds still require rollout wiring. The
+default workflow does not auto-publish unreviewed PR objects. This code is not
+evidence that all existing runner pools are live on this path.
 
 ## Validation and rollout boundary
 

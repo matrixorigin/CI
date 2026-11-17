@@ -23,7 +23,12 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('incremental_cache_validation_failure',steps['coverage_status']['run'])
         self.assertIn('-DMO_NATIVE_CACHE_${native_id}=1',steps['coverage_ut']['run'])
         self.assertIn('-count=1',steps['coverage_ut']['run'])
-        self.assertNotIn('publish_node_cache',str(job))
+        self.assertNotIn('publish_node_cache.py publish',str(job))
+        self.assertEqual(inputs['node_cache_candidate']['default'],'false')
+        self.assertLess(steps['coverage_ut']['run'].index('node_cache_candidate.py'),
+                        steps['coverage_ut']['run'].index('phase_start cs_s3_smoke'))
+        self.assertIn("steps.node_cache_acceptance.outcome == 'success'",steps['upload_node_cache_candidate']['if'])
+        self.assertNotIn('continue-on-error',steps['upload_node_cache_candidate'])
         for name in ('merge-coverage-groups','coverage-final-status'):
             self.assertEqual(current['jobs'][name],original['jobs'][name])
 

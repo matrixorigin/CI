@@ -23,6 +23,11 @@ on:
         required: false
         type: string
         default: ""
+      node_cache_candidate:
+        description: Freeze only new compile-only objects before tests for separate trusted review; never writes shared PVC
+        required: false
+        type: boolean
+        default: false
       bvt_generation:
         description: "Shared CI generation used to select this run's coverage artifacts"
         required: false
@@ -60,11 +65,21 @@ jobs:
       allowed: ${{ steps.eligibility.outputs.allowed }}
     steps:
       - name: Validate opt-in node-cache routing
-        if: ${{ inputs.node_compile_cache }}
+        if: ${{ inputs.node_compile_cache || inputs.node_cache_candidate }}
         env:
           CACHE_ENVIRONMENT: ${{ inputs.node_cache_environment }}
+          NODE_CACHE: ${{ inputs.node_compile_cache }}
+          CANDIDATE: ${{ inputs.node_cache_candidate }}
+          EVENT: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
         run: |
+          set -euo pipefail
           case "$CACHE_ENVIRONMENT" in mty|mnl2|jed|ruh) ;; *) exit 1 ;; esac
+          if [ "$CANDIDATE" = true ]; then
+            test "$NODE_CACHE" = true
+            test "$REPOSITORY" = matrixorigin/matrixone
+            case "$EVENT" in push|workflow_dispatch) ;; *) exit 1 ;; esac
+          fi
       - id: check_in_org
         name: Check organization membership
         env:
@@ -235,6 +250,8 @@ jobs:
             scripts/cs_coverage_cache.py
             scripts/incremental_cache.py
             scripts/node_compile_cache.py
+            scripts/node_cache_candidate.py
+            scripts/publish_node_cache.py
             config/node-compile-cache-catalog.json
             config/coverage-cache-catalog.json
           sparse-checkout-cone-mode: false
@@ -506,6 +523,20 @@ jobs:
             cgo_cflags="$cgo_cflags -DMO_NATIVE_CACHE_${native_id}=1"
           fi
           cgo_ldflags="-L${GITHUB_WORKSPACE}/cgo -lmo -Wl,-rpath,${GITHUB_WORKSPACE}/cgo -L${thirdparties_install_dir}/lib -lusearch_c -Wl,-rpath,${thirdparties_install_dir}/lib -lm"
+
+          if [ '${{ inputs.node_cache_candidate }}' = true ]; then
+            phase_start incremental_candidate
+            set +e
+            env CGO_CFLAGS="${cgo_cflags}" CGO_LDFLAGS="${cgo_ldflags}" \
+              python3 .ci-workflow/scripts/node_cache_candidate.py \
+                --state "$CS_NODE_CACHE_STATE" --selected "$RUNNER_TEMP/coverage-group.txt" \
+                --full "$RUNNER_TEMP/coverage-full-scope.txt" --cover "$RUNNER_TEMP/coverage-instrumented-scope.txt" \
+                --destination "$RUNNER_TEMP/node-cache-candidate" > "$RUNNER_TEMP/node-cache-candidate.log" 2>&1
+            candidate_status=$?
+            set -e
+            phase_end "$candidate_status"
+            (( candidate_status == 0 )) || exit "$candidate_status"
+          fi
 
           # Fail early on the real restricted-account SDK path before the suite.
           phase_start cs_s3_smoke
@@ -814,6 +845,19 @@ jobs:
         if: ${{ always() && !cancelled() && inputs.node_compile_cache && steps.node_cache.outcome == 'success' }}
         timeout-minutes: 5
         run: python3 .ci-workflow/scripts/node_compile_cache.py accept --state "$RUNNER_TEMP/cs-node-cache/state.json"
+      - id: upload_node_cache_candidate
+        name: Upload frozen delta only after full group tests and integrity gate
+        if: ${{ success() && inputs.node_cache_candidate && steps.coverage_ut.outcome == 'success' && steps.node_cache_acceptance.outcome == 'success' }}
+        timeout-minutes: 15
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: node-cache-delta-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}
+          path: |
+            ${{ runner.temp }}/node-cache-candidate/manifest.json
+            ${{ runner.temp }}/node-cache-candidate/index.json
+            ${{ runner.temp }}/node-cache-candidate/delta.tar.gz
+          if-no-files-found: error
+          retention-days: 7
       - id: coverage_status
         name: Record final UT coverage producer status
         if: ${{ always() && !cancelled() }}

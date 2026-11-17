@@ -79,6 +79,16 @@ class NodeCacheTests(unittest.TestCase):
         with self.assertRaises(ValueError):n.reviewed_entries({'entries':[entry]},self.runtime,bad)
         with self.assertRaises(ValueError):n.reviewed_entries({'entries':[{**entry,'compile_only':False}]},self.runtime,api)
 
+    def test_unpopulated_node_is_cold_not_a_missing_other_nodes_index(self):
+        binding={'node_uid':'node-a','pvc_uid':'claim-a','pv_uid':'pv-a'}
+        entry,api=approval('d'*64,self.runtime)
+        self.assertEqual(n.catalog_for_node({'entries':[entry]},binding),{'entries':[]})
+        entry['bindings']=[binding]
+        self.assertEqual(n.catalog_for_node({'entries':[entry]},binding),{'entries':[entry]})
+        self.assertEqual(n.catalog_for_node({'entries':[entry]},{**binding,'pv_uid':'replaced'}),{'entries':[]})
+        entry['bindings']=[{'node_uid':'node-a'}]
+        with self.assertRaises(ValueError):n.catalog_for_node({'entries':[entry]},binding)
+
     def test_delta_publication_keeps_existing_generation_and_copies_only_new_bytes(self):
         local=self.root/'private';shared=self.root/'shared'
         cache=c.Cache({'schema':2,'local':str(local),'shared':None,'indexes':[],'runtime':self.runtime,'reserve_bytes':0})
