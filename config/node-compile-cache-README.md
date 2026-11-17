@@ -36,6 +36,8 @@ credentials. Tests retain `-count=1`. Workspaces remain separate emptyDirs.
 * Runtime identity retains repository, environment, Go/CC/CXX/CMake, OS, CPU,
   Go target options and source/module paths. Whole source SHA and test group
   are **not** runtime keys; they remain producer audit evidence.
+  Compiler/tool binaries and the installed system-package inventory are hashed
+  too, so upgrades at the same executable path cannot alias native generations.
 * PVC/PV/node UIDs are checked by the GitOps node pool and by a catalog-pinned
   marker plus runtime node hints and actual Linux RO mount verification.
   Pod-provided environment variables alone are not authority.

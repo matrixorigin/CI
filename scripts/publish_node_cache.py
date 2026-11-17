@@ -123,6 +123,9 @@ def publish(candidate,index_path,shared,reviewed,api=n.legacy.api):
             objects[r['sha256']]=r['size']
         metadata.append((path,shared/'native'/(mid+'.json')))
     c.require(sum(objects.values())<=8*c.GIB, 'publication exceeds 8 GiB budget')
+    import shutil
+    destination=shared if shared.exists() else shared.parent
+    c.require(shutil.disk_usage(destination).free>=20*c.GIB+sum(objects.values()), 'publication disk reserve insufficient')
     # All candidate bytes verified before any publication. Never execute source
     # or build tools in a privileged publisher.
     for digest,size in objects.items():

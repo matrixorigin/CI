@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -46,6 +47,11 @@ def runtime(source, environment, repository):
     for key in ('source','group','gocache'):
         del value[key]
     value.update(schema=2,environment=environment,repository=repository)
+    # A package update or compiler replacement at an unchanged path/version
+    # string must not silently reuse native output from the previous toolchain.
+    value['tool_binaries']={name:c.digest(Path(shutil.which(name)).resolve())
+                            for name in ('go','cc','c++','cmake','make','ar','ld')}
+    value['system_packages_sha256']=hash_value(command(['dpkg-query','-W','-f=${binary:Package}=${Version}\n'],source))
     return value
 
 
@@ -117,6 +123,7 @@ def configure(catalog_path,shared,source,local,environment,repository):
     started=time.monotonic()
     shared=c.safe_path(shared);local=c.safe_path(local)
     c.require(not local.exists(), 'per-job cache must be fresh')
+    c.require(all(shutil.disk_usage(path).free>=60*c.GIB for path in (source,local.parent)), 'node cache startup headroom below 60 GiB')
     catalog=c.read_json(catalog_path)
     current=runtime(source,environment,repository)
     # A new/uncached node can cold-build. An advertised bound volume must be

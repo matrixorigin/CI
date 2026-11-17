@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -44,6 +46,24 @@ class NodeCacheTests(unittest.TestCase):
         n.verify_binding(catalog,shared,'mty','node-0',hints)
         with self.assertRaises(ValueError):n.verify_binding(catalog,shared,'jed','node-0',hints)
         with self.assertRaises(ValueError):n.verify_binding(catalog,shared,'mty','node-0',{**hints,'pv_uid':'other'})
+
+    @unittest.skipUnless(sys.platform=='linux','actual runtime fingerprint is Linux-only')
+    def test_actual_runtime_ignores_sha_group_and_private_cache_but_hashes_tools(self):
+        source=self.root/'source';source.mkdir()
+        subprocess.run(['git','init','-q'],cwd=source,check=True)
+        (source/'main.go').write_text('package main\nfunc main() {}\n')
+        def commit():
+            subprocess.run(['git','add','.'],cwd=source,check=True)
+            subprocess.run(['git','-c','user.name=fixture','-c','user.email=fixture@example.test','commit','-qm','fixture'],cwd=source,check=True)
+        commit()
+        with patch.dict(os.environ,{'GOCACHE':str(self.root/'cache-a'),'GOMODCACHE':str(self.root/'modules'),
+                                    'COVERAGE_GROUP':'0','GOCACHEPROG':''}):
+            first=n.runtime(source,'mty','matrixorigin/matrixone')
+            (source/'main.go').write_text('package main\nfunc main() { println("new SHA") }\n');commit()
+            with patch.dict(os.environ,{'GOCACHE':str(self.root/'cache-b'),'COVERAGE_GROUP':'1'}):
+                self.assertEqual(n.runtime(source,'mty','matrixorigin/matrixone'),first)
+            self.assertEqual(set(first['tool_binaries']),{'go','cc','c++','cmake','make','ar','ld'})
+            self.assertTrue(c.HEX.fullmatch(first['system_packages_sha256']))
 
     def test_compatibility_expiry_unavailable_are_miss_but_provenance_is_fatal(self):
         entry,api=approval('d'*64,self.runtime)
