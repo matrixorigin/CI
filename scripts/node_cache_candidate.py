@@ -85,9 +85,13 @@ def freeze(state_path, contract, destination, execute=run_compile):
     c.require(env.get('GOCACHEPROG') and '-DMO_NATIVE_CACHE_'+native['native_output_sha256']+'=1'
               in env.get('CGO_CFLAGS', ''), 'private incremental cache/native flag missing')
     timings = []
-    for command in compile_commands(contract):
+    for number, command in enumerate(compile_commands(contract)):
+        c.atomic_json(Path(state_path).parent/f'compile-phase-{number}-started.json',
+                      {'phase': number, 'compile_only': True})
         before = time.monotonic(); execute(command, source, env)
         timings.append(round(time.monotonic()-before, 6))
+        c.atomic_json(Path(state_path).parent/f'compile-phase-{number}-completed.json',
+                      {'phase': number, 'seconds': timings[-1], 'compile_only': True})
     # Cache checks the durable corruption marker even if Go silently fell back.
     # Do not write final acceptance.json here: the full UT hasn't run yet.
     parents = c.Cache(cfg).index
@@ -145,7 +149,8 @@ def main():
     args = parser.parse_args()
     try:
         freeze(args.state, scope(args.selected, args.full, args.cover), args.destination)
-    except Exception:
+    except Exception as exc:
+        c.record_failure(args.state.parent, exc)
         print('Incremental candidate rejected; no shared cache was modified.', file=__import__('sys').stderr)
         raise SystemExit(1)
 

@@ -114,6 +114,45 @@ def atomic_json(path, value):
     atomic_file(path, io.BytesIO(raw), len(raw), hashlib.sha256(raw).hexdigest(), reserve=0)
 
 
+def failure_report(exc):
+    """Allowlisted diagnostics only: never include exception text or locals."""
+    codes = {
+        'cache disk reserve reached': 'disk_reserve',
+        'compile reserve reached': 'compile_reserve',
+        'incremental compile failed': 'compile_exit',
+        'incremental compile deadline': 'compile_deadline',
+        'incremental candidate export budget': 'export_budget',
+        'new build disagrees with trusted action': 'trusted_action_conflict',
+        'existing object differs': 'existing_object_conflict',
+        'private object corrupted': 'private_object_digest',
+        'cache object digest mismatch': 'object_digest',
+        'object exceeds budget': 'object_budget',
+        'invalid object size': 'object_size',
+        'cache corruption observed; test success is not accepted': 'durable_failure_marker',
+    }
+    result = {'schema': 1, 'code': codes.get(str(exc), 'unclassified'),
+              'error_type': type(exc).__name__ if type(exc).__name__ in
+              {'ValueError', 'OSError', 'FileNotFoundError', 'PermissionError',
+               'TimeoutExpired', 'CalledProcessError', 'JSONDecodeError'} else 'Other',
+              'sites': []}
+    tb = exc.__traceback__
+    allowed = {'incremental_cache.py', 'node_cache_candidate.py', 'node_compile_cache.py',
+               'publish_node_cache.py'}
+    while tb:
+        name = Path(tb.tb_frame.f_code.co_filename).name
+        if name in allowed:
+            result['sites'].append({'file': name, 'line': tb.tb_lineno})
+        tb = tb.tb_next
+    return result
+
+
+def record_failure(directory, exc):
+    # A unique private file preserves concurrent failures without replacing the
+    # immutable failure marker or another process's evidence.
+    atomic_json(Path(directory)/'failure-reports'/f'{os.getpid()}-{time.time_ns()}.json',
+                failure_report(exc))
+
+
 class Cache:
     def __init__(self, config):
         require(config['schema'] == 2, 'unsupported cache configuration')
@@ -241,6 +280,7 @@ def protocol(config, stdin, stdout):
         # Go may treat an individual cache Get error as a miss. A durable
         # failure marker is also checked by the workflow before acceptance.
         atomic_json(cache.local/'validation-failed.json', {'invalid':True})
+        record_failure(cache.local, exc)
         print('cache protocol rejected: '+type(exc).__name__,file=sys.stderr)
         raise
 

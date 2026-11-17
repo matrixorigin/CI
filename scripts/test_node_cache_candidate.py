@@ -16,6 +16,23 @@ from test_node_compile_cache import approval
 
 
 class CandidateTests(unittest.TestCase):
+    def test_failure_diagnostics_do_not_disclose_exception_text(self):
+        try:
+            raise ValueError('secret-token=https://private.example/?signature=hidden')
+        except ValueError as exc:
+            result = c.failure_report(exc)
+        self.assertEqual(result['code'], 'unclassified')
+        self.assertNotIn('secret', str(result))
+        self.assertNotIn('private.example', str(result))
+        self.assertEqual(c.failure_report(ValueError('cache disk reserve reached'))['code'], 'disk_reserve')
+
+    def test_unique_failure_reports_preserve_all_causes(self):
+        c.record_failure(self.root, ValueError('compile reserve reached'))
+        c.record_failure(self.root, ValueError('new build disagrees with trusted action'))
+        records = [c.read_json(p) for p in (self.root/'failure-reports').glob('*.json')]
+        self.assertEqual(len(records), 2)
+        self.assertEqual({r['code'] for r in records}, {'compile_reserve', 'trusted_action_conflict'})
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name).resolve(); self.source = self.root/'source'; self.source.mkdir()

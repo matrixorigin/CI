@@ -845,6 +845,17 @@ jobs:
         if: ${{ always() && !cancelled() && inputs.node_compile_cache && steps.node_cache.outcome == 'success' }}
         timeout-minutes: 5
         run: python3 .ci-workflow/scripts/node_compile_cache.py accept --state "$RUNNER_TEMP/cs-node-cache/state.json"
+      - id: upload_node_cache_failures
+        name: Upload sanitized incremental failure evidence
+        if: ${{ always() && !cancelled() && inputs.node_compile_cache }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: node-cache-failures-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}
+          path: |
+            ${{ runner.temp }}/cs-node-cache/failure-reports/*.json
+            ${{ runner.temp }}/cs-node-cache/objects-private/failure-reports/*.json
+          if-no-files-found: ignore
+          retention-days: 7
       - id: upload_node_cache_candidate
         name: Upload frozen delta only after full group tests and integrity gate
         if: ${{ success() && inputs.node_cache_candidate && steps.coverage_ut.outcome == 'success' && steps.node_cache_acceptance.outcome == 'success' }}

@@ -308,7 +308,9 @@ def main():
                       os.environ['CS_CACHE_SOURCE_REPOSITORY'])
         elif a.mode=='prepare-native':prepare_native(a.state)
         else:acceptance(a.state)
-    except Exception:
+    except Exception as exc:
+        if a.state:
+            c.record_failure(a.state.parent, exc)
         print('Node compilation cache validation failed; no fallback after corruption.',file=sys.stderr)
         raise SystemExit(1)
 
