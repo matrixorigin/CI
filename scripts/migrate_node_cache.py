@@ -37,9 +37,11 @@ def reviewed_archive(directory, entry, current, api=n.legacy.api, now=None):
     c.require(artifact.get('expired') is False, 'legacy artifact expired or unknown')
     # Legacy catalogs pin artifact identity, not always expires_at. In that
     # case use the live API expiry, never fabricate an extended retention.
+    expiries = []
     for value in (artifact['expires_at'], entry.get('expires_at', artifact['expires_at'])):
         expires = dt.datetime.fromisoformat(value.replace('Z', '+00:00'))
         c.require(expires.tzinfo is not None and expires > now, 'legacy artifact expired')
+        expiries.append(expires)
     transport = directory / 'transport.zip'
     c.require(transport.stat().st_size == artifact['size_in_bytes'] and
               'sha256:' + c.digest(transport) == artifact['digest'], 'legacy ZIP differs')
@@ -63,7 +65,7 @@ def reviewed_archive(directory, entry, current, api=n.legacy.api, now=None):
     archive = directory / 'build-cache.tar.gz'
     c.require(archive.stat().st_size == m['archive_bytes'] and
               c.digest(archive) == m['archive_sha256'], 'legacy archive differs')
-    return archive, m
+    return archive, m, min(expiries).isoformat()
 
 
 def scan(archive, manifest):
@@ -120,7 +122,7 @@ def migrate(directory, entry, current, candidate, api=n.legacy.api):
     directory = c.safe_path(directory); candidate = c.safe_path(candidate)
     c.require(not candidate.exists() and directory not in candidate.parents and
               candidate not in directory.parents, 'migration must use fresh isolated stage')
-    archive, manifest = reviewed_archive(directory, entry, current, api)
+    archive, manifest, expires = reviewed_archive(directory, entry, current, api)
     actions, trimmed = scan(archive, manifest)
     needed = {r['output_id']: r['size'] for r in actions.values()}
     c.require(shutil.disk_usage(candidate.parent).free >= sum(needed.values()) + 20*c.GIB,
@@ -141,6 +143,7 @@ def migrate(directory, entry, current, candidate, api=n.legacy.api):
                'source_manifest_sha256': entry['manifest_sha256'],
                'source_archive_sha256': manifest['archive_sha256'],
                'source_artifact_id': entry['artifact']['id'], 'source_producer_id': entry['producer']['id'],
+               'source_expires_at': expires,
                'index_sha256': c.digest(candidate/'index.json'), 'runtime': current,
                'action_count': len(actions), 'trimmed_action_count': trimmed,
                'object_count': len(needed), 'object_bytes': sum(needed.values()),

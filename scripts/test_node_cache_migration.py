@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import incremental_cache as c
 import migrate_node_cache as m
+import node_cache_migration_job as job
 from test_node_compile_cache import approval
 
 
@@ -111,6 +112,17 @@ class MigrationTests(unittest.TestCase):
         self.members = [v for v in self.members if not v[0].endswith('-d')]; self.pack()
         report = self.migrate()
         self.assertEqual((report['action_count'], report['trimmed_action_count']), (0, 1))
+
+    def test_migration_bundle_preserves_source_expiry_and_never_compiles(self):
+        receipt = self.migrate()
+        with patch('subprocess.run', side_effect=AssertionError('must not compile')):
+            manifest = job.package(self.root/'candidate', receipt, self.entry, self.root/'bundle')
+        self.assertEqual(manifest['object_count'], 1)
+        self.assertEqual(manifest['migration']['source_expires_at'], '2099-01-01T00:00:00+00:00')
+        self.assertEqual(manifest['native_manifests'], {})
+        with tarfile.open(self.root/'bundle/delta.tar.gz', 'r:gz') as tar:
+            self.assertEqual(set(tar.getnames()), {'index.json', 'objects/'+self.obj[:2]+'/'+self.obj})
+        with self.assertRaises(ValueError): job.package(self.root/'candidate', receipt, self.entry, self.root/'bundle')
 
     def test_corrupt_go_object_never_has_completed_index(self):
         self.members = [(name, b'bad compiler!!!' if name.endswith('-d') else data) for name, data in self.members]

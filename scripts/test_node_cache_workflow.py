@@ -5,6 +5,22 @@ import yaml
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_migration_is_isolated_read_only_and_never_rebuilds_or_tests(self):
+        root=Path(__file__).resolve().parents[1]
+        workflow=yaml.load((root/'.github/workflows/node-cache-migrate-isolated.yaml').read_text(),Loader=yaml.BaseLoader)
+        self.assertEqual(set(workflow['jobs']),{'authorize','migrate'})
+        authorization=workflow['jobs']['authorize']['steps'][0]['run']
+        self.assertIn('test "$GITHUB_RUN_ATTEMPT" = 1',authorization)
+        self.assertIn('refs/heads/weilu-runner-test',authorization)
+        for pool in ('cs-ruh-pvc-g0-rhprep','cs-mnl2-pvc-g0-vlleop'):self.assertIn(pool,authorization)
+        job=workflow['jobs']['migrate']
+        self.assertEqual(job['runs-on'],"${{ needs.authorize.outputs.pool }}")
+        text=str(job)
+        for forbidden in ('make cgo','make build','go test','publish_node_cache.py','kubectl','CS_S3_'):
+            self.assertNotIn(forbidden,text)
+        self.assertIn('node_cache_migration_job.py',text)
+        self.assertEqual(workflow['permissions']['actions'],'read')
+
     def test_opt_in_only_no_existing_pool_or_job_matrix_change(self):
         root=Path(__file__).resolve().parents[1]
         path='.github/workflows/coverage-ut.yaml'

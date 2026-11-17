@@ -13,6 +13,11 @@ self-hosted-runner:
     - mac-arm64-mini
 
 paths:
+  .github/workflows/node-cache-migrate-isolated.yaml:
+    ignore:
+      # GitHub.com documents these reusable-workflow contexts; installed
+      # actionlint predates them (same narrow exception as coverage-ut.yaml).
+      - 'property "workflow_(repository|sha)" is not defined'
   .github/workflows/ci.yaml:
     ignore:
       - 'constant expression "false" in condition'
