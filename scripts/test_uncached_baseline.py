@@ -34,7 +34,7 @@ class BaselineContract(unittest.TestCase):
         self.assertIn("- name: Upload frozen compile-only seed\n        if: ${{ inputs.cache_mode == 'cold'", self.text)
 
     def test_same_safety_and_test_contract(self):
-        for invariant in ['max-parallel: 3', 'fail-fast: false', "format('cs-{0}-pvc-g{1}-cpe8k'",
+        for invariant in ['max-parallel: 2', 'fail-fast: false', "format('cs-{0}-pvc-g{1}-cpe8k'",
                           'test "$CS_S3_ENV" = "$CS_CACHE_ENV"',
                           'cache: false', 'test ! -e "$RUNNER_TEMP/cs-buildcache-gomod"',
                           'test ! -e "$RUNNER_TEMP/cs-buildcache-go"', '62914560',

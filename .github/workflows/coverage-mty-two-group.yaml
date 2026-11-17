@@ -1,0 +1,119 @@
+name: MTY two-group first cache preparation and full test acceptance
+on:
+  workflow_call:
+    inputs:
+      target_environment:
+        required: true
+        type: string
+      cache_mode:
+        required: true
+        type: string
+    secrets:
+      TOKEN_ACTION:
+        required: true
+      CS_S3_MTY_CONFIG:
+        required: false
+      CS_S3_MNL2_CONFIG:
+        required: false
+      CS_S3_JED_CONFIG:
+        required: false
+      CS_S3_RUH_CONFIG:
+        required: false
+permissions:
+  contents: read
+  actions: read
+jobs:
+  validate-versions:
+    if: github.repository == 'matrixorigin/matrixone' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/weilu-runner-test' && github.actor == 'Ariznawlll'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Enforce explicit experimental environment and arm
+        env:
+          TARGET: ${{ inputs.target_environment }}
+          MODE: ${{ inputs.cache_mode }}
+        run: |
+          test "$TARGET" = mty
+          test "$MODE" = cold
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          repository: matrixorigin/CI
+          ref: 90b78e12e49093b07c651a723a2b71a091d1fe81
+          token: ${{ secrets.TOKEN_ACTION }}
+          persist-credentials: false
+          fetch-depth: 0
+      - run: python3 scripts/check_buildcache_versions.py --arm-ref 90b78e12e49093b07c651a723a2b71a091d1fe81 --expected-source dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca
+  coverage:
+    needs: [validate-versions]
+    uses: matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@90b78e12e49093b07c651a723a2b71a091d1fe81
+    with:
+      target_environment: ${{ inputs.target_environment }}
+      cache_mode: ${{ inputs.cache_mode }}
+    secrets: inherit
+  verify-complete:
+    needs: [coverage]
+    if: ${{ !cancelled() && always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Require both groups and merged Coverage
+        env:
+          STATUS: ${{ needs.coverage.outputs.coverage_status }}
+        run: test "$STATUS" = passed
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          repository: matrixorigin/CI
+          ref: 90b78e12e49093b07c651a723a2b71a091d1fe81
+          token: ${{ secrets.TOKEN_ACTION }}
+          persist-credentials: false
+      - name: Check fixed successful uncached reference
+        env:
+          GH_READ_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          req = urllib.request.Request('https://api.github.com/repos/matrixorigin/matrixone/actions/runs/44032472330', headers={'Authorization':'Bearer '+os.environ['GH_READ_TOKEN'],'Accept':'application/vnd.github+json'})
+          with urllib.request.urlopen(req, timeout=30) as response:
+              run = json.load(response)
+          assert run['id']==44032472330 and run['status']=='completed' and run['conclusion']=='success'
+          assert run['head_sha']=='6b0121525da561211b76e647c10f374304d79c25'
+          assert run['repository']['full_name']=='matrixorigin/matrixone' and run['event']=='workflow_dispatch'
+          PY
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: cold-ut-coverage-combined-skips-${{ github.run_id }}-${{ github.run_attempt }}
+          path: comparison/candidate/skips
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: cold-ut-coverage-generation-${{ github.run_id }}-${{ github.run_attempt }}-attempt-${{ github.run_attempt }}
+          path: comparison/candidate/profile
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: cold-ut-coverage-report-group-*-attempt-${{ github.run_attempt }}
+          path: comparison/candidate/reports
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          run-id: 44032472330
+          github-token: ${{ github.token }}
+          name: baseline-ut-coverage-combined-skips-44032472330-1
+          path: comparison/baseline/skips
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          run-id: 44032472330
+          github-token: ${{ github.token }}
+          name: baseline-ut-coverage-generation-44032472330-1-attempt-1
+          path: comparison/baseline/profile
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          run-id: 44032472330
+          github-token: ${{ github.token }}
+          pattern: baseline-ut-coverage-report-group-*-attempt-1
+          path: comparison/baseline/reports
+      - name: Compare the full two-group test scope against accepted MTY baseline
+        run: python3 scripts/verify_two_group_producer.py comparison
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mty-two-group-preparation-acceptance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: comparison/acceptance.json
+          if-no-files-found: error
+          retention-days: 14
