@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
           repository: matrixorigin/CI
-          ref: ${{ github.repository == 'matrixorigin/CI' && github.event_name == 'push' && github.sha || '9b236cc1eec247be0a08d9568adc430a079d5134' }}
+          ref: ${{ github.repository == 'matrixorigin/CI' && github.event_name == 'push' && github.sha || 'c6783ac24bf4caab8ffed130062998e599fda5ed' }}
           persist-credentials: false
           fetch-depth: 0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
