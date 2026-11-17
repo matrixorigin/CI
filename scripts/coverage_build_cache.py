@@ -108,6 +108,7 @@ def fingerprint(source):
         if key.strip() in ('vendor_id', 'cpu family', 'model', 'model name', 'stepping', 'flags'):
             cpu[key.strip()] = value.strip()
     return {'schema': 1, 'source': SOURCE, 'cs_environment': cache_environment(), 'tools': tools, 'cpu': cpu,
+            'group_count': 2, 'partition_policy': sha256(Path(__file__).with_name('coverage_two_groups.py')),
             'os': sha256(Path('/etc/os-release')),
             'platform': subprocess.check_output(['uname', '-sm'], text=True).strip(),
             'go_env': json.loads(subprocess.check_output(
