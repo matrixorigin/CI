@@ -20,10 +20,21 @@ class MtyWorkflow(unittest.TestCase):
             self.assertNotIn(stale, t)
         self.assertNotIn('coverage_build_cache.py seed', t)
 
-    def test_no_reviewed_artifacts_before_producer_acceptance(self):
+    def test_only_explicit_reviewed_mty_producer(self):
         import json
         c = json.loads((ROOT/'config/coverage-cache-catalog.json').read_text())
-        self.assertEqual(c, {'schema': 1, 'entries': []})
+        self.assertEqual(c['schema'], 1)
+        self.assertEqual(len(c['entries']), 3)
+        self.assertEqual({e['group'] for e in c['entries']}, {'0','1','2'})
+        self.assertEqual({e['artifact']['id'] for e in c['entries']}, {14310968185,14310263300,14310002919})
+        for e in c['entries']:
+            self.assertEqual(e['producer']['id'], 44036614881)
+            self.assertEqual(e['producer']['head_sha'], 'd1521fc1b05d41b5c501a92ee202ab1659c2dd7d')
+            self.assertEqual(e['source'], 'dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca')
+            self.assertEqual(e['environment'], 'mty')
+            self.assertEqual(e['fingerprint']['cs_environment'], 'mty')
+            self.assertRegex(e['manifest_sha256'], r'^[0-9a-f]{64}$')
+            self.assertRegex(e['artifact']['digest'], r'^sha256:[0-9a-f]{64}$')
 
 if __name__ == '__main__':
     unittest.main()
