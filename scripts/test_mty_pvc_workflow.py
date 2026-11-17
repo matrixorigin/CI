@@ -24,7 +24,17 @@ class MtyWorkflow(unittest.TestCase):
         import json
         c = json.loads((ROOT/'config/coverage-cache-catalog.json').read_text())
         self.assertEqual(c['schema'], 1)
-        self.assertEqual({e['environment'] for e in c['entries']}, {'mty','jed'})
+        self.assertEqual({e['environment'] for e in c['entries']}, {'mty','jed','ruh'})
+        ruh = [e for e in c['entries'] if e['environment']=='ruh']
+        self.assertEqual(len(ruh), 3)
+        self.assertEqual({e['artifact']['id'] for e in ruh}, {14311524223,14312128728,14312317022})
+        self.assertEqual({e['producer']['id'] for e in ruh}, {44041833471})
+        self.assertEqual({e['producer']['head_sha'] for e in ruh}, {'5555635094f3ebb36291f29a615968548b2d6223'})
+        for e in ruh:
+            self.assertEqual(e['source'], 'dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca')
+            self.assertEqual(e['fingerprint']['cs_environment'], 'ruh')
+            self.assertRegex(e['manifest_sha256'], r'^[0-9a-f]{64}$')
+            self.assertRegex(e['artifact']['digest'], r'^sha256:[0-9a-f]{64}$')
         jed = [e for e in c['entries'] if e['environment']=='jed']
         self.assertEqual({e['artifact']['id'] for e in jed}, {14311103808,14312425656,14310499999})
         self.assertEqual({e['producer']['id'] for e in jed}, {44040765865})
