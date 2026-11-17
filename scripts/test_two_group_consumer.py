@@ -57,11 +57,20 @@ class TwoGroupConsumer(unittest.TestCase):
             with patch.dict(os.environ,CS_CACHE_ENV=env,COVERAGE_GROUP=group,RUNNER_NAME=runner):
                 with self.assertRaises(ValueError):consumer.cache_environment()
 
-    def test_two_group_end_to_end_draft_contract(self):
+    def test_two_group_end_to_end_reviewed_contract(self):
         root=Path(__file__).parents[1]
         text=(root/'.github/workflows/coverage-mty-two-group-pvc-consumer.yaml').read_text()
-        self.assertIn('test DRAFT_CATALOG_NOT_REVIEWED = REVIEWED',text)
-        self.assertEqual(json.loads((root/'config/coverage-two-group-cache-catalog.json').read_text())['entries'],[])
+        self.assertNotIn('DRAFT_CATALOG_NOT_REVIEWED',text)
+        self.assertNotIn('0000000000000000000000000000000000000000',text)
+        self.assertIn('test "$CACHE_SEED" = false',text)
+        self.assertIn('test "$REUSE_CACHE" = true',text)
+        entries=json.loads((root/'config/coverage-two-group-cache-catalog.json').read_text())['entries']
+        self.assertEqual([e['artifact']['id'] for e in entries],[14322160882,14321007529])
+        self.assertEqual([e['group'] for e in entries],['0','1'])
+        self.assertTrue(all(e['environment']=='mty' and e['producer']['id']==44062673282 and e['fingerprint']['group_count']==2 for e in entries))
+        self.assertIn('ref: 38fca550df9136dc13ae6a98223fb6f7f82b5780',text)
+        self.assertNotIn('coverage_build_cache.py seed',text)
+        self.assertNotIn('actions/cache',text)
         self.assertNotIn('- group: 2',text)
         self.assertNotIn('profiles/2/',text)
         self.assertIn('max-parallel: 2',text)

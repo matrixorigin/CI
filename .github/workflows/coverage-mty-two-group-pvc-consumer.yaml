@@ -1,4 +1,4 @@
-name: Isolated MTY TWO GROUP read-only PVC cache consumer (draft)
+name: Isolated MTY TWO GROUP read-only PVC cache consumer
 
 on:
   workflow_call:
@@ -53,9 +53,12 @@ jobs:
       - id: eligibility
         env:
           CONFIG: ${{ secrets.CS_S3_MTY_CONFIG }}
+          CACHE_SEED: ${{ inputs.cache_seed }}
+          REUSE_CACHE: ${{ inputs.coverage_compile_cache }}
         run: |
-          # Deliberately blocked until the successful producer/catalog and fill are reviewed.
-          test DRAFT_CATALOG_NOT_REVIEWED = REVIEWED
+          # Audited producer44062673282; both PVC copies independently rehashed.
+          test "$CACHE_SEED" = false
+          test "$REUSE_CACHE" = true
           test -n "$CONFIG"
           echo 'allowed=true' >> "$GITHUB_OUTPUT"
   ut-coverage-linux-x86:
@@ -149,7 +152,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
           repository: matrixorigin/CI
-          ref: 0000000000000000000000000000000000000000
+          ref: 38fca550df9136dc13ae6a98223fb6f7f82b5780
           token: ${{ secrets.TOKEN_ACTION }}
           persist-credentials: false
           path: .cache-consumer
@@ -1074,7 +1077,8 @@ jobs:
               covered += manifest['coverage_contract']['packages']
               ids.append(entry['artifact']['id'])
           assert len(covered)==len(set(covered))==505 and set(covered)==set(a['started_packages'])
-          result={'source':a['source_sha'],'consumer_run':os.environ['GITHUB_RUN_ID'],'producer_run':44062673282,'baseline_run':44032472330,'artifact_ids':ids,'two_reviewed_hits':True,'packages':505,'skips':len(b['skipped_tests']),'same_package_skip_profile_scope':True,'cache_published':False,'storage':'independent-readonly-pvc','cross_sha_validated':False,'reviewed_consumer_commit':'0000000000000000000000000000000000000000'}
+          assert ids==[14322160882,14321007529]
+          result={'source':a['source_sha'],'consumer_run':os.environ['GITHUB_RUN_ID'],'producer_run':44062673282,'baseline_run':44032472330,'artifact_ids':ids,'two_reviewed_hits':True,'packages':505,'skips':len(b['skipped_tests']),'same_package_skip_profile_scope':True,'cache_published':False,'storage':'independent-readonly-pvc','cross_sha_validated':False,'reviewed_consumer_commit':'38fca550df9136dc13ae6a98223fb6f7f82b5780'}
           (root/'acceptance.json').write_text(json.dumps(result,indent=2)+'\n')
           print(json.dumps(result,indent=2))
           PY
