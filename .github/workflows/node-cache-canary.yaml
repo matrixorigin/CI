@@ -1,0 +1,44 @@
+name: Isolated incremental node-cache contract
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  incremental-contract:
+    # Deliberately GitHub-hosted: no CS runner, PVC, S3 or cluster credentials.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          repository: matrixorigin/CI
+          ref: 9b236cc1eec247be0a08d9568adc430a079d5134
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - name: Install fixture YAML parser
+        run: python3 -m pip install PyYAML==6.0.2
+      - name: Real Go changed SHA partition flags native and concurrent readers
+        env:
+          GOMAXPROCS: '2'
+        run: |
+          set -euo pipefail
+          go version
+          python3 -m unittest discover -s scripts -p test_incremental_cache.py -v 2>&1 | tee incremental-tests.log
+          python3 -m unittest discover -s scripts -p 'test_node*cache*.py' -v 2>&1 | tee node-tests.log
+          python3 -m unittest discover -s scripts -p test_cs_coverage_cache.py -v 2>&1 | tee legacy-tests.log
+          python3 -m unittest discover -s scripts -p test_coverage_native_runtime.py -v 2>&1 | tee native-tests.log
+      - name: Upload contract evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: incremental-node-cache-contract-${{ github.run_id }}
+          path: '*-tests.log'
+          if-no-files-found: error
+          retention-days: 14
