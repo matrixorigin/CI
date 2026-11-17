@@ -3,6 +3,10 @@ name: Isolated all-package Coverage compilation-cache arm
 on:
   workflow_call:
     inputs:
+      target_environment:
+        description: Explicit environment for isolated MTY/JED PVC comparison
+        required: true
+        type: string
       cache_seed:
         description: "Compatibility input; CS three-group workflow does not seed external caches"
         required: false
@@ -52,6 +56,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           ACTOR: ${{ github.actor }}
           CACHE_MODE: ${{ inputs.cache_mode }}
+          TARGET_ENV: ${{ inputs.target_environment }}
           MTY: ${{ secrets.CS_S3_MTY_CONFIG }}
           MNL2: ${{ secrets.CS_S3_MNL2_CONFIG }}
           JED: ${{ secrets.CS_S3_JED_CONFIG }}
@@ -62,13 +67,15 @@ jobs:
           test "$CALLER_REF" = refs/heads/weilu-runner-test
           test "$EVENT_NAME" = workflow_dispatch
           test "$ACTOR" = Ariznawlll
+          case "$TARGET_ENV" in mty|jed) ;; *) exit 1 ;; esac
           case "$CACHE_MODE" in
             cold) ;;
             warm) ;;
             baseline) ;;
             *) echo 'Invalid comparison mode'; exit 1 ;;
           esac
-          for key in MTY MNL2 JED RUH; do
+          key="${TARGET_ENV^^}"
+          for key in "$key"; do
             if [ -z "${!key}" ]; then
               echo "::error::Missing dedicated CS S3 configuration for $key"
               exit 1
@@ -91,7 +98,9 @@ jobs:
     if: ${{ needs.check_coverage_eligibility.outputs.allowed == 'true' }}
     environment: ci
     # Schedule across CS environments; bind S3 to the actual runner below.
-    runs-on: cs-mnl2-large-7c14g
+    runs-on: ${{ format('cs-{0}-pvc-g{1}-cpe8k', inputs.target_environment, matrix.group) }}
+    env:
+      CS_CACHE_ENV: ${{ inputs.target_environment }}
     # Leave headroom for setup, cache seeding, reports and post-action cleanup.
     # Success paths skip the failure-only steps.
     # The wrapper below enforces the test deadline before this job-level last
@@ -164,7 +173,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
           repository: matrixorigin/CI
-          ref: db4f346faf52888577269e448edcb6bf1209dc9e
+          ref: 625dd1471ec0de4853ad083e2d054c23bc190ea8
           token: ${{ secrets.TOKEN_ACTION }}
           persist-credentials: false
           path: .build-cache-helper
@@ -267,6 +276,7 @@ jobs:
             mty|mnl2|jed|ruh) ;;
             *) echo '::error::Unknown CS runner environment; refusing to choose another environment storage.'; exit 1 ;;
           esac
+          test "$CS_S3_ENV" = "$CS_CACHE_ENV" || { echo '::error::Runner/cache environment mismatch'; exit 1; }
           test -n "${TEST_S3FS_CS:-}" || { echo '::error::Missing S3 configuration for the selected CS runner.'; exit 1; }
           export MO_CI_S3_PREFIX="ci-ut/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/${CACHE_MODE}/group-${COVERAGE_GROUP}"
           unset endpoint region apikey apisecret bucket TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD
