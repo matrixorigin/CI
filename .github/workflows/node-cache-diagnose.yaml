@@ -1,0 +1,315 @@
+name: Isolated failed cache compile-stage diagnosis
+'on':
+  workflow_call:
+    inputs:
+      cache_seed:
+        description: Compatibility input; CS three-group workflow does not seed external caches
+        required: false
+        type: boolean
+        default: false
+      coverage_compile_cache:
+        description: Reuse an exact-version reviewed compile-only artifact; never create a seed on a cache miss
+        required: false
+        type: boolean
+        default: false
+      node_compile_cache:
+        description: Opt in to reviewed incremental objects on isolated node-cache pools; never publishes from a test job
+        required: false
+        type: boolean
+        default: true
+      node_cache_environment:
+        description: Environment for the isolated node-cache routing label (mty, mnl2, jed, ruh)
+        required: true
+        type: string
+      node_cache_candidate:
+        description: Freeze only new compile-only objects before tests for separate trusted review; never writes shared PVC
+        required: false
+        type: boolean
+        default: true
+      bvt_generation:
+        description: Shared CI generation used to select this run's coverage artifacts
+        required: false
+        type: string
+        default: ''
+      source_sha:
+        type: string
+        required: true
+        description: Explicit reviewed test source SHA, never a moving branch
+      group_count:
+        type: number
+        required: true
+        description: Two or three complete groups; no package exclusions
+      diagnostic_group:
+        required: true
+        type: number
+    secrets:
+      CS_COVERAGE_CACHE_READ_TOKEN:
+        description: Optional repository Actions-read-only token; otherwise use the caller GITHUB_TOKEN
+        required: false
+      TOKEN_ACTION:
+        description: Token for checkout (e.g. pull from fork/private)
+        required: false
+permissions:
+  contents: read
+  actions: read
+jobs:
+  check_coverage_eligibility:
+    name: Authorize cache failure diagnosis only
+    if: github.repository == 'matrixorigin/matrixone' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/weilu-runner-test'
+      && github.actor == 'Ariznawlll'
+    environment: ci
+    runs-on: ubuntu-latest
+    outputs:
+      allowed: ${{ steps.allowed.outputs.allowed }}
+    steps:
+    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      with:
+        repository: matrixorigin/CI
+        ref: 90fad76479b53fbd943d651397d28d67dff53b0a
+        persist-credentials: false
+        sparse-checkout: config/node-cache-validation-sources.json
+        sparse-checkout-cone-mode: false
+    - id: allowed
+      env:
+        ENVIRONMENT: ${{ inputs.node_cache_environment }}
+        SOURCE_SHA: ${{ inputs.source_sha }}
+        GROUP_COUNT: ${{ inputs.group_count }}
+        NODE_CACHE: ${{ inputs.node_compile_cache }}
+        CANDIDATE: ${{ inputs.node_cache_candidate }}
+        LEGACY: ${{ inputs.coverage_compile_cache }}
+        SEED: ${{ inputs.cache_seed }}
+        DIAGNOSTIC_GROUP: ${{ inputs.diagnostic_group }}
+      run: 'set -euo pipefail
+
+        case "$ENVIRONMENT" in mty|mnl2) ;; *) exit 1 ;; esac
+
+        test "$GROUP_COUNT" = 2
+
+        case "$ENVIRONMENT:$DIAGNOSTIC_GROUP" in mty:1|mnl2:0) ;; *) exit 1 ;; esac
+
+        test "$NODE_CACHE" = true
+
+        test "$CANDIDATE" = true
+
+        test "$LEGACY" = false
+
+        test "$SEED" = false
+
+
+        jq -e --arg sha "$SOURCE_SHA" ''.source_shas | index($sha) != null'' config/node-cache-validation-sources.json
+
+        echo ''allowed=true'' >> "$GITHUB_OUTPUT"
+
+        '
+  diagnose:
+    name: Diagnose failed compile-only group ${{ inputs.diagnostic_group }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        group: ${{ fromJSON(format('["{0}"]', inputs.diagnostic_group)) }}
+    needs:
+    - check_coverage_eligibility
+    if: ${{ needs.check_coverage_eligibility.outputs.allowed == 'true' }}
+    environment: ci
+    runs-on: ${{ inputs.node_compile_cache && format('cs-{0}-node-cache-7c14g', inputs.node_cache_environment) || 'cs-large-7c14g' }}
+    timeout-minutes: 65
+    steps:
+    - name: Install CS runner build dependencies
+      timeout-minutes: 10
+      run: "set -euo pipefail\nif command -v gcc && command -v g++ && command -v make && command -v pkg-config && command -v cmake &&\
+        \ command -v python; then\n  echo 'Build dependencies are already available.'\nelse\n  sudo apt-get -o Acquire::ForceIPv4=true\
+        \ update\n  sudo apt-get -o Acquire::ForceIPv4=true install -y build-essential cmake pkg-config python3 python-is-python3\n\
+        fi\n"
+    - name: Checkout MatrixOne source
+      timeout-minutes: 10
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      env:
+        GIT_HTTP_LOW_SPEED_LIMIT: '1'
+        GIT_HTTP_LOW_SPEED_TIME: '60'
+      with:
+        token: ${{ secrets.TOKEN_ACTION }}
+        fetch-depth: '3'
+        repository: matrixorigin/matrixone
+        ref: ${{ inputs.source_sha }}
+        persist-credentials: false
+    - name: Set up Go
+      timeout-minutes: 10
+      uses: matrixorigin/CI/actions/setup-env@4670989748419fb169f88282cf05fb690ea91074
+      with:
+        setup-java: false
+        go-version-file: ${{ github.workspace }}/go.mod
+        cache: false
+    - name: Prepare Python UDF contract tests
+      if: ${{ hashFiles('pkg/udf/python/worker/requirements.txt') != '' }}
+      timeout-minutes: 5
+      uses: matrixorigin/CI/actions/setup-python-udf@4670989748419fb169f88282cf05fb690ea91074
+    - name: Checkout CI coverage helper
+      timeout-minutes: 10
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      env:
+        GIT_HTTP_LOW_SPEED_LIMIT: '1'
+        GIT_HTTP_LOW_SPEED_TIME: '60'
+      with:
+        token: ${{ secrets.TOKEN_ACTION }}
+        repository: matrixorigin/CI
+        ref: 90fad76479b53fbd943d651397d28d67dff53b0a
+        persist-credentials: false
+        sparse-checkout: 'scripts/prepare_coverage_cgo.sh
+
+          scripts/run_coverage_ut.py
+
+          scripts/run_coverage_packages.py
+
+          scripts/coverage_two_groups.py
+
+          scripts/test_run_coverage_packages.py
+
+          scripts/compact_coverage_profile.go
+
+          scripts/summarize_coverage_ut.py
+
+          scripts/coverage_timing.py
+
+          scripts/coverage_skip_manifest.py
+
+          scripts/summarize_ut_report.py
+
+          scripts/cs_coverage_cache.py
+
+          scripts/incremental_cache.py
+
+          scripts/node_compile_cache.py
+
+          scripts/node_cache_candidate.py
+
+          scripts/publish_node_cache.py
+
+          config/node-compile-cache-catalog.json
+
+          config/coverage-cache-catalog.json
+
+          '
+        sparse-checkout-cone-mode: false
+        path: .ci-workflow
+    - name: Prepare fresh per-job compilation paths
+      env:
+        GROUP: ${{ matrix.group }}
+      run: "set -euo pipefail\nfor path in \"$RUNNER_TEMP/cs-buildcache-gomod\" \"$RUNNER_TEMP/cs-buildcache-go\" \"$RUNNER_TEMP/cs-reviewed-artifact\"\
+        \ \"$RUNNER_TEMP/cs-reviewed-entry.json\"; do\n  test ! -e \"$path\"\ndone\necho \"GOMODCACHE=$RUNNER_TEMP/cs-buildcache-gomod\"\
+        \ >> \"$GITHUB_ENV\"\necho \"GOCACHE=$RUNNER_TEMP/cs-buildcache-go\" >> \"$GITHUB_ENV\"\necho \"COVERAGE_GROUP=$GROUP\" >> \"\
+        $GITHUB_ENV\"\necho 'GOFLAGS=' >> \"$GITHUB_ENV\"\necho 'GOWORK=off' >> \"$GITHUB_ENV\"\necho 'CGO_ENABLED=1' >> \"$GITHUB_ENV\"\
+        \necho 'GOMAXPROCS=7' >> \"$GITHUB_ENV\"\n"
+    - id: node_cache
+      name: Configure reviewed node cache with private incremental writes
+      if: ${{ inputs.node_compile_cache }}
+      timeout-minutes: 5
+      env:
+        CS_CACHE_READ_TOKEN: ${{ secrets.CS_COVERAGE_CACHE_READ_TOKEN || github.token }}
+        CS_CACHE_SOURCE_REPOSITORY: matrixorigin/matrixone
+        REQUESTED_CACHE_ENV: ${{ inputs.node_cache_environment }}
+      run: "set -euo pipefail\ntest \"${CS_CACHE_ENV:-}\" = \"$REQUESTED_CACHE_ENV\"\npython3 .ci-workflow/scripts/node_compile_cache.py\
+        \ configure \\\n  --catalog .ci-workflow/config/node-compile-cache-catalog.json\n\n# Acceptance must select a published generation.\n\
+        jq -e '(.entries | length) > 0 and (.config.indexes | length) > 0' \"$RUNNER_TEMP/cs-node-cache/state.json\"\n"
+    - id: coverage_ut
+      name: Reproduce failed compile stage without UT or publication
+      timeout-minutes: 190
+      continue-on-error: false
+      env:
+        GOPROXY: https://goproxy.cn|https://proxy.golang.org|direct
+        CS_COMPILE_CACHE_HIT: ''
+        GOMAXPROCS: '7'
+        COVERAGE_UT_TEST_TIMEOUT_SECONDS: '3600'
+        COVERAGE_UT_HEARTBEAT_SECONDS: '15'
+        COVERAGE_UT_CONSOLE_HEARTBEAT_SECONDS: '60'
+        COVERAGE_UT_FALLBACK_TIMEOUT_SECONDS: '4200'
+        MO_TEST_CLUSTER_ADMISSION_POOL_SIZE: '2'
+        COVERAGE_UT_PACKAGE_PARALLELISM: '7'
+        COVERAGE_UT_DISCOVERY_TIMEOUT_SECONDS: '900'
+        COVERAGE_UT_CGO_TIMEOUT_SECONDS: '1800'
+        COVERAGE_GROUP: ${{ matrix.group }}
+        COVERAGE_GROUP_COUNT: ${{ inputs.group_count }}
+      run: "set -euo pipefail\ncd \"$GITHUB_WORKSPACE\"\necho \"Coverage comparison: GOMAXPROCS=${GOMAXPROCS}; package parallelism=${COVERAGE_UT_PACKAGE_PARALLELISM}\"\
+        \ncoverage_profile=\"${RUNNER_TEMP}/ut-coverage.out\"\ncoverage_report=\"${RUNNER_TEMP}/ut-coverage-report.json\"\ncoverage_progress=\"\
+        ${RUNNER_TEMP}/ut-coverage-progress.txt\"\ncoverage_status=\"${RUNNER_TEMP}/ut-coverage-status.json\"\ntimeout_diagnostics=\"\
+        ${RUNNER_TEMP}/ut-coverage-timeout.txt\"\nphase_timing=\"${RUNNER_TEMP}/ut-coverage-phase-timing.txt\"\nrunner_pid_file=\"${RUNNER_TEMP}/ut-coverage-runner.pid.json\"\
+        \nphase_failure=\"${RUNNER_TEMP}/ut-coverage-phase-failure.txt\"\npackage_error=\"${RUNNER_TEMP}/ut-coverage-package-error.txt\"\
+        \ncgo_log=\"${RUNNER_TEMP}/ut-coverage-cgo.log\"\nrm -f \"${coverage_profile}\" \"${coverage_report}\"\nrm -f \"${coverage_progress}\"\
+        \ \"${coverage_status}\" \"${timeout_diagnostics}\" \"${runner_pid_file}\" \"${phase_failure}\"\nrm -f \"${package_error}\"\
+        \ \"${cgo_log}\"\n: > \"${phase_timing}\"\n\nphase_start() {\n  phase_name=\"$1\"\n  phase_started_at=$(date +%s)\n  echo \"\
+        phase=${phase_name} status=started\" >> \"${phase_timing}\"\n}\nphase_end() {\n  raw_phase_status=\"$1\"\n  phase_status=\"\
+        $1\"\n  phase_timeout_seconds=\"${2:-}\"\n  phase_finished_at=$(date +%s)\n  phase_elapsed_seconds=$((phase_finished_at - phase_started_at))\n\
+        \  # GNU timeout returns 137 when its hard KILL is required. Treat\n  # that as a deadline only when the phase actually ran\
+        \ through its\n  # configured budget; a fast OOM/SIGKILL remains an ordinary\n  # preparation failure.\n  if [ \"${phase_status}\"\
+        \ = '137' ] && [ -n \"${phase_timeout_seconds}\" ] && \\\n    (( phase_elapsed_seconds >= phase_timeout_seconds )); then\n \
+        \   phase_status=124\n  fi\n  phase_status_suffix=''\n  if [ \"${raw_phase_status}\" != \"${phase_status}\" ]; then\n    phase_status_suffix=\"\
+        \ raw_status=${raw_phase_status}\"\n  fi\n  echo \"phase=${phase_name} status=${phase_status} elapsed_seconds=${phase_elapsed_seconds}${phase_status_suffix}\"\
+        \ >> \"${phase_timing}\"\n  if [ \"${phase_status}\" = '124' ]; then\n    {\n      echo \"Coverage UT phase exceeded its internal\
+        \ deadline: ${phase_name}\"\n      echo \"phase=${phase_name} timeout_seconds=${phase_timeout_seconds:-unknown}\"\n      if\
+        \ [ \"${phase_name}\" = 'discover_packages' ] && [ -s \"${package_error}\" ]; then\n        echo\n        echo 'Package discovery\
+        \ stderr (last 100 lines):'\n        tail -n 100 \"${package_error}\"\n      fi\n      if [ \"${phase_name}\" = 'prepare_cgo'\
+        \ ] && [ -s \"${cgo_log}\" ]; then\n        echo\n        echo 'CGo preparation log (last 100 lines):'\n        tail -n 100\
+        \ \"${cgo_log}\"\n      fi\n    } > \"${timeout_diagnostics}\"\n  elif { [ \"${phase_name}\" = 'discover_packages' ] && [ \"\
+        ${phase_status}\" != '0' ]; } || \\\n    { [ \"${phase_name}\" = 'prepare_cgo' ] && [ \"${phase_status}\" != '0' ]; } || \\\n\
+        \    { [ \"${phase_name}\" = 'build_coverage_scope' ] && [ \"${phase_status}\" != '0' ]; }; then\n    {\n      echo \"Coverage\
+        \ UT phase failed: ${phase_name}\"\n      echo \"phase=${phase_name} status=${phase_status}\"\n      if [ \"${phase_name}\"\
+        \ = 'discover_packages' ] && [ -s \"${package_error}\" ]; then\n        echo\n        echo 'Package discovery stderr (last 100\
+        \ lines):'\n        tail -n 100 \"${package_error}\"\n      fi\n      if [ \"${phase_name}\" = 'prepare_cgo' ] && [ -s \"${cgo_log}\"\
+        \ ]; then\n        echo\n        echo 'CGo preparation log (last 100 lines):'\n        tail -n 100 \"${cgo_log}\"\n      fi\n\
+        \    } > \"${phase_failure}\"\n  fi\n}\n\nphase_start discover_packages\npackage_list=\"${RUNNER_TEMP}/ut-coverage-packages.txt\"\
+        \nset +e\ntimeout --kill-after=30s \"${COVERAGE_UT_DISCOVERY_TIMEOUT_SECONDS}s\" \\\n  go list -mod=readonly ./... > \"${package_list}\"\
+        \ 2> \"${package_error}\"\nlist_status=$?\ntest_scope=''\nfilter_status=0\nif (( list_status == 0 )); then\n  test_scope=$(grep\
+        \ -v 'driver\\|engine/aoe\\|engine/memEngine\\|pkg/catalog' \"${package_list}\")\n  filter_status=$?\nfi\nphase_status=${list_status}\n\
+        if (( phase_status == 0 && filter_status != 0 )); then\n  phase_status=${filter_status}\nfi\nset -e\nphase_end \"${phase_status}\"\
+        \ \"${COVERAGE_UT_DISCOVERY_TIMEOUT_SECONDS}\"\n(( phase_status == 0 )) || exit \"${phase_status}\"\n# Use the existing profile\
+        \ policy before instrumentation too. Test\n# selection stays complete, including tests in excluded packages.\nphase_start build_coverage_scope\n\
+        coverage_helper=\"${RUNNER_TEMP}/compact-coverage-profile\"\nset +e\ntimeout --kill-after=30s \"${COVERAGE_UT_DISCOVERY_TIMEOUT_SECONDS}s\"\
+        \ \\\n  go build -o \"${coverage_helper}\" \"$GITHUB_WORKSPACE/.ci-workflow/scripts/compact_coverage_profile.go\" && \\\n  cover_pkgs=$(printf\
+        \ '%s\\n' \"${test_scope}\" | \"${coverage_helper}\" -packages)\nphase_status=$?\nset -e\nphase_end \"${phase_status}\" \"${COVERAGE_UT_DISCOVERY_TIMEOUT_SECONDS}\"\
+        \n(( phase_status == 0 )) || exit \"${phase_status}\"\npackage_count=$(printf '%s\\n' \"${test_scope}\" | awk 'NF { count++\
+        \ } END { print count + 0 }')\ninstrumented_package_count=$(printf '%s\\n' \"${cover_pkgs}\" | awk -F, '{ print NF }')\nprintf\
+        \ '%s\\n' \"${test_scope}\" > \"$RUNNER_TEMP/coverage-full-scope.txt\"\nprintf '%s\\n' \"${cover_pkgs}\" > \"$RUNNER_TEMP/coverage-instrumented-scope.txt\"\
+        \npython \"$GITHUB_WORKSPACE/.ci-workflow/scripts/coverage_two_groups.py\" \\\n  --packages \"$RUNNER_TEMP/coverage-full-scope.txt\"\
+        \ --group \"${COVERAGE_GROUP}\" --group-count \"$COVERAGE_GROUP_COUNT\" \\\n  --manifest \"$RUNNER_TEMP/coverage-group-plan.json\"\
+        \ --selected \"$RUNNER_TEMP/coverage-group.txt\"\ntest_scope=$(cat \"$RUNNER_TEMP/coverage-group.txt\")\nselected_count=$(wc\
+        \ -l < \"$RUNNER_TEMP/coverage-group.txt\" | tr -d ' ')\necho \"coverage_ut package_count=${selected_count} full_package_count=${package_count}\
+        \ package_parallelism=${COVERAGE_UT_PACKAGE_PARALLELISM} instrumented_package_count=${instrumented_package_count}\" | tee -a\
+        \ \"${phase_timing}\"\nif [ \"${CS_COMPILE_CACHE_HIT:-}\" = true ]; then\n  python3 .ci-workflow/scripts/cs_coverage_cache.py\
+        \ verify-scope \\\n    --state \"$RUNNER_TEMP/cs-reviewed-entry.json\" --artifact \"$RUNNER_TEMP/cs-reviewed-artifact\" \\\n\
+        \    --packages \"$RUNNER_TEMP/coverage-group.txt\" --full-packages \"$RUNNER_TEMP/coverage-full-scope.txt\" \\\n    --coverpkg-file\
+        \ \"$RUNNER_TEMP/coverage-instrumented-scope.txt\"\nfi\n\nphase_start prepare_cgo\nset +e\nif [ -n \"${CS_NODE_CACHE_STATE:-}\"\
+        \ ]; then\n  timeout --kill-after=30s \"${COVERAGE_UT_CGO_TIMEOUT_SECONDS}s\" \\\n    python3 .ci-workflow/scripts/node_compile_cache.py\
+        \ prepare-native \\\n      --state \"$CS_NODE_CACHE_STATE\" > \"${cgo_log}\" 2>&1\nelif [ \"${CS_COMPILE_CACHE_HIT:-}\" = true\
+        \ ]; then\n  timeout --kill-after=30s \"${COVERAGE_UT_CGO_TIMEOUT_SECONDS}s\" \\\n    bash -e -c 'make config; make cgo; python3\
+        \ .ci-workflow/scripts/cs_coverage_cache.py verify-native --state \"$RUNNER_TEMP/cs-reviewed-entry.json\" --artifact \"$RUNNER_TEMP/cs-reviewed-artifact\"\
+        ' > \"${cgo_log}\" 2>&1\nelse\n  timeout --kill-after=30s \"${COVERAGE_UT_CGO_TIMEOUT_SECONDS}s\" \\\n    \"$GITHUB_WORKSPACE/.ci-workflow/scripts/prepare_coverage_cgo.sh\"\
+        \ > \"${cgo_log}\" 2>&1\nfi\nphase_status=$?\nset -e\nphase_end \"${phase_status}\" \"${COVERAGE_UT_CGO_TIMEOUT_SECONDS}\"\n\
+        (( phase_status == 0 )) || exit \"${phase_status}\"\nthirdparties_install_dir=\"$GITHUB_WORKSPACE/thirdparties/install\"\ncgo_cflags=\"\
+        -I${GITHUB_WORKSPACE}/cgo -I${thirdparties_install_dir}/include\"\nif [ -n \"${CS_NODE_CACHE_STATE:-}\" ]; then\n  native_id=$(jq\
+        \ -er '.native_output_sha256 | select(test(\"^[0-9a-f]{64}$\"))' \"$RUNNER_TEMP/cs-node-cache/native-result.json\")\n  cgo_cflags=\"\
+        $cgo_cflags -DMO_NATIVE_CACHE_${native_id}=1\"\nfi\ncgo_ldflags=\"-L${GITHUB_WORKSPACE}/cgo -lmo -Wl,-rpath,${GITHUB_WORKSPACE}/cgo\
+        \ -L${thirdparties_install_dir}/lib -lusearch_c -Wl,-rpath,${thirdparties_install_dir}/lib -lm\"\n\nif [ '${{ inputs.node_cache_candidate\
+        \ }}' = true ]; then\n  phase_start incremental_candidate\n  set +e\n  env CGO_CFLAGS=\"${cgo_cflags}\" CGO_LDFLAGS=\"${cgo_ldflags}\"\
+        \ \\\n    python3 .ci-workflow/scripts/node_cache_candidate.py \\\n      --state \"$CS_NODE_CACHE_STATE\" --selected \"$RUNNER_TEMP/coverage-group.txt\"\
+        \ \\\n      --full \"$RUNNER_TEMP/coverage-full-scope.txt\" --cover \"$RUNNER_TEMP/coverage-instrumented-scope.txt\" \\\n  \
+        \    --destination \"$RUNNER_TEMP/node-cache-candidate\" > \"$RUNNER_TEMP/node-cache-candidate.log\" 2>&1\n  candidate_status=$?\n\
+        \  set -e\n  phase_end \"$candidate_status\"\n  (( candidate_status == 0 )) || exit \"$candidate_status\"\nfi\n\n\necho \"compile-only\
+        \ diagnostic finished; no UT or shared publication was executed\"\n"
+    - name: Upload sanitized diagnosis evidence
+      if: ${{ always() && !cancelled() }}
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: node-cache-diagnosis-${{ github.run_id }}-${{ inputs.node_cache_environment }}
+        path: '${{ runner.temp }}/cs-node-cache/failure-reports/*.json
+
+          ${{ runner.temp }}/cs-node-cache/objects-private/failure-reports/*.json
+
+          ${{ runner.temp }}/cs-node-cache/compile-phase-*.json
+
+          ${{ runner.temp }}/cs-node-cache/native-result.json
+
+          ${{ runner.temp }}/cs-node-cache/objects-private/stats/*.json
+
+          ${{ runner.temp }}/ut-coverage-phase-timing.txt'
+        if-no-files-found: error
+        retention-days: 7
