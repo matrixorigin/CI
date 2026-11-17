@@ -99,6 +99,15 @@ class MigrationTests(unittest.TestCase):
         self.assertFalse(target.stat().st_mode & 0o111)
         self.assertEqual(result['compiler_invocations'],0)
 
+    def test_testexpire_timestamp_validated_but_not_imported(self):
+        self.assertEqual(m.disk_member('gocache/testexpire.txt'), ('', 'metadata'))
+        self.members.append(('gocache/testexpire.txt',b'1794910000000000000\n'));self.pack()
+        result=self.migrate();self.assertEqual(result['action_count'],1)
+        self.assertFalse(any(p.name=='testexpire.txt' for p in (self.root/'candidate').rglob('*')))
+        self.members[-1]=('gocache/testexpire.txt',b'not-a-timestamp');self.pack()
+        with self.assertRaises(ValueError):self.migrate(candidate=self.root/'malformed')
+        self.assertFalse((self.root/'malformed').exists())
+
     def test_executable_alias_corruption_and_nested_paths_rejected(self):
         original=list(self.members)
         for name,data in [(f'gocache/{self.obj[:2]}/{self.obj}-d/covdata',self.data),

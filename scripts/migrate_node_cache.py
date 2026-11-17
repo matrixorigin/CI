@@ -26,9 +26,11 @@ DISK_NAME = re.compile(r'gocache/([0-9a-f]{2})/([0-9a-f]{64})-([ad])')
 # immutable output ID. Never execute it or trust the child name as an address.
 EXECUTABLE_NAME = re.compile(r'gocache/([0-9a-f]{2})/([0-9a-f]{64})-d/[A-Za-z0-9][A-Za-z0-9_.+-]{0,127}')
 HEADER = re.compile(rb'v1 ([0-9a-f]{64}) ([0-9a-f]{64}) ([ 0-9]{20}) ([ 0-9]{20})\n')
+HOUSEKEEPING = ('gocache/README', 'gocache/trim.txt', 'gocache/testexpire.txt')
 
 
 def disk_member(name):
+    if name in HOUSEKEEPING: return '', 'metadata'
     match = DISK_NAME.fullmatch(name)
     if match and match[1] == match[2][:2]: return match[2], match[3]
     match = EXECUTABLE_NAME.fullmatch(name)
@@ -107,8 +109,13 @@ def scan(archive, manifest):
                 c.require(digest.hexdigest() == manifest['native_hashes'][name], 'legacy native bytes differ')
                 native.add(name)
                 continue
-            if member.name in ('gocache/README', 'gocache/trim.txt'):
+            if member.name in HOUSEKEEPING:
                 c.require(member.size <= 4096, 'legacy housekeeping file too large')
+                if member.name != 'gocache/README':
+                    with tar.extractfile(member) as src: stamp = src.read(4097)
+                    c.require(re.fullmatch(rb'[0-9]{1,20}\n?', stamp), 'invalid Go housekeeping timestamp')
+                # testexpire.txt is Go's invalidation timestamp, NOT test
+                # results. Authenticate/validate it but never import it.
                 continue
             ident, kind = disk_member(member.name)
             if kind == 'd':
@@ -151,7 +158,7 @@ def migrate(directory, entry, current, candidate, api=n.legacy.api, progress=lam
     candidate.mkdir()
     with c.safe_open(archive) as body, tarfile.open(fileobj=body, mode='r:gz') as tar:
         for member in tar:
-            if member.name.startswith('native/') or member.name in ('gocache/README','gocache/trim.txt'): continue
+            if member.name.startswith('native/') or member.name in HOUSEKEEPING: continue
             ident, kind = disk_member(member.name)
             if kind != 'd' or ident not in needed: continue
             with tar.extractfile(member) as src:
