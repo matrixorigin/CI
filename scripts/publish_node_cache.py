@@ -91,7 +91,7 @@ def import_reviewed_disk_cache(disk,local,runtime,output):
     return export_delta(local,runtime,{},output)
 
 
-def publish(candidate,index_path,shared,reviewed,api=n.legacy.api):
+def publish(candidate,index_path,shared,reviewed,api=n.legacy.api,*,precondition=None):
     """Exact reviewed hashes + live producer validation; copy new objects only.
 
     No catalogue/head is auto-advanced: a trusted caller reviews the returned
@@ -137,6 +137,9 @@ def publish(candidate,index_path,shared,reviewed,api=n.legacy.api):
     copied=0;deduplicated=0
     try:
         fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        # Protected append callers revalidate their exact approved base while
+        # holding the same lock as every publisher, before any object writes.
+        if precondition is not None:precondition()
         for digest,size in objects.items():
             src=candidate/'objects'/digest[:2]/digest;dst=shared/'objects'/digest[:2]/digest
             exists=dst.exists()
