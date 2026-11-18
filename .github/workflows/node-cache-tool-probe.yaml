@@ -1,0 +1,85 @@
+name: Isolated two-runner local tool recovery probe (no UT)
+on:
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+permissions:
+  contents: read
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          CACHE_ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          test "$GITHUB_REPOSITORY" = matrixorigin/matrixone
+          test "$GITHUB_REF" = refs/heads/weilu-runner-test
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          case "$CACHE_ENVIRONMENT" in mty|jed|ruh|mnl2) ;; *) exit 1 ;; esac
+  local-tools:
+    needs: authorize
+    runs-on: ${{ format('cs-{0}-node-cache-7c14g', inputs.environment) }}
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        group: [0, 1]
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          repository: matrixorigin/CI
+          ref: fda89a9c2b6b51b72ec5d912d80ce0ecef256e51
+          persist-credentials: false
+          path: .ci-tools
+          sparse-checkout: |
+            scripts
+            config
+      - name: Verify local read-only tool archive and private recovery
+        env:
+          REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
+          PROBE_GROUP: ${{ matrix.group }}
+        run: |
+          set -euo pipefail
+          test "$CS_CACHE_ENV" = "$REQUESTED_ENVIRONMENT"
+          date -u +%Y-%m-%dT%H:%M:%SZ > "$RUNNER_TEMP/tool-probe-start.txt"
+          python3 .ci-tools/scripts/node_cache_toolchain_store.py --catalog .ci-tools/config/node-compile-cache-catalog.json --lock .ci-tools/config/node-toolchain-lock.json --destination "$RUNNER_TEMP/probe-tools" --report "$RUNNER_TEMP/persistent-toolchain.json"
+          printf '%s\n' "$GITHUB_RUN_ID-$PROBE_GROUP-$ACTIONS_RUNNER_POD_NAME" > "$RUNNER_TEMP/tool-private-marker"
+          # Keep both isolated readers alive to measure real overlap; no downloads.
+          sleep 30
+      - name: Execute restored exact versions and recheck unchanged shared archive
+        env:
+          PROBE_GROUP: ${{ matrix.group }}
+        run: |
+          set -euo pipefail
+          go version
+          cmake --version
+          PYTHONPATH=.ci-tools/scripts python3 - <<'PY'
+          import json, os, datetime
+          from pathlib import Path
+          import node_cache_toolchain_store as s
+          import incremental_cache as c
+          root=Path(os.environ['RUNNER_TEMP'])
+          report=json.loads((root/'persistent-toolchain.json').read_text())
+          lock=c.read_json(Path('.ci-tools/config/node-toolchain-lock.json'))
+          s.verify(Path('/ci-cache'),lock,report['binding'])
+          marker=(root/'tool-private-marker').read_text().strip()
+          assert marker=='-'.join([os.environ['GITHUB_RUN_ID'],os.environ['PROBE_GROUP'],os.environ['ACTIONS_RUNNER_POD_NAME']])
+          report.update(probe_only=True,compiler_invocations=0,group=int(os.environ['PROBE_GROUP']),
+                        runner_pod=os.environ['ACTIONS_RUNNER_POD_NAME'],shared_archive_unchanged=True,
+                        private_marker_verified=True,started_at=(root/'tool-probe-start.txt').read_text().strip(),
+                        completed_at=datetime.datetime.now(datetime.timezone.utc).isoformat())
+          (root/'tool-probe.json').write_text(json.dumps(report,indent=2)+'\n')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: local-tool-probe-${{ inputs.environment }}-${{ matrix.group }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/persistent-toolchain.json
+            ${{ runner.temp }}/tool-probe.json
+          if-no-files-found: error
+          retention-days: 7
