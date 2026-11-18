@@ -46,6 +46,12 @@ class PRConsumerContract(unittest.TestCase):
         self.assertEqual(steps['coverage_ut']['env']['COVERAGE_GROUP_COUNT'], '2')
         self.assertEqual(steps['coverage_ut']['env']['COVERAGE_UT_PACKAGE_PARALLELISM'], '7')
         self.assertEqual(steps['coverage_ut']['env']['COVERAGE_UT_TEST_TIMEOUT_SECONDS'], '3600')
+        node=steps['node_cache']
+        self.assertEqual(node['env']['CS_CACHE_SOURCE_REPOSITORY'],'matrixorigin/matrixone')
+        self.assertEqual(node['env']['ACTUAL_PR_SOURCE_REPOSITORY'],'${{ github.event.pull_request.head.repo.full_name }}')
+        self.assertEqual(node['env']['ACTUAL_PR_HEAD_SHA'],'${{ github.event.pull_request.head.sha }}')
+        self.assertIn('node-compile-cache-pr-catalog.json',node['run'])
+        self.assertIn('node_cache_pr_source.py record',node['run'])
         for s in self.j['steps']:
             if s.get('with', {}).get('repository') == '${{ job.workflow_repository }}':
                 self.assertEqual(s['with']['ref'], '${{ job.workflow_sha }}')

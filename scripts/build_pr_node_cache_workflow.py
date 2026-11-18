@@ -45,11 +45,19 @@ def build():
             step['with']['repository'] = '${{ job.workflow_repository }}'
             step['with']['ref'] = '${{ job.workflow_sha }}'
         if step.get('id') == 'node_cache':
-            step['env']['CS_CACHE_SOURCE_REPOSITORY'] = '${{ github.event.pull_request.head.repo.full_name }}'
+            # The trusted project namespace is not the fork provenance. Native
+            # input hashes and Go ActionIDs still distinguish changed code.
+            step['env']['CS_CACHE_SOURCE_REPOSITORY'] = 'matrixorigin/matrixone'
+            step['env']['ACTUAL_PR_SOURCE_REPOSITORY'] = '${{ github.event.pull_request.head.repo.full_name }}'
+            step['env']['ACTUAL_PR_HEAD_SHA'] = '${{ github.event.pull_request.head.sha }}'
             step['env'].pop('REQUESTED_CACHE_ENV', None)
             step['run'] = ('set -euo pipefail\ncase "${CS_CACHE_ENV:-}" in mty|mnl2|jed|ruh) ;; *) exit 1 ;; esac\n'
+                'python3 .ci-workflow/scripts/node_cache_pr_source.py record\n'
+                'python3 .ci-workflow/scripts/node_cache_pr_catalog.py check\n'
                 'python3 .ci-workflow/scripts/node_compile_cache.py configure '
-                '--catalog .ci-workflow/config/node-compile-cache-catalog.json\n')
+                '--catalog .ci-workflow/config/node-compile-cache-pr-catalog.json\n')
+        if step.get('name') == 'Upload readable coverage UT report':
+            step['with']['path']+='${{ runner.temp }}/cs-node-cache/pr-source.json\n'
         if step.get('id') == 'coverage_ut':
             step['env']['CS_COMPILE_CACHE_HIT'] = 'false'
             step['env']['COVERAGE_GROUP_COUNT'] = '2'

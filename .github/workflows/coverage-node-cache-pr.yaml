@@ -212,11 +212,15 @@ jobs:
       timeout-minutes: 5
       env:
         CS_CACHE_READ_TOKEN: ${{ secrets.CS_COVERAGE_CACHE_READ_TOKEN || github.token }}
-        CS_CACHE_SOURCE_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        CS_CACHE_SOURCE_REPOSITORY: matrixorigin/matrixone
+        ACTUAL_PR_SOURCE_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        ACTUAL_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       run: |
         set -euo pipefail
         case "${CS_CACHE_ENV:-}" in mty|mnl2|jed|ruh) ;; *) exit 1 ;; esac
-        python3 .ci-workflow/scripts/node_compile_cache.py configure --catalog .ci-workflow/config/node-compile-cache-catalog.json
+        python3 .ci-workflow/scripts/node_cache_pr_source.py record
+        python3 .ci-workflow/scripts/node_cache_pr_catalog.py check
+        python3 .ci-workflow/scripts/node_compile_cache.py configure --catalog .ci-workflow/config/node-compile-cache-pr-catalog.json
     - id: coverage_ut
       name: Run coverage unit tests
       timeout-minutes: 190
@@ -848,6 +852,7 @@ jobs:
           ${{ runner.temp }}/cs-node-cache/native-result.json
           ${{ runner.temp }}/cs-node-cache/acceptance.json
           ${{ runner.temp }}/cs-node-cache/validation.json
+          ${{ runner.temp }}/cs-node-cache/pr-source.json
         if-no-files-found: warn
         retention-days: 7
     - id: upload_coverage_diagnostics
