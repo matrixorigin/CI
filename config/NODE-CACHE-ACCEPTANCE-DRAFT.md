@@ -4,19 +4,28 @@
 activation. The original live caller and runner pools are unchanged. The
 optional production-workflow code exists but is not enabled by this experiment.
 
-As of 2026-11-18 01:16 UTC, the initial full-suite runs for MTY 44117113781,
-MNL2 44117281094 and JED 44208196494 have passed independent raw-evidence
-review. RUH 44210497665 remains in progress. These runs use existing
+As of 2026-11-18 01:59 UTC, the initial full-suite runs for MTY 44117113781,
+MNL2 44117281094, JED 44208196494 and RUH 44210497665 have passed independent
+raw-evidence review. These runs use existing
 Go cache objects plus private missing-object compilation, not a wholly warm
 native restore and not controlled-new-SHA acceptance.
 
 Protected incremental append is implemented separately from test jobs. Both
-MNL2 deltas and both MTY deltas are independently verified and published;
+MNL2 deltas, both MTY deltas and both JED deltas are independently verified and published;
 their catalog entries explicitly select the reviewed group-zero native outputs.
+RUH group-zero append 44219823683 is pending; no RUH append entry is activated.
 Do not activate any further candidate catalog until
 every named publication receipt, immutable binding, and cleanup is verified.
 The additional warm/native/source-canary acceptance checks are implemented,
 but their new helper/catalog pins have not been activated in the caller.
+
+The initial general-cache full-suite eligibility-to-final wall times are
+45m46s (MTY), 50m02s (MNL2), 42m59s (JED), and 51m33s (RUH). They include
+native misses and private incremental compilation, and must not be presented
+as the warm-restore timings. All four reviews checked 505 packages, 484
+instrumented packages, 86 exact skips, 446657 profile blocks and mandatory
+same-environment S3. The changed-runner/partition/source acceptance is still
+pending; these initial results alone do not establish it.
 
 Before activation:
 
