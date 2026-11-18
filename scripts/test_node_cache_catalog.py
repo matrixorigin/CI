@@ -4,6 +4,7 @@ These checks do not replace protected publication or live producer validation.
 """
 import copy
 import datetime
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -44,6 +45,22 @@ class CatalogTests(unittest.TestCase):
 
     def test_checked_in_catalog(self):
         check(self.catalog)
+
+    def test_all_node_copy_evidence_matches_published_catalog(self):
+        evidence=json.loads((Path(__file__).resolve().parents[1]/'config/node-cache-all-node-copy-evidence.json').read_text())
+        raw=json.dumps(self.catalog,sort_keys=True,separators=(',',':')).encode()
+        self.assertEqual(evidence['catalog_canonical_sha256'],hashlib.sha256(raw).hexdigest())
+        expected={'mty':44269605010,'mnl2':44274157817,'jed':44285215965,'ruh':44291764527}
+        self.assertEqual({r['environment']:r['run_id'] for r in evidence['copies']},expected)
+        self.assertEqual(len(self.catalog['nodes']),12)
+        for row in evidence['copies']:
+            self.assertRegex(row['artifact_digest'],r'^sha256:[0-9a-f]{64}$')
+            self.assertRegex(row['receipt_canonical_sha256'],r'^[0-9a-f]{64}$')
+            self.assertEqual(set(row['targets']),{'mo-standard-1','mo-standard-2'})
+            for node,proof in row['targets'].items():
+                binding=next(n for n in self.catalog['nodes'] if n['environment']==row['environment'] and n['node']==node)
+                self.assertEqual(proof['binding'],binding)
+                self.assertEqual(sorted(proof['indexes']),sorted(e['index_sha256'] for e in n.catalog_for_node(self.catalog,binding)['entries']))
 
     def test_cross_environment_binding_rejected(self):
         self.catalog['entries'][0]['runtime']['environment'] = 'unknown'

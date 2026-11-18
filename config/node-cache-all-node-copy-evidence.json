@@ -1,0 +1,187 @@
+{
+  "schema": 1,
+  "scope": "all-node copy acceptance; not formal PR rollout or capacity acceptance",
+  "catalog_canonical_sha256": "bf56c605419fb707707c722552115d5efe27660b6735da87e72ba53bed7a2d4a",
+  "copies": [
+    {
+      "environment": "mty",
+      "run_id": 44269605010,
+      "gitops_sha": "ecc89fdfec0b7acd575fb9ef563f6f1d06b9fad6",
+      "run_url": "https://github.com/matrixorigin/cloudsigma-gitops/actions/runs/44269605010",
+      "artifact_id": 14413022547,
+      "artifact_digest": "sha256:f2a1aae05fcfe59660dc29e1236f9bb9ef478a52ab6911112066653c57b6c5ef",
+      "receipt_canonical_sha256": "620ef1b4acf0029820c192b3dd233d46705920a7262867b8f0d120264af614d3",
+      "targets": {
+        "mo-standard-1": {
+          "binding": {
+            "environment": "mty",
+            "marker_sha256": "41348447dbb48e74cf64a8eca9142cdc2a763608f6e6cd820f05d2d79857ac10",
+            "node": "mo-standard-1",
+            "node_uid": "3a3f68b5-9fca-4c62-9dd6-8a9b92559517",
+            "pv_uid": "26fd0368-7b17-4669-a249-8f67a78ac4af",
+            "pvc_uid": "3db987eb-9c02-4dd0-ba0a-83462c5ff454"
+          },
+          "files": 14296,
+          "bytes": 9145029572,
+          "indexes": [
+            "015ea74a7b608662aaf9a719496e0f00b703eb2679f6072312cd82c5071bfb77",
+            "b0fd0bdbb3f3ad67e43df6e57da933be3e5c838198870a5114752aa4c35b30e6",
+            "d8b9c3e43c5eed5d2985822f7bfca5ce27da047fe48822b28edeae74c3686f2c"
+          ]
+        },
+        "mo-standard-2": {
+          "binding": {
+            "environment": "mty",
+            "marker_sha256": "5d81e99e2ee209655754b477f55e04d6594a84ea374894274a6ca8d78ea75935",
+            "node": "mo-standard-2",
+            "node_uid": "0ce60e08-4425-40e1-b069-eb062a1e41f6",
+            "pv_uid": "8bb6d1d2-bcfe-439f-9f24-eab14dd41d09",
+            "pvc_uid": "06897876-ae2d-441e-a97b-bd05780536d2"
+          },
+          "files": 14296,
+          "bytes": 9145029572,
+          "indexes": [
+            "015ea74a7b608662aaf9a719496e0f00b703eb2679f6072312cd82c5071bfb77",
+            "b0fd0bdbb3f3ad67e43df6e57da933be3e5c838198870a5114752aa4c35b30e6",
+            "d8b9c3e43c5eed5d2985822f7bfca5ce27da047fe48822b28edeae74c3686f2c"
+          ]
+        }
+      }
+    },
+    {
+      "environment": "mnl2",
+      "run_id": 44274157817,
+      "gitops_sha": "6eacf9c3629fb6c1c9fe797c8487ecb041bf0735",
+      "run_url": "https://github.com/matrixorigin/cloudsigma-gitops/actions/runs/44274157817",
+      "artifact_id": 14415182166,
+      "artifact_digest": "sha256:d5752e0820c0ef5373f320458fb641a0ae59edbcb16f082c543052a1212d15e3",
+      "receipt_canonical_sha256": "01295ac72d351d0831ad9e96c05484f6e65391df20f7af2896975aad3da438a7",
+      "targets": {
+        "mo-standard-1": {
+          "binding": {
+            "environment": "mnl2",
+            "marker_sha256": "51ef9dcd8ff8fcdb1c44d4801c45728f95102e05dfb62789b20d16cc4e6fc2e1",
+            "node": "mo-standard-1",
+            "node_uid": "95781cf6-84dd-4351-b65f-ad6bed7f9758",
+            "pv_uid": "aa93f757-df90-4e5e-b79e-d79a215b5a80",
+            "pvc_uid": "e7227a79-ae07-409b-9fba-08dc57ca4fa6"
+          },
+          "files": 14296,
+          "bytes": 9145029638,
+          "indexes": [
+            "40e661e10777fbb7a93bf03ca28624801f6445b2ce2f21b9db22e0e899db06a0",
+            "cbb03d76a1919ed37b95d0320de3c4a2de5f7a20c12405c04a2916b645f9f1a4",
+            "fdd321a62f3b81029959e1e7d800cac17c9e3093d291a6a1d2bf6044c3e47841"
+          ]
+        },
+        "mo-standard-2": {
+          "binding": {
+            "environment": "mnl2",
+            "marker_sha256": "5535b9e7b8d198e62c5ae669365567af85b3a303dc4b26f76d8434621aaf2e47",
+            "node": "mo-standard-2",
+            "node_uid": "fa78d205-6055-4bae-bef4-84cb6bc1f7c5",
+            "pv_uid": "5c229927-d099-4d5d-ae43-4546a5f0a17b",
+            "pvc_uid": "bf35fff9-83ed-45c4-b534-91ffd56d574d"
+          },
+          "files": 14296,
+          "bytes": 9145029638,
+          "indexes": [
+            "40e661e10777fbb7a93bf03ca28624801f6445b2ce2f21b9db22e0e899db06a0",
+            "cbb03d76a1919ed37b95d0320de3c4a2de5f7a20c12405c04a2916b645f9f1a4",
+            "fdd321a62f3b81029959e1e7d800cac17c9e3093d291a6a1d2bf6044c3e47841"
+          ]
+        }
+      }
+    },
+    {
+      "environment": "jed",
+      "run_id": 44285215965,
+      "gitops_sha": "5b803f519d55192956c93a2ab4ea76617e307756",
+      "run_url": "https://github.com/matrixorigin/cloudsigma-gitops/actions/runs/44285215965",
+      "artifact_id": 14422535969,
+      "artifact_digest": "sha256:85278f0ece6daf24397301409d5b6e627893007e04323052b429e6246137257a",
+      "receipt_canonical_sha256": "136f011a23873e0a07ac8fccc943fb6299c999681a9e1250e9bdfc24566c8d06",
+      "targets": {
+        "mo-standard-1": {
+          "binding": {
+            "environment": "jed",
+            "marker_sha256": "3c26a04e84767d8ef23f46d0d35e47a30d6d8545d4b3eb712b472dd2814b5bdb",
+            "node": "mo-standard-1",
+            "node_uid": "e244184e-8d5b-4560-818a-c97f610c2b19",
+            "pv_uid": "85d21765-54de-4f38-a0f1-1033ea389b61",
+            "pvc_uid": "647e4340-a08e-4efa-9600-965ce9c25a06"
+          },
+          "files": 14296,
+          "bytes": 9144995337,
+          "indexes": [
+            "6b1f887be09e7c3c5b0ce7e3eaca3ad3468751b89664e4615a71460da9e69e37",
+            "8ffe511be18b2ebd8871663126dbac448ee68aeffe2a369a7b58fb485d8521c0",
+            "96793fb61cc9ee8e65f9ed9d461b87ed1d1294c69112f31c9f022adf5dcd5249"
+          ]
+        },
+        "mo-standard-2": {
+          "binding": {
+            "environment": "jed",
+            "marker_sha256": "99060ba70d9f4ff3006349fc29f906d94d369a0349cee550d4fc1fb6dc4eb82f",
+            "node": "mo-standard-2",
+            "node_uid": "60d316fd-91d4-4b53-bab7-00a41eea4df1",
+            "pv_uid": "c9da142d-8022-4730-b071-1422da393d8a",
+            "pvc_uid": "f0551a2d-e68c-4847-8c08-470330b3d433"
+          },
+          "files": 14296,
+          "bytes": 9144995337,
+          "indexes": [
+            "6b1f887be09e7c3c5b0ce7e3eaca3ad3468751b89664e4615a71460da9e69e37",
+            "8ffe511be18b2ebd8871663126dbac448ee68aeffe2a369a7b58fb485d8521c0",
+            "96793fb61cc9ee8e65f9ed9d461b87ed1d1294c69112f31c9f022adf5dcd5249"
+          ]
+        }
+      }
+    },
+    {
+      "environment": "ruh",
+      "run_id": 44291764527,
+      "gitops_sha": "86feae79d44134a295c7c2ba11d2563e0ae2672f",
+      "run_url": "https://github.com/matrixorigin/cloudsigma-gitops/actions/runs/44291764527",
+      "artifact_id": 14423178616,
+      "artifact_digest": "sha256:fbb7392539ac06bf7b265059cfdcac0ac7bfded100b871dad16ed8060947e53f",
+      "receipt_canonical_sha256": "354310eb579a77b160599b2d7448a6aac83d76a756673a7dc2925fea107e5024",
+      "targets": {
+        "mo-standard-1": {
+          "binding": {
+            "environment": "ruh",
+            "marker_sha256": "0622ba830a3b48bbca7e99142bbc5acef8ef3dae318487e52cf2bc3b06883aab",
+            "node": "mo-standard-1",
+            "node_uid": "73ed3039-bec9-4289-bae5-e71b89d0249b",
+            "pv_uid": "e5e32937-3aa1-46c9-b39f-8fcf676e35de",
+            "pvc_uid": "e6c0901b-0aaf-4f74-89fa-74b049c68dfa"
+          },
+          "files": 14296,
+          "bytes": 9145028865,
+          "indexes": [
+            "a5e1ba2addc74cf6efeee6659f72ba85a2b3cb56246dff720a69681e390ec5f9",
+            "c357cc227c142855d25f0d40d09bafc698ecbfea2a0fae2c2cf5d9e8ab2349e6",
+            "f71c4848fbbaadbb54a50062d2a5020626b94eee7cecf9f0eca26d6ea64475cf"
+          ]
+        },
+        "mo-standard-2": {
+          "binding": {
+            "environment": "ruh",
+            "marker_sha256": "833c6c49b9d5b0a330d8dc9a68b50127b40747bf135cca5da8fdc85365987090",
+            "node": "mo-standard-2",
+            "node_uid": "b66e90e6-0dce-4b10-ac33-b1283c54b604",
+            "pv_uid": "a1d9ad6d-e9fd-49bd-a5a1-6482f3d483cf",
+            "pvc_uid": "97aead78-e501-4015-a955-90c8eae2e5a4"
+          },
+          "files": 14296,
+          "bytes": 9145028865,
+          "indexes": [
+            "a5e1ba2addc74cf6efeee6659f72ba85a2b3cb56246dff720a69681e390ec5f9",
+            "c357cc227c142855d25f0d40d09bafc698ecbfea2a0fae2c2cf5d9e8ab2349e6",
+            "f71c4848fbbaadbb54a50062d2a5020626b94eee7cecf9f0eca26d6ea64475cf"
+          ]
+        }
+      }
+    }
+  ]
+}

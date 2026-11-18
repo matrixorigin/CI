@@ -10,6 +10,13 @@ import node_cache_replication_catalog as p
 class Proposal(unittest.TestCase):
     def fixture(self):
         catalog=json.loads((Path(__file__).resolve().parents[1]/'config/node-compile-cache-catalog.json').read_text())
+        # Construct the pre-copy source catalog even after checked-in rollout
+        # publication adds real target bindings. Never change the live file.
+        catalog['nodes']=[n for n in catalog['nodes'] if n['node']=='mo-standard-0']
+        for entry in catalog['entries']:
+            source=next(n for n in catalog['nodes'] if n['environment']==entry['runtime']['environment'])
+            entry['bindings']=[{k:source[k] for k in ('node_uid','pvc_uid','pv_uid')}]
+        catalog['native_authorities']=[a for a in catalog['native_authorities'] if a['node']=='mo-standard-0']
         receipts={}
         for ordinal,env in enumerate(('mty','jed','ruh','mnl2'),1):
             expected=sorted(e['index_sha256'] for e in catalog['entries'] if e['runtime']['environment']==env)
