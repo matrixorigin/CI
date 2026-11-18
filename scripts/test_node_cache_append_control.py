@@ -29,12 +29,23 @@ class AppendControllerTests(unittest.TestCase):
                 {'key':k,'operator':'In','values':[v]} for k,v in snapshot['nodes']['items'][0]['metadata']['labels'].items()]}]}}}}
         return policy,snapshot,receipt,base,entry,pvc,pv
 
-    def lifecycle(self,case=None):
+    def lifecycle(self,case=None,resuming=False):
         policy,s,receipt,base,entry,pvc,pv=self.fixture();live={};writes=[]
         original_pvc=copy.deepcopy(pvc);original_pv=copy.deepcopy(pv)
         if case=='wrong-pvc':pvc['metadata']['uid']='different'
         if case=='runner':s['pods']['items']=[{'metadata':{'ownerReferences':[{'kind':'EphemeralRunner'}]},'status':{'phase':'Pending'}}]
         if case=='root':s['stats']['node']['fs']['availableBytes']=59*a.c.GIB
+        resume=None
+        if resuming:
+            name='cs-mty-nc-append-1-2'
+            resources=a.objects(policy,entry,base,name)
+            for obj in resources:
+                obj['metadata']['uid']=U;live[obj['kind']]=obj
+            live['Pod']['spec']['nodeName']=policy['node']
+            live['Pod']['status']={'phase':'Running','conditions':[{'type':'Ready','status':'True'}]}
+            resume={'complete':False,'environment':'mty','name':name,'compiler_invocations':0,
+                'existing_pvc_preserved':True,'started_at':'previous-reviewed-attempt',
+                'created':[{'kind':k,'name':name,'uid':U} for k in ('ConfigMap','Pod')]}
         def execute(cmd,**kwargs):
             if 'wait' in cmd:return subprocess.CompletedProcess(cmd,0,'pod condition met','')
             args=cmd[4:];verb=args[0];result=None
@@ -51,9 +62,18 @@ class AppendControllerTests(unittest.TestCase):
                 if kind=='Pod':
                     obj['spec']['nodeName']=policy['node'];obj['status']={'phase':'Running','conditions':[{'type':'Ready','status':'True'}]}
                     if case=='mutated-pod':obj['spec']['automountServiceAccountToken']=True
+                    if case in ('defaults','wrong-toleration','wrong-field-api'):
+                        for key in ('node.kubernetes.io/not-ready','node.kubernetes.io/unreachable'):
+                            obj['spec']['tolerations'].append({'effect':'NoExecute','key':key,'operator':'Exists','tolerationSeconds':300})
+                        obj['spec']['containers'][0]['env'][1]['valueFrom']['fieldRef']['apiVersion']='v1'
+                        if case=='wrong-toleration':obj['spec']['tolerations'][-1]['tolerationSeconds']=600
+                        if case=='wrong-field-api':obj['spec']['containers'][0]['env'][1]['valueFrom']['fieldRef']['apiVersion']='v2'
                 result=obj
                 if case=='ambiguous-create':raise subprocess.TimeoutExpired(cmd,60)
             elif verb=='exec':
+                if '-c' in args:
+                    writes.append(('check','empty-stage'))
+                    return subprocess.CompletedProcess(cmd,0,json.dumps({'empty':case!='dirty-stage'}),'')
                 phase=args[-1];writes.append(('exec',phase))
                 if case=='failed-append' and phase=='append':raise RuntimeError('scoped execution failed')
                 result={'success':True,'phase':phase}
@@ -69,11 +89,11 @@ class AppendControllerTests(unittest.TestCase):
              patch.object(a.transport,'signed_archive_url',return_value='https://fixture.blob.core.windows.net/object'), \
              patch.dict(os.environ,{'CS_CACHE_READ_TOKEN':'fixture'}):
             path=Path(tmp).resolve()/'append.json'
-            if case:
-                with self.assertRaises(Exception):a.run(policy,entry,base,receipt,'fixture',path)
+            if case and case!='defaults':
+                with self.assertRaises(Exception):a.run(policy,entry,base,receipt,'fixture',path,resume)
                 result=json.loads(path.read_text());self.assertFalse(result['complete'])
                 self.assertFalse(result['automatic_retry'])
-            else:result=a.run(policy,entry,base,receipt,'fixture',path)
+            else:result=a.run(policy,entry,base,receipt,'fixture',path,resume)
         if case!='wrong-pvc':self.assertEqual(pvc,original_pvc)
         self.assertEqual(pv,original_pv)
         return result,writes,live
@@ -111,6 +131,24 @@ class AppendControllerTests(unittest.TestCase):
         self.assertEqual(pod['containers'][0]['resources']['limits'],{'cpu':'1','memory':'1Gi'})
         self.assertNotIn('TOKEN',str(pod['containers'][0]['env']))
         with self.assertRaises(ValueError):a.objects(policy,entry,base,'cs-mty-nc-append-1-3')
+
+    def test_observed_api_defaults_only_are_accepted(self):
+        self.assertTrue(self.lifecycle('defaults')[0]['complete'])
+        for case in ('wrong-toleration','wrong-field-api'):
+            _,writes,_=self.lifecycle(case)
+            self.assertFalse(any(w[0]=='exec' for w in writes))
+
+    def test_explicit_pretransfer_resume_creates_no_resources(self):
+        result,writes,_=self.lifecycle(resuming=True)
+        self.assertTrue(result['complete']);self.assertTrue(result['resumed_existing_resources'])
+        self.assertEqual(writes,[('check','empty-stage'),('exec','stage'),('exec','append'),('exec','verify'),('delete','Pod')])
+
+    def test_dirty_or_ambiguous_stage_never_retried(self):
+        _,writes,live=self.lifecycle('dirty-stage',resuming=True)
+        self.assertEqual(writes,[('check','empty-stage')]);self.assertIn('Pod',live)
+        for key in ('pending_create','pending_delete','active_phase','stage','append','verify'):
+            with self.assertRaises(ValueError):a.resume_created({'complete':False,'environment':'mty',
+                'name':'n','compiler_invocations':0,'existing_pvc_preserved':True,key:{}},'mty','n')
 
 
 if __name__=='__main__':unittest.main()

@@ -53,8 +53,13 @@ def identity(policy,receipt,base,resources,created,cm,pod,pvc,pv,node):
     c.require(spec['nodeName']==policy['node'] and pod['status']['phase']=='Running' and
               any(x['type']=='Ready' and x['status']=='True' for x in pod['status']['conditions']),
               'append Pod not ready')
-    for key in ('automountServiceAccountToken','restartPolicy','activeDeadlineSeconds','nodeSelector','tolerations','securityContext'):
+    for key in ('automountServiceAccountToken','restartPolicy','activeDeadlineSeconds','nodeSelector','securityContext'):
         c.require(spec[key]==expected[key],'append Pod security/scheduling differs')
+    tolerations=copy.deepcopy(spec['tolerations'])
+    for key in ('node.kubernetes.io/not-ready','node.kubernetes.io/unreachable'):
+        default={'effect':'NoExecute','key':key,'operator':'Exists','tolerationSeconds':300}
+        if default in tolerations:tolerations.remove(default)
+    c.require(tolerations==expected['tolerations'],'append Pod tolerations differ')
     volumes=copy.deepcopy(spec['volumes'])
     for volume in volumes:
         if 'configMap' in volume:
@@ -62,18 +67,40 @@ def identity(policy,receipt,base,resources,created,cm,pod,pvc,pv,node):
             volume['configMap'].pop('defaultMode',None)
     c.require(volumes==expected['volumes'] and len(spec['containers'])==1 and
               not spec.get('initContainers') and not spec.get('ephemeralContainers'),'append volume/container scope differs')
+    actual_container=copy.deepcopy(spec['containers'][0])
+    for value in actual_container.get('env',[]):
+        ref=value.get('valueFrom',{}).get('fieldRef')
+        if ref is not None:
+            c.require(ref.get('apiVersion','v1')=='v1','append field API version differs')
+            ref.pop('apiVersion',None)
     for key,value in expected['containers'][0].items():
-        c.require(spec['containers'][0][key]==value,'append container differs')
+        c.require(actual_container[key]==value,'append container differs')
     return base['binding']
 
 
-def run(policy,entry,base,receipt,config,path):
+def resume_created(resume,environment,name):
+    c.require(resume['complete'] is False and resume['environment']==environment and resume['name']==name and
+              resume['compiler_invocations']==0 and resume['existing_pvc_preserved'] is True,
+              'resume identity differs')
+    c.require(not any(k in resume for k in ('active_phase','stage','append','verify','pending_create','pending_delete')),
+              'cannot resume ambiguous or started transfer/publication')
+    created=resume['created']
+    c.require([r['kind'] for r in created]==['ConfigMap','Pod'] and all(r['name']==name and
+              re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}',r['uid']) for r in created),
+              'resume resource identity incomplete')
+    return copy.deepcopy(created)
+
+
+def run(policy,entry,base,receipt,config,path,resume=None):
     c.require(not path.exists() and entry['runtime']['environment']==policy['environment'] and
               not entry['bindings'],'fresh append operation required')
     name=f"cs-{policy['environment']}-nc-append-{entry['producer']['id']}-{entry['artifact']['id']}"
     resources=objects(policy,entry,base,name)
     result={'complete':False,'environment':policy['environment'],'name':name,'created':[],
             'started_at':initial.now().isoformat(),'compiler_invocations':0,'existing_pvc_preserved':True}
+    if resume is not None:
+        result['created']=resume_created(resume,policy['environment'],name)
+        result['resumed_from_started_at']=resume['started_at']
     def journal():initial.write_journal(path,result)
     def call(args,data=None,timeout=60):
         proc=subprocess.run(['kubectl','--kubeconfig',str(config),'--request-timeout=30s',*args],
@@ -112,19 +139,29 @@ def run(policy,entry,base,receipt,config,path):
             call(['get','pod',name,'-n','cicd','-o','json']),pvc,pv,node)
     try:
         fresh_authorization();authorization.validate_url(transport.signed_archive_url(entry))
-        snap=snapshot();result['preflight']=initial.guard(policy,snap,after_allocation=True)
+        own_uid=next((x['uid'] for x in result['created'] if x['kind']=='Pod'),None)
+        snap=snapshot();result['preflight']=initial.guard(policy,snap,own_uid,after_allocation=True)
         c.require(result['preflight']['root_free_bytes']>=60*c.GIB,'append startup disk reserve')
         policy={**policy,'initial_init_restarts':result['preflight']['init_restarts']}
         volume();journal()
-        for obj in resources:
-            c.require(call(['get',obj['kind'],name,'-n','cicd','--ignore-not-found','-o','json']) is None,
-                      'append resource exists; reconcile without retry')
-        initial.guard(policy,snap,after_allocation=True)
-        for obj in resources:
-            result['pending_create']={'kind':obj['kind'],'name':name};journal()
-            live=call(['create','-f','-','-o','json'],obj)
-            result['created'].append({'kind':obj['kind'],'name':name,'uid':live['metadata']['uid']});journal()
-        result.pop('pending_create');journal()
+        if resume is None:
+            for obj in resources:
+                c.require(call(['get',obj['kind'],name,'-n','cicd','--ignore-not-found','-o','json']) is None,
+                          'append resource exists; reconcile without retry')
+            initial.guard(policy,snap,after_allocation=True)
+            for obj in resources:
+                result['pending_create']={'kind':obj['kind'],'name':name};journal()
+                live=call(['create','-f','-','-o','json'],obj)
+                result['created'].append({'kind':obj['kind'],'name':name,'uid':live['metadata']['uid']});journal()
+            result.pop('pending_create');journal()
+        else:
+            current_identity()
+            # Previous controller stopped before its first exec. Independently
+            # prove that the same private stage still has no transfer bytes.
+            empty=call(['exec','-n','cicd',name,'--','python3','-c',
+                'import json; from pathlib import Path; print(json.dumps({"empty":not any(Path("/stage").iterdir())}))'])
+            c.require(empty=={'empty':True},'resume stage is not empty; reconcile only')
+            result['resumed_existing_resources']=True;journal()
         waited=subprocess.run(['kubectl','--kubeconfig',str(config),'-n','cicd','wait',
             '--for=condition=Ready','pod/'+name,'--timeout=180s'],capture_output=True,text=True,timeout=200)
         c.require(waited.returncode==0,'append Pod scheduling incomplete')
@@ -151,15 +188,22 @@ def run(policy,entry,base,receipt,config,path):
         result.update(complete=True,completed_at=initial.now().isoformat());result.pop('active_phase');journal()
         return result
     except Exception as error:
-        result.update(diagnostic=c.failure_report(error),automatic_retry=False);journal();raise
+        diagnostic=c.failure_report(error)
+        import traceback
+        diagnostic['sites']=[{'file':Path(x.filename).name,'line':x.lineno}
+            for x in traceback.extract_tb(error.__traceback__) if Path(x.filename).name.startswith(
+                ('node_cache_','incremental_','publish_node_'))]
+        result.update(diagnostic=diagnostic,automatic_retry=False);journal();raise
 
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     for name in ('policy','entry','base','receipt','kubeconfig','report'):parser.add_argument('--'+name,type=Path,required=True)
+    parser.add_argument('--resume-receipt',type=Path)
     args=parser.parse_args()
     try:run(c.read_json(args.policy),c.read_json(args.entry),c.read_json(args.base),
-            c.read_json(args.receipt),args.kubeconfig,args.report)
+            c.read_json(args.receipt),args.kubeconfig,args.report,
+            c.read_json(args.resume_receipt) if args.resume_receipt else None)
     except Exception as error:
         print(c.canonical({'complete':False,'diagnostic':c.failure_report(error),'automatic_retry':False}).decode())
         sys.exit(1)
