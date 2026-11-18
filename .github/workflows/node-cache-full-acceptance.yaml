@@ -130,11 +130,15 @@ jobs:
 
           scripts/node_compile_cache.py
 
+          scripts/node_cache_validation.py
+
           scripts/node_cache_candidate.py
 
           scripts/publish_node_cache.py
 
           config/node-compile-cache-catalog.json
+
+          config/node-cache-validation-sources.json
 
           config/coverage-cache-catalog.json
 
@@ -400,7 +404,16 @@ jobs:
       name: Fail closed on any incremental cache validation error
       if: ${{ always() && !cancelled() && inputs.node_compile_cache && steps.node_cache.outcome == 'success' }}
       timeout-minutes: 5
-      run: python3 .ci-workflow/scripts/node_compile_cache.py accept --state "$RUNNER_TEMP/cs-node-cache/state.json"
+      run: |
+        set -euo pipefail
+        python3 .ci-workflow/scripts/node_compile_cache.py accept --state "$RUNNER_TEMP/cs-node-cache/state.json"
+        python3 .ci-workflow/scripts/node_cache_validation.py \
+          --policy .ci-workflow/config/node-cache-validation-sources.json \
+          --state "$RUNNER_TEMP/cs-node-cache/state.json" \
+          --source "$GITHUB_WORKSPACE" \
+          --packages "$RUNNER_TEMP/coverage-group.txt" \
+          --report "$RUNNER_TEMP/ut-coverage-report.json" \
+          --output "$RUNNER_TEMP/cs-node-cache/validation.json"
     - id: upload_node_cache_failures
       # Diagnostic metadata has only static codes/types and reviewed source
       # locations. Never upload cache configuration, raw exception text or logs.
@@ -519,6 +532,8 @@ jobs:
           ${{ runner.temp }}/cs-node-cache/native-result.json
 
           ${{ runner.temp }}/cs-node-cache/acceptance.json
+
+          ${{ runner.temp }}/cs-node-cache/validation.json
 
           '
         if-no-files-found: warn

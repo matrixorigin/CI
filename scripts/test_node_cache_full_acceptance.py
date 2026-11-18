@@ -23,6 +23,22 @@ class FullAcceptanceContract(unittest.TestCase):
                 self.assertEqual(restored['with']['repository'],'matrixorigin/CI')
                 self.assertRegex(restored['with']['ref'],r'^[0-9a-f]{40}$')
                 restored['with']['repository']=original['with']['repository'];restored['with']['ref']=original['with']['ref']
+                paths=restored['with']['sparse-checkout'].split()
+                self.assertIn('scripts/node_cache_validation.py',paths)
+                self.assertIn('config/node-cache-validation-sources.json',paths)
+                self.assertEqual([p for p in paths if p not in ('scripts/node_cache_validation.py','config/node-cache-validation-sources.json')],original['with']['sparse-checkout'].split())
+                restored['with']['sparse-checkout']=original['with']['sparse-checkout']
+            if original.get('id')=='node_cache_acceptance':
+                self.assertIn(original['run'],restored['run'])
+                self.assertIn('set -euo pipefail',restored['run'])
+                self.assertIn('node_cache_validation.py',restored['run'])
+                self.assertNotIn('continue-on-error',restored)
+                restored['run']=original['run']
+            if original.get('id')=='upload_coverage_report':
+                added='${{ runner.temp }}/cs-node-cache/validation.json'
+                self.assertIn(added,restored['with']['path'])
+                self.assertEqual(restored['with']['path'].replace(added+'\n',''),original['with']['path'])
+                restored['with']['path']=original['with']['path']
             if original.get('id')=='node_cache':
                 self.assertIn('(.entries | length) > 0',restored['run'])
                 restored['run']=original['run'];restored['env']['CS_CACHE_SOURCE_REPOSITORY']=original['env']['CS_CACHE_SOURCE_REPOSITORY']

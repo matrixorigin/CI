@@ -1,1 +1,18 @@
-{"source_shas":["dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca"],"boundary":"Isolated full-suite acceptance; separately review new source SHA before enabling it."}
+{
+  "source_shas": [
+    "dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca",
+    "ca16432a13fceeb987cf07e68a1ec883bd18559e"
+  ],
+  "controlled_sources": {
+    "ca16432a13fceeb987cf07e68a1ec883bd18559e": {
+      "baseline_sha": "dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca",
+      "files": {
+        "pkg/common/zipstream/zip.go": "d8c8b6627deabcd86f7ce6970ef44f7d6f773d6cbcffb979bd869d4115b89ade",
+        "pkg/common/zipstream/node_cache_source_canary_test.go": "3fcaa6fde8167b662bf8372f46ab7073957a8f991efdbe3219826bb67b710d52"
+      },
+      "canary_package": "github.com/matrixorigin/matrixone/pkg/common/zipstream",
+      "canary_test": "TestNodeCacheControlledSourceVersion"
+    }
+  },
+  "boundary": "Isolated acceptance only. Controlled revision changes one comment without moving coverage blocks and adds one test; production code behavior and modules are unchanged. Native hits and shared baseline objects are mandatory in this acceptance round."
+}
