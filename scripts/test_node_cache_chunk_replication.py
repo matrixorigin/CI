@@ -49,3 +49,25 @@ class Chunks(unittest.TestCase):
         stream=io.BytesIO();q.export_batch(self.source_root,self.catalog,self.source,self.lock,0,stream);stream.seek(0)
         with self.assertRaises(ValueError):q.receive_batch(dest,self.catalog,self.source,self.lock,identity,0,stream)
         self.assertFalse((dest/'.replication-stage').exists())
+
+    def test_failed_batch_replays_only_missing_files_and_reverifies_omissions(self):
+        dest=self.root/'target';dest.mkdir();identity=self.target()
+        out=io.BytesIO();q.export_batch(self.source_root,self.catalog,self.source,self.lock,0,out)
+        raw=out.getvalue()
+        with q.tarfile.open(fileobj=io.BytesIO(raw)) as archive:cut=archive.getmembers()[2].offset_data+1
+        with self.assertRaises((ValueError,EOFError,q.tarfile.ReadError)):
+            q.receive_batch(dest,self.catalog,self.source,self.lock,identity,0,io.BytesIO(raw[:cut]))
+        proof=q.inventory(dest,self.catalog,self.source,self.lock,identity)
+        self.assertEqual(proof['acknowledged'],[]);self.assertEqual(proof['verified_files'],1)
+        selected=proof['partial_selections']['0'];self.assertEqual(len(selected),2)
+        meta=next((dest/'.replication-stage/incremental-v2/indexes').iterdir());before=(meta.stat().st_ino,meta.stat().st_mtime_ns)
+        out=io.BytesIO();q.export_batch(self.source_root,self.catalog,self.source,self.lock,0,out,selected);out.seek(0)
+        self.assertTrue(q.receive_batch(dest,self.catalog,self.source,self.lock,identity,0,out)['success'])
+        self.assertEqual(before,(meta.stat().st_ino,meta.stat().st_mtime_ns))
+        self.assertTrue(q.finish(dest,self.catalog,self.source,self.lock,identity)['success'])
+
+    def test_sender_cannot_claim_an_unverified_omission(self):
+        dest=self.root/'target';dest.mkdir();identity=self.target();out=io.BytesIO()
+        q.export_batch(self.source_root,self.catalog,self.source,self.lock,0,out,selected=[]);out.seek(0)
+        with self.assertRaises(ValueError):q.receive_batch(dest,self.catalog,self.source,self.lock,identity,0,out)
+        self.assertFalse((dest/'incremental-v2').exists())

@@ -9,14 +9,24 @@ import node_cache_partial_recover_control as q
 import node_cache_replicate_control as b
 import node_cache_partial_replication as p
 import node_cache_chunk_replication as chunks
+import node_cache_chunk_resume_control as chunk_resume
 import test_node_cache_replication as fixtures
 from test_node_cache_publish_control import fixture,NOW
 
 
 class PartialController(unittest.TestCase):
-    def exercise(self,bad=None,retry=False,env='jed'):
+    def exercise(self,bad=None,retry=False,env='jed',chunk_retry=False):
         data=fixtures.Replication('test_two_nodes_same_objects_new_bindings_source_unchanged')
         data.environment=env;data.setUp();self.addCleanup(data.doCleanups)
+        if chunk_retry:
+            retry=True;budget=patch.object(chunks,'BUDGET',64);budget.start();self.addCleanup(budget.stop)
+            entry=data.catalog['entries'][0]
+            index=json.loads((data.source_root/'incremental-v2/indexes'/(entry['index_sha256']+'.json')).read_text())
+            for number in (1,2):
+                raw=bytes([number])*32;digest=b.replication.sha(raw)
+                path=data.source_root/'incremental-v2/objects'/digest[:2]/digest;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(raw)
+                index['actions'][str(number)*64]={'output_id':digest,'size':len(raw)}
+            ident=b.replication.sha(b.c.canonical(index));b.c.atomic_json(data.source_root/'incremental-v2/indexes'/(ident+'.json'),index);entry['index_sha256']=ident
         policy,s=fixture();policy.update(environment=env,name=f'cs-{env}-incremental-n0-v1')
         policy['namespace_uids']={k.replace('mocservices-mty','mocservices-'+env):v for k,v in policy['namespace_uids'].items()}
         s['namespaces']['items']=[{'metadata':{'name':k,'uid':v}} for k,v in policy['namespace_uids'].items()]
@@ -62,7 +72,7 @@ class PartialController(unittest.TestCase):
         if bad=='uid':live['pod',made[1]['name']]['metadata']['uid']='replacement'
         if bad=='proof':approval['stage_reverification']['bad']=['wrong']
         if bad=='hash':existing.chmod(0o644);existing.write_bytes(b'X'*existing.stat().st_size)
-        def api(path):return {'head_sha':'0cd28ed7774ff8f4e6c453336ae8ead2624d2e1f' if path.endswith('/44280524562') else '185274d735086446e0caafd9766f38c2a743a6dc' if path.endswith('/44278016051') else q.OLD_REV,'head_branch':'codex/ruh-pvc-readiness','event':'workflow_dispatch',
+        def api(path):return {'head_sha':chunk_resume.PRIOR_REV if path.endswith('/44279718678') else '0cd28ed7774ff8f4e6c453336ae8ead2624d2e1f' if path.endswith('/44280524562') else '185274d735086446e0caafd9766f38c2a743a6dc' if path.endswith('/44278016051') else q.OLD_REV,'head_branch':'codex/ruh-pvc-readiness','event':'workflow_dispatch',
             'conclusion':'success' if path.endswith('/44280524562') else 'failure','status':'completed','run_attempt':1,'path':'.github/workflows/cloudsigma-up.yaml','actor':{'login':'Ariznawlll'}}
         def call(command,**kwargs):
             nonlocal counter
@@ -105,23 +115,35 @@ class PartialController(unittest.TestCase):
                     expected,groups=chunks.batches(plan,data.catalog,data.source,data.lock)
                     value={'batches':len(groups),'bytes':sum(x[0] for x in expected.values()),'files':len(expected)}
                 elif mode=='finish':value=chunks.finish(root,data.catalog,data.source,data.lock,identity)
+                elif mode=='inventory':value=chunks.inventory(root,data.catalog,data.source,data.lock,identity)
                 else:raise AssertionError(mode)
             else:raise AssertionError(verb)
             return subprocess.CompletedProcess(command,0,'' if value is None else json.dumps(value),'')
-        fail_first=retry
+        fail_first=retry;fail_chunk=chunk_retry;resumed_selections=[]
         def streaming(source_cmd,target_cmd,**kwargs):
-            nonlocal fail_first
+            nonlocal fail_first,fail_chunk
             self.assertIn('-i',target_cmd[:target_cmd.index('--')])
-            self.assertNotIn('-i',source_cmd[:source_cmd.index('--')])
+            self.assertIn('-i',source_cmd[:source_cmd.index('--')]);self.assertIn('--await-ack',source_cmd)
+            self.assertTrue(kwargs['await_ack'])
             args=target_cmd[4:];name=args[1];script=next(x for x in args if x.startswith('/probe/'));mode=args[args.index(script)+1]
             identity=json.loads(args[args.index('--target-json')+1]);claim=live['pod',name]['spec']['volumes'][0]['persistentVolumeClaim']['claimName']
             if mode=='finish-tool':
                 if fail_first:fail_first=False;raise ValueError('simulated missing stdin in original reviewed run')
-                out=io.BytesIO();p.export_tool(data.source_root,data.catalog,data.source,data.lock,out);self.assertEqual(len(out.getvalue()),data.lock['archive_size'])
-                out.seek(0);return p.finish_tool(roots[claim],data.catalog,data.source,data.lock,identity,out)
+                self.assertIn('--framed-tool',source_cmd);self.assertIn('--framed-tool',target_cmd)
+                out=io.BytesIO();p.export_tool(data.source_root,data.catalog,data.source,data.lock,out,framed=True)
+                self.assertEqual(len(out.getvalue()),data.lock['archive_size']+len(p.FOOTER))
+                out.seek(0);return p.finish_tool(roots[claim],data.catalog,data.source,data.lock,identity,out,framed=True)
             self.assertEqual(mode,'receive-batch');self.assertLessEqual(kwargs['timeout'],900)
             number=int(args[args.index('--number')+1]);out=io.BytesIO()
-            chunks.export_batch(data.source_root,data.catalog,data.source,data.lock,number,out);out.seek(0)
+            selected=json.loads(source_cmd[source_cmd.index('--selected-json')+1]) if '--selected-json' in source_cmd else None
+            chunks.export_batch(data.source_root,data.catalog,data.source,data.lock,number,out,selected);out.seek(0)
+            if fail_chunk and number==2:
+                fail_chunk=False
+                with chunks.tarfile.open(fileobj=io.BytesIO(out.getvalue())) as archive:cut=archive.getmembers()[-1].offset_data+1
+                try:chunks.receive_batch(roots[claim],data.catalog,data.source,data.lock,identity,number,io.BytesIO(out.getvalue()[:cut]))
+                except (ValueError,chunks.tarfile.ReadError,EOFError):raise ValueError('simulated truncated original chunk')
+                raise AssertionError('truncation must fail')
+            if selected is not None:resumed_selections.append(selected)
             return chunks.receive_batch(roots[claim],data.catalog,data.source,data.lock,identity,number,out)
         with patch.object(q.subprocess,'run',side_effect=call),patch.object(b.pub,'now',return_value=NOW), \
              patch.object(b.n,'reviewed_entries',side_effect=lambda cat,*_:cat['entries']),patch.object(b.tools,'authorize'), \
@@ -137,6 +159,23 @@ class PartialController(unittest.TestCase):
                 failed['failure_sites']=[{'file':'node_cache_partial_recover_control.py','line':165},
                                          {'file':'node_cache_replicate_control.py','line':116}]
                 approval['failed_recovery']={'run_id':44278016051,'receipt':failed}
+                if chunk_retry:
+                    with self.assertRaises(ValueError):q.run(policy,data.catalog,data.lock,approval,'private',data.root/'failed-chunks',api=api)
+                    prior=json.loads((data.root/'failed-chunks/state.json').read_text())
+                    prior['failure_sites']=[{'file':'node_cache_partial_recover_control.py','line':233},
+                                            {'file':'node_cache_replicate_control.py','line':116}]
+                    control={'readonly':True,'filesystem_writes':0,'producer_waited_for_ack':True,
+                        'batch':2,'verified_files':556,'verified_bytes':264928544}
+                    original_creates=len(mutations)
+                    result=chunk_resume.run(policy,data.catalog,data.lock,{'prior_run_id':chunk_resume.PRIOR,'receipt':prior,'ack_control':control},
+                        'private',data.root/'chunk-resume',api=api)
+                    self.assertTrue(result['complete']);self.assertTrue(result['node1_not_modified'])
+                    self.assertEqual(result['retained_inventory']['acknowledged'],[0,1])
+                    self.assertEqual(len(resumed_selections),1);self.assertEqual(resumed_selections[0],[p.tool_name(data.lock)])
+                    self.assertFalse(any(kind=='PersistentVolumeClaim' for verb,kind,name in mutations[original_creates:]))
+                    self.assertEqual(len(result['created']),4);self.assertEqual(len(result['deleted']),3)
+                    self.assertEqual(before,((destination/data.object_name).stat().st_ino,(destination/data.object_name).stat().st_mtime_ns,(destination/data.object_name).read_bytes()))
+                    return
                 first_creates=len([m for m in mutations if m[0]=='create'])
                 result=q.run(policy,data.catalog,data.lock,approval,'private',data.root/'recovery',api=api)
                 self.assertEqual(transfer.call_count,3)
@@ -164,9 +203,11 @@ class PartialController(unittest.TestCase):
     def test_kubectl_stdin_forwarding_contract(self):
         for mode in ('finish-tool','receive-batch','inspect','verify','export-tool','export-batch','finish','plan-batches'):
             args=q.exec_args('owned-helper',mode)
-            self.assertEqual('-i' in args[:args.index('--')],mode in ('finish-tool','receive-batch'))
+            self.assertEqual('-i' in args[:args.index('--')],mode in ('finish-tool','receive-batch','export-tool','export-batch'))
             self.assertNotIn('-t',args)
 
     def test_reviewed_stdin_failure_reuses_configmap_preserves_stage_replaces_only_own_helpers(self):self.exercise(retry=True)
 
     def test_ruh_protected_inspection_selective_copy_and_own_helper_scope(self):self.exercise(env='ruh')
+
+    def test_jed_partial_chunks_resume_only_missing_without_new_pvc_or_node1_writes(self):self.exercise(chunk_retry=True)

@@ -22,11 +22,13 @@ CM='cs-jed-cache-partial-r1'
 
 def exec_args(pod,mode,target=None,module='node_cache_replication.py',number=None):
     args=['exec',pod,'-n','cicd']
-    if mode in ('finish-tool','receive-batch'):args+=['-i']
+    if mode in ('finish-tool','receive-batch','export-tool','export-batch'):args+=['-i']
     args+=['--','python3','/probe/'+module,mode,
           '--catalog','/probe/catalog.json','--lock','/probe/lock.json','--source','/probe/source.json']
     if target is not None:args+=['--target-json',json.dumps(target,sort_keys=True,separators=(',',':'))]
     if number is not None:args+=['--number',str(number)]
+    if mode in ('export-tool','export-batch'):args+=['--await-ack']
+    if mode in ('export-tool','finish-tool'):args+=['--framed-tool']
     return args
 
 
@@ -233,7 +235,7 @@ def run(policy,catalog,lock,approval,config,directory,api=base.n.legacy.api):
         c.require(inspected['success'] and inspected['verified_files']==proof['verified_files'] and inspected['missing']==[partial.tool_name(lock)],'live partial stage changed')
         state['partial_reverified_before_write']=inspected;journal();guard('mo-standard-1')
         result=base.stream_transfer(command(execute(src,'export-tool',module='node_cache_partial_replication.py')),
-            command(execute(pod1,'finish-tool',target1,'node_cache_partial_replication.py')))
+            command(execute(pod1,'finish-tool',target1,'node_cache_partial_replication.py')),await_ack=True)
         state['targets']['mo-standard-1']={'claim':f'cs-{env}-incremental-n1-v1','binding':target1,'received':result,'tool_only_recovery':True}
         journal();verified=call(execute(pod1,'verify',target1),timeout=600)
         c.require(verified==result and verified['success'],'partial independent verification differs')
@@ -255,7 +257,7 @@ def run(policy,catalog,lock,approval,config,directory,api=base.n.legacy.api):
             # new copy budget is extended from measured transfer evidence.
             guard(node);left=copy_budget-(time.monotonic()-copy_start);c.require(left>0,'whole-node transfer deadline')
             batch=base.stream_transfer(command(execute(src,'export-batch',module='node_cache_chunk_replication.py',number=number)),
-                command(execute(pod2,'receive-batch',target2,'node_cache_chunk_replication.py',number)),timeout=min(900,left))
+                command(execute(pod2,'receive-batch',target2,'node_cache_chunk_replication.py',number)),timeout=min(900,left),await_ack=True)
             c.require(batch['success'] is True and batch['number']==number and batch['batches']==planned['batches']
                 and batch['compiler_invocations']==batch['external_downloads']==0,'node2 batch receipt differs')
             state['targets'][node]['batches'].append(batch);journal()

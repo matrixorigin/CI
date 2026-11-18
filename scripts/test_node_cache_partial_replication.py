@@ -71,3 +71,14 @@ class PartialReplication(unittest.TestCase):
         self.assertTrue(p.finish_tool(dest,self.catalog,self.source,self.lock,target,stream)['success'])
         obj=dest/self.object_name
         self.assertEqual(before,(obj.stat().st_ino,obj.stat().st_mtime_ns,obj.read_bytes()))
+
+    def test_framed_tool_is_length_bounded_and_rejects_missing_footer(self):
+        dest,target=self.partial();out=io.BytesIO()
+        p.export_tool(self.source_root,self.catalog,self.source,self.lock,out,framed=True)
+        out.seek(0);self.assertTrue(p.finish_tool(dest,self.catalog,self.source,self.lock,target,out,framed=True)['success'])
+
+    def test_missing_frame_footer_never_publishes(self):
+        dest,target=self.partial();out=io.BytesIO()
+        p.export_tool(self.source_root,self.catalog,self.source,self.lock,out,framed=True)
+        with self.assertRaises(ValueError):p.finish_tool(dest,self.catalog,self.source,self.lock,target,io.BytesIO(out.getvalue()[:-1]),framed=True)
+        self.assertFalse((dest/'incremental-v2').exists());self.assertTrue((dest/'.replication-stage'/self.object_name).exists())

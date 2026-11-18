@@ -105,11 +105,11 @@ def checked_helper_spec(expected,actual):
     return subset(expected,actual)
 
 
-def stream_transfer(source_command,target_command,timeout=3700):
+def stream_transfer(source_command,target_command,timeout=3700,await_ack=False):
     """Bounded pipe, no whole archive on the controller's filesystem."""
     source=target=None;started=time.monotonic()
     try:
-        source=subprocess.Popen(source_command,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        source=subprocess.Popen(source_command,stdin=subprocess.PIPE if await_ack else None,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         target=subprocess.Popen(target_command,stdin=source.stdout,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         source.stdout.close()
         output,errors=target.communicate(timeout=timeout)
@@ -131,9 +131,17 @@ def stream_transfer(source_command,target_command,timeout=3700):
                 'receiver_error_types':sorted(set(types)),'transport_signal_codes':sorted(set(signals)),
                 'stderr_text_retained':False}
             raise error
+        result=json.loads(output)
+        if await_ack:
+            c.require(type(result) is dict and any(result.get(k) is True for k in ('success','verified','readonly')),
+                      'consumer did not acknowledge verified payload')
+            # Keep the producer exec alive until its consumer has independently
+            # validated the framed payload. Closing the producer earlier can
+            # drop buffered stdout in Kubernetes/CRI exec transports.
+            source.stdin.write(b'A');source.stdin.flush();source.stdin.close()
         source.wait(timeout=max(1,timeout-(time.monotonic()-started)))
         c.require(source.returncode==0,'source stream stopped; target must not be admitted')
-        return json.loads(output)
+        return result
     finally:
         # Only subprocesses created in this function, never cluster/test jobs.
         for process in (target,source):
@@ -141,7 +149,7 @@ def stream_transfer(source_command,target_command,timeout=3700):
                 process.kill();process.wait(timeout=10)
         for process in (target,source):
             if process is not None:
-                for pipe in (process.stdout,process.stderr):
+                for pipe in (process.stdin,process.stdout,process.stderr):
                     if pipe is not None and not pipe.closed:pipe.close()
 
 

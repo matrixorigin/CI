@@ -134,6 +134,16 @@ class ControllerGuard(unittest.TestCase):
         result=r.stream_transfer(source,target,timeout=10)
         self.assertEqual(result['bytes'],1048576)
 
+    def test_producer_waits_for_consumer_ack_without_eof_deadlock(self):
+        source=[sys.executable,'-c','import sys;sys.stdout.buffer.write(b"x"*1048576);sys.stdout.buffer.flush();assert sys.stdin.buffer.read(1)==b"A"']
+        target=[sys.executable,'-c','import sys,json;data=sys.stdin.buffer.read(1048576);assert len(data)==1048576;print(json.dumps({"verified":True,"bytes":len(data)}))']
+        self.assertEqual(r.stream_transfer(source,target,timeout=10,await_ack=True)['bytes'],1048576)
+
+    def test_rejected_consumer_is_not_acknowledged(self):
+        source=[sys.executable,'-c','import sys;sys.stdout.buffer.write(b"x"*1024);sys.stdout.buffer.flush();assert sys.stdin.buffer.read(1)==b"A"']
+        target=[sys.executable,'-c','import sys;sys.stdin.buffer.read(1024);print("{\"success\":false}")']
+        with self.assertRaises(ValueError):r.stream_transfer(source,target,timeout=10,await_ack=True)
+
     def test_pipe_failure_is_not_accepted(self):
         for source,target in [([sys.executable,'-c','raise SystemExit(2)'],
                                [sys.executable,'-c','import sys;sys.stdin.buffer.read();print("{}")']),
