@@ -23,7 +23,10 @@ def build():
             {'name':'Upload actual PR snapshot authorization','uses':'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
              'with':{'name':'real-pr-snapshot-${{ github.run_id }}','path':'${{ runner.temp }}/real-pr-authorization.json',
                 'if-no-files-found':'error'}}]}
-    workflow['jobs']['ut-coverage-linux-x86']['runs-on']='cs-mty-node-cache-all'
+    # This acceptance must exercise BOTH newly prepared nodes. General PRs
+    # retain the demand label; deterministic validation avoids two groups being
+    # assigned to one node and waiting for its private-PVC capacity unnecessarily.
+    workflow['jobs']['ut-coverage-linux-x86']['runs-on']="${{ matrix.group == 0 && 'cs-mty-nc-n0-pr-v1' || 'cs-mty-nc-n1-pr-v1' }}"
     workflow['jobs']['merge-coverage-groups']['needs']=['check_coverage_eligibility','ut-coverage-linux-x86']
     replacements={'github.event.pull_request.head.repo.full_name':'needs.check_coverage_eligibility.outputs.head_repository',
         'github.event.pull_request.head.sha':'needs.check_coverage_eligibility.outputs.head_sha',

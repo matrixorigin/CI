@@ -40,7 +40,7 @@ class CurrentPR(unittest.TestCase):
     def test_validation_inherits_full_two_group_consumer_without_precompile_or_fake_pr_event(self):
         w=workflow.build();job=w['jobs']['ut-coverage-linux-x86']
         self.assertEqual(set(w['on']['workflow_call']['inputs']),{'pr_number','expected_head_sha'})
-        self.assertEqual(job['runs-on'],'cs-mty-node-cache-all')
+        self.assertEqual(job['runs-on'],"${{ matrix.group == 0 && 'cs-mty-nc-n0-pr-v1' || 'cs-mty-nc-n1-pr-v1' }}")
         self.assertEqual(job['strategy'],{'fail-fast':False,'max-parallel':2,'matrix':{'group':[0,1]}})
         self.assertNotIn('concurrency',w);self.assertNotIn('concurrency',job)
         source=next(s for s in job['steps'] if s.get('name')=='Checkout MatrixOne source')

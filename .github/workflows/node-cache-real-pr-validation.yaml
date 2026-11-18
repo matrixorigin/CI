@@ -51,7 +51,7 @@ jobs:
     - check_coverage_eligibility
     if: ${{ needs.check_coverage_eligibility.outputs.allowed == 'true' }}
     environment: ci
-    runs-on: cs-mty-node-cache-all
+    runs-on: ${{ matrix.group == 0 && 'cs-mty-nc-n0-pr-v1' || 'cs-mty-nc-n1-pr-v1' }}
     timeout-minutes: 320
     steps:
     - name: Install CS runner build dependencies

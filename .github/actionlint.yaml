@@ -3,6 +3,8 @@ self-hosted-runner:
     - cs-large-7c14g
     - cs-node-cache-7c14g
     - cs-mty-node-cache-all
+    - cs-mty-nc-n0-pr-v1
+    - cs-mty-nc-n1-pr-v1
     - amd64-mo-shanghai-8c16g
     - amd64-mo-guangzhou-2xlarge16
     - amd64-mo-guangzhou-2xlarge32
