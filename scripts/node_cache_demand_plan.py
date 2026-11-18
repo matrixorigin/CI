@@ -7,6 +7,7 @@ import copy
 
 import incremental_cache as c
 import node_cache_demand_fleet as demand
+import node_compile_cache as cache
 
 ENVIRONMENTS=('mty','jed','ruh','mnl2')
 NODES=tuple(f'mo-standard-{i}' for i in range(3))
@@ -31,3 +32,28 @@ def plan(catalog,policy,original,storage_class,work_size_gib=128):
         result.append(demand.pool(local,binding,original,storage_class,work_size_gib))
     c.require(len({x['metadata']['name'] for x in result})==3,'node pool identities collide')
     return result
+
+
+def staged_plan(catalog,policy,original,storage_class,ready_nodes,observed_cpus,work_size_gib=128):
+    """Explicit partial rollout; unready nodes remain targets, never block peers.
+
+    This is only a proposal. The protected caller must authenticate the catalog
+    and fresh CPU census, then recheck live resources before each new pool. A
+    count of prepared nodes is NOT a min/max runner setting or fleet capacity.
+    """
+    c.require(isinstance(ready_nodes,(list,tuple)) and ready_nodes and
+        len(set(ready_nodes))==len(ready_nodes) and set(ready_nodes)<=set(NODES),
+        'explicit unique ready-node rollout scope required')
+    c.require(set(observed_cpus)==set(NODES),'complete observed CPU inventory required')
+    resources=plan(catalog,policy,original,storage_class,work_size_gib)
+    env=policy['environment']
+    for node in ready_nodes:
+        binding=next(b for b in catalog['nodes'] if (b['environment'],b['node'])==(env,node))
+        entries=cache.catalog_for_node(catalog,binding)['entries']
+        exact=[e for e in entries if e['runtime']['cpu']==observed_cpus[node]]
+        c.require(exact and any(e.get('native_manifests') for e in exact),
+            'ready node lacks published exact-CPU compilation/native generation')
+    return {'environment':env,'target_nodes':list(NODES),'ready_nodes':list(ready_nodes),
+        'pending_nodes':[n for n in NODES if n not in ready_nodes],
+        'resources':[r for r in resources if r['spec']['template']['spec']['nodeSelector']['kubernetes.io/hostname'] in ready_nodes],
+        'runner_count_cap':None,'cluster_writes':0,'live_capacity_accepted':False}

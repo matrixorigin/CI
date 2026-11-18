@@ -37,5 +37,30 @@ class AllNodePlan(unittest.TestCase):
             if fault=='entries':cat['entries']=[]
             with self.subTest(fault=fault),self.assertRaises(ValueError):p.plan(cat,policy,old,sc)
 
+    def test_explicit_node0_node1_rollout_preserves_node2_target_without_count_cap(self):
+        cat,policy,old,sc=self.fixture()
+        by_node={n:next(e['runtime']['cpu'] for e in p.cache.catalog_for_node(cat,
+            next(b for b in cat['nodes'] if (b['environment'],b['node'])==('mty',n)))['entries']) for n in p.NODES}
+        for e in cat['entries']:
+            if e['runtime']['environment']=='mty':e['native_manifests']={'a'*64:'b'*64}
+        before=copy.deepcopy((cat,policy,old,sc))
+        result=p.staged_plan(cat,policy,old,sc,['mo-standard-0','mo-standard-1'],by_node)
+        self.assertEqual(result['pending_nodes'],['mo-standard-2'])
+        self.assertEqual(result['target_nodes'],list(p.NODES))
+        self.assertEqual(len(result['resources']),2)
+        self.assertIsNone(result['runner_count_cap'])
+        self.assertFalse(result['live_capacity_accepted'])
+        for resource in result['resources']:
+            self.assertNotIn('maxRunners',resource['spec']);self.assertNotIn('minRunners',resource['spec'])
+        self.assertEqual((cat,policy,old,sc),before)
+
+    def test_staged_rollout_cannot_route_unpublished_or_mismatched_cpu(self):
+        cat,policy,old,sc=self.fixture()
+        by_node={n:{} for n in p.NODES}
+        for nodes in ([],['mo-standard-0','mo-standard-0'],['other'],['mo-standard-1']):
+            with self.subTest(nodes=nodes),self.assertRaises(ValueError):
+                p.staged_plan(cat,policy,old,sc,nodes,by_node)
+        with self.assertRaises(ValueError):p.staged_plan(cat,policy,old,sc,['mo-standard-0'],{})
+
 
 if __name__=='__main__':unittest.main()
