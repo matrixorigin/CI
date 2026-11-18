@@ -93,10 +93,22 @@ def subset(want,got):
     return want==got
 
 
+def checked_helper_spec(expected,actual):
+    """Allow only Kubernetes' two standard admission-added tolerations."""
+    import copy
+    actual=copy.deepcopy(actual)
+    defaults=[{'effect':'NoExecute','key':key,'operator':'Exists','tolerationSeconds':300}
+              for key in ('node.kubernetes.io/not-ready','node.kubernetes.io/unreachable')]
+    tolerations=actual.get('tolerations',[])
+    for value in defaults:
+        if value in tolerations:tolerations.remove(value)
+    return subset(expected,actual)
+
+
 def run(policy,catalog,lock,config,directory,api=n.legacy.api):
     c.require(not directory.exists(), 'replication intent exists; reconcile without retry')
     directory.mkdir();report=directory/'state.json'
-    env=policy['environment'];cm=f'cs-{env}-cache-replication-v1'
+    env=policy['environment'];cm=f'cs-{env}-cache-replication-v2'
     source=next(x for x in catalog['nodes'] if x['environment']==env and x['node']=='mo-standard-0')
     state={'environment':env,'complete':False,'compiler_invocations':0,'created':[],'deleted':[],
            'started_at':pub.now().isoformat(),'targets':{},'automatic_retry':False}
@@ -125,7 +137,7 @@ def run(policy,catalog,lock,config,directory,api=n.legacy.api):
             c.require(pod['metadata']['uid']==row['uid'] and not pod['metadata'].get('deletionTimestamp'),'helper identity changed')
             if pod['status'].get('phase')=='Running' and any(x['type']=='Ready' and x['status']=='True' for x in pod['status'].get('conditions',[])):
                 c.require(pod['spec']['nodeName']==node and pod['spec'].get('automountServiceAccountToken') is False,'helper node differs')
-                c.require(not pod['metadata'].get('ownerReferences') and subset(helper(name,node,claim,cm,readonly)['spec'],pod['spec']), 'helper template or readonly mount differs')
+                c.require(not pod['metadata'].get('ownerReferences') and checked_helper_spec(helper(name,node,claim,cm,readonly)['spec'],pod['spec']), 'helper template or readonly mount differs')
                 return pod
             c.require(pod['status'].get('phase') not in ('Failed','Succeeded'),'helper exited')
             time.sleep(3)

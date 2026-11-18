@@ -133,5 +133,19 @@ class ControllerGuard(unittest.TestCase):
             changed=copy.deepcopy(spec);changed['containers'][0]['image']='other'
             self.assertFalse(r.subset(spec,changed))
 
+    def test_exact_admission_defaults_allowed_without_weakening_template(self):
+        expected=r.helper('helper','mo-standard-0','cache','config',True)['spec']
+        actual=copy.deepcopy(expected)
+        actual['tolerations'] += [{'effect':'NoExecute','key':key,'operator':'Exists','tolerationSeconds':300}
+            for key in ('node.kubernetes.io/not-ready','node.kubernetes.io/unreachable')]
+        self.assertTrue(r.checked_helper_spec(expected,actual))
+        self.assertEqual(len(actual['tolerations']),3)
+        bad=copy.deepcopy(actual);bad['tolerations'][-1]['tolerationSeconds']=999
+        self.assertFalse(r.checked_helper_spec(expected,bad))
+        bad=copy.deepcopy(actual);bad['containers'][0]['volumeMounts'][0]['readOnly']=False
+        self.assertFalse(r.checked_helper_spec(expected,bad))
+        bad=copy.deepcopy(actual);bad['tolerations'].append({'operator':'Exists'})
+        self.assertFalse(r.checked_helper_spec(expected,bad))
+
 
 if __name__=='__main__':unittest.main()
