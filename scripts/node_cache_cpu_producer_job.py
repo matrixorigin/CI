@@ -35,7 +35,8 @@ def preflight(state, catalog, node, tools, revision):
                              {k: v for k, v in current.items() if k != 'cpu'} for e in parents),
               'CPU producer changed non-CPU ABI/tools/paths')
     return {'source': revision, 'node': node, 'cpu_sha256': PROFILES[node], 'binding': binding,
-            'non_cpu_runtime_unchanged': True, 'external_tool_downloads': 0,
+            'non_cpu_runtime_unchanged': True, 'persistent_tool_restore_downloads': 0,
+            'job_wide_zero_tool_downloads_claimed': False,
             'shared_cache_writes': 0, 'ut_execution': False, 'catalog_activated': False}
 
 

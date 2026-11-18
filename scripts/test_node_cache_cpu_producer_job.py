@@ -34,6 +34,8 @@ class ProducerJob(unittest.TestCase):
                 else:
                     proof = p.preflight(local, {}, 'mo-standard-1', t, revision)
                     self.assertFalse(proof['ut_execution']); self.assertEqual(proof['shared_cache_writes'], 0)
+                    self.assertEqual(proof['persistent_tool_restore_downloads'], 0)
+                    self.assertFalse(proof['job_wide_zero_tool_downloads_claimed'])
 
     def test_compile_contract_requires_all_packages_and_own_native(self):
         contract = {'full_packages': ['p']*505, 'coverpkg': ['c']*484}
