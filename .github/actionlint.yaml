@@ -2,6 +2,7 @@ self-hosted-runner:
   labels:
     - cs-large-7c14g
     - cs-node-cache-7c14g
+    - cs-mty-node-cache-all
     - amd64-mo-shanghai-8c16g
     - amd64-mo-guangzhou-2xlarge16
     - amd64-mo-guangzhou-2xlarge32
@@ -14,6 +15,11 @@ self-hosted-runner:
     - mac-arm64-mini
 
 paths:
+  .github/workflows/node-cache-real-pr-validation.yaml:
+    ignore:
+      # Same documented GitHub.com reusable-job contexts as the PR consumer;
+      # actionlint v1.7.12 predates them. No other expressions are suppressed.
+      - 'property "workflow_(repository|sha)" is not defined'
   .github/workflows/coverage-node-cache-pr.yaml:
     ignore:
       # Documented GitHub.com reusable-workflow identity; installed linter
