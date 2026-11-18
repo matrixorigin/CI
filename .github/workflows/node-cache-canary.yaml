@@ -9,6 +9,46 @@ permissions:
   contents: read
 
 jobs:
+  toolchain-transport:
+    if: github.event_name == 'push' && github.repository == 'matrixorigin/CI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - uses: matrixorigin/CI/actions/setup-cmake@37298579134ab5ce90a4a4df5a40d6e6ed393ebf
+        with:
+          cmake: '3.17.2'
+          ninja: '1.9.0'
+      - id: pack
+        name: Verify actual tools match reviewed runtime and package
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/tools-stage"
+          cp -a "$(go env GOROOT)" "$RUNNER_TEMP/tools-stage/go"
+          cmake_root=$(dirname "$(dirname "$(readlink -f "$(command -v cmake)")")")
+          cp -a "$cmake_root" "$RUNNER_TEMP/tools-stage/cmake"
+          python3 scripts/node_cache_toolchain.py pack --catalog config/node-compile-cache-catalog.json --root "$RUNNER_TEMP/tools-stage" --archive "$RUNNER_TEMP/toolchain.tar.gz"
+      - name: Independently verify and unpack actual tool archive
+        env:
+          TOOLCHAIN_SHA: ${{ steps.pack.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          PYTHONPATH=scripts python3 -c 'import os; from pathlib import Path; import node_cache_toolchain as t; r=Path(os.environ["RUNNER_TEMP"]); t.unpack(r/"toolchain.tar.gz",os.environ["TOOLCHAIN_SHA"],r/"tools-restored",Path("config/node-compile-cache-catalog.json"))'
+          "$RUNNER_TEMP/tools-restored/go/bin/go" version
+          "$RUNNER_TEMP/tools-restored/cmake/bin/cmake" --version
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: reviewed-toolchain-contract-${{ github.run_id }}
+          path: ${{ runner.temp }}/toolchain.tar.gz
+          if-no-files-found: error
+          retention-days: 7
   incremental-contract:
     # Deliberately GitHub-hosted: no CS runner, PVC, S3 or cluster credentials.
     runs-on: ubuntu-latest
