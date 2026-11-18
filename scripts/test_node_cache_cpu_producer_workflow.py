@@ -43,7 +43,10 @@ class Workflow(unittest.TestCase):
         self.assertIn('node_cache_cpu_producer_job.py freeze', runs)
         self.assertIn('--full "$RUNNER_TEMP/coverage-full-scope.txt"', runs)
         self.assertNotIn('go test ', runs)
-        self.assertNotIn('apt-get', runs)
+        bootstrap = [s for s in job['steps'] if 'apt-get' in s.get('run', '')]
+        self.assertEqual(len(bootstrap), 1)
+        self.assertIn('build-essential cmake pkg-config python3 python-is-python3', bootstrap[0]['run'])
+        self.assertIn('job_wide_zero_tool_downloads_claimed:false', bootstrap[0]['run'])
         self.assertIn('--destination "$RUNNER_TEMP/node-toolchain-install"', runs)
         token_steps = [s for s in job['steps'] if 'CS_CACHE_READ_TOKEN' in s.get('env', {})]
         self.assertEqual(len(token_steps), 1)
