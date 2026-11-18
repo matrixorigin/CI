@@ -105,10 +105,33 @@ def checked_helper_spec(expected,actual):
     return subset(expected,actual)
 
 
-def run(policy,catalog,lock,config,directory,api=n.legacy.api):
+def stream_transfer(source_command,target_command,timeout=3700):
+    """Bounded pipe, no whole archive on the controller's filesystem."""
+    source=target=None;started=time.monotonic()
+    try:
+        source=subprocess.Popen(source_command,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        target=subprocess.Popen(target_command,stdin=source.stdout,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        source.stdout.close()
+        output,errors=target.communicate(timeout=timeout)
+        c.require(target.returncode==0 and len(output)<1024**2,'target stream stopped; preserve partial data')
+        source.wait(timeout=max(1,timeout-(time.monotonic()-started)))
+        c.require(source.returncode==0,'source stream stopped; target must not be admitted')
+        return json.loads(output)
+    finally:
+        # Only subprocesses created in this function, never cluster/test jobs.
+        for process in (target,source):
+            if process is not None and process.poll() is None:
+                process.kill();process.wait(timeout=10)
+        for process in (target,source):
+            if process is not None:
+                for pipe in (process.stdout,process.stderr):
+                    if pipe is not None and not pipe.closed:pipe.close()
+
+
+def run(policy,catalog,lock,config,directory,api=n.legacy.api,cleanup=None):
     c.require(not directory.exists(), 'replication intent exists; reconcile without retry')
     directory.mkdir();report=directory/'state.json'
-    env=policy['environment'];cm=f'cs-{env}-cache-replication-v2'
+    env=policy['environment'];cm=f'cs-{env}-cache-replication-v3'
     source=next(x for x in catalog['nodes'] if x['environment']==env and x['node']=='mo-standard-0')
     state={'environment':env,'complete':False,'compiler_invocations':0,'created':[],'deleted':[],
            'started_at':pub.now().isoformat(),'targets':{},'automatic_retry':False}
@@ -156,6 +179,23 @@ def run(policy,catalog,lock,config,directory,api=n.legacy.api):
         tools.authorize(lock,api(f'repos/{lock["producer"]["repository"]}/actions/runs/{lock["producer"]["id"]}'),
                         api(f'repos/{lock["producer"]["repository"]}/actions/artifacts/{lock["artifact"]["id"]}'))
         state['provenance_verified_before_write']=True
+        if cleanup is not None:
+            c.require(cleanup['environment']==env and cleanup['targets']=={} and cleanup['complete'] is False
+                      and cleanup['failure_sites'][-1]=={'file':'node_cache_replicate_control.py','line':175}
+                      and [x['kind'] for x in cleanup['created']]==['ConfigMap','Pod']
+                      and 'pending_create' not in cleanup,'unapproved previous-source cleanup')
+            row=cleanup['created'][1];old_cm=f'cs-{env}-cache-replication-v2'
+            c.require(row['name']==old_cm+'-source','old helper name differs')
+            snapshot_guard(policy,snap('mo-standard-0'),'mo-standard-0',owned=[row['uid']])
+            old=call(['get','pod',row['name'],'-n','cicd','-o','json'])
+            c.require(old['metadata']['uid']==row['uid'] and not old['metadata'].get('ownerReferences')
+                      and checked_helper_spec(helper(row['name'],'mo-standard-0',policy['name'],old_cm,True)['spec'],old['spec']), 'old readonly helper identity differs')
+            call(['delete','--raw','/api/v1/namespaces/cicd/pods/'+row['name'],'-f','-'],
+                 {'apiVersion':'v1','kind':'DeleteOptions','preconditions':{'uid':row['uid']},'gracePeriodSeconds':1})
+            deadline=time.monotonic()+120
+            while call(['get','pod',row['name'],'-n','cicd','--ignore-not-found','-o','json']) is not None:
+                c.require(time.monotonic()<deadline,'old helper cleanup not yet confirmed');time.sleep(2)
+            state['previous_readonly_helper_deleted']=row;journal()
         baselines={}
         for node in policy['node_uids']:
             baselines[node]=snapshot_guard(policy,snap(node),node,allocate=node!='mo-standard-0')
@@ -171,13 +211,8 @@ def run(policy,catalog,lock,config,directory,api=n.legacy.api):
         create({'apiVersion':'v1','kind':'ConfigMap','immutable':True,'metadata':{'name':cm,'namespace':'cicd'},'data':data})
         source_pod=cm+'-source';create(helper(source_pod,'mo-standard-0',policy['name'],cm,True));wait_pod(source_pod,'mo-standard-0',policy['name'],True)
         plan=call(exec_args(source_pod,'plan'));payload=replication.expected_files(plan,catalog,source,lock)
-        bytes_needed=sum(x[0]+1024 for x in payload.values())+len(c.canonical(plan))+10240
-        c.require(shutil.disk_usage(directory).free>=bytes_needed+20*c.GIB,'controller transfer disk reserve')
-        bundle=directory/'reviewed-cache.tar';state['export_started_at']=pub.now().isoformat();journal()
-        with bundle.open('xb') as out:
-            proc=subprocess.run(cmd(exec_args(source_pod,'export')),stdout=out,stderr=subprocess.PIPE,timeout=3700)
-        c.require(proc.returncode==0 and bundle.stat().st_size<=bytes_needed,'source export failed or oversized')
-        state['export']={'bytes':bundle.stat().st_size,'sha256':c.digest(bundle),'completed_at':pub.now().isoformat()};journal()
+        state['payload']={'bytes':sum(x[0] for x in payload.values()),'files':len(payload),
+                          'streamed':True,'controller_archive_bytes':0};journal()
         for number in (1,2):
             node=f'mo-standard-{number}';claim=f'cs-{env}-incremental-n{number}-v1';pod=cm+f'-n{number}'
             owned=[x['uid'] for x in state['created'] if x['kind']=='Pod']
@@ -204,10 +239,8 @@ def run(policy,catalog,lock,config,directory,api=n.legacy.api):
             state['targets'][node]={'claim':claim,'binding':target,'started_at':pub.now().isoformat()};journal()
             owned=[x['uid'] for x in state['created'] if x['kind']=='Pod']
             snapshot_guard(policy,snap(node),node,owned,baselines[node]['workloads'])
-            with bundle.open('rb') as incoming:
-                proc=subprocess.run(cmd(exec_args(pod,'receive',target)),stdin=incoming,capture_output=True,text=True,timeout=3700)
-            c.require(proc.returncode==0,'target transfer stopped; preserve partial data without retry')
-            state['targets'][node]['received']=json.loads(proc.stdout);journal()
+            state['targets'][node]['received']=stream_transfer(cmd(exec_args(source_pod,'export')),cmd(exec_args(pod,'receive',target)))
+            journal()
             result=call(exec_args(pod,'verify',target));c.require(result['success'] and result['compiler_invocations']==0,'independent target verification failed')
             state['targets'][node]['verify']=result;state['targets'][node]['completed_at']=pub.now().isoformat();journal()
         owned=[x['uid'] for x in state['created'] if x['kind']=='Pod']
@@ -242,9 +275,11 @@ def run(policy,catalog,lock,config,directory,api=n.legacy.api):
 if __name__=='__main__':
     parser=argparse.ArgumentParser()
     for name in ('policy','catalog','lock','kubeconfig','directory'):parser.add_argument('--'+name,type=Path,required=True)
+    parser.add_argument('--cleanup-approved',type=Path)
     args=parser.parse_args()
     try:
-        result=run(c.read_json(args.policy),c.read_json(args.catalog),c.read_json(args.lock),args.kubeconfig,args.directory)
+        result=run(c.read_json(args.policy),c.read_json(args.catalog),c.read_json(args.lock),args.kubeconfig,args.directory,
+                   cleanup=c.read_json(args.cleanup_approved) if args.cleanup_approved else None)
         print(json.dumps({'complete':result['complete'],'environment':result['environment'],'compiler_invocations':0}))
     except Exception as error:
         print(json.dumps({'complete':False,'error_type':type(error).__name__,'automatic_retry':False}));raise SystemExit(1)

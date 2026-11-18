@@ -4,6 +4,8 @@ import unittest
 from unittest.mock import patch
 import json
 import subprocess
+import io
+import sys
 
 import node_cache_replicate_control as r
 from test_node_cache_publish_control import fixture, NOW, U
@@ -71,7 +73,8 @@ class ControllerGuard(unittest.TestCase):
             else:raise AssertionError(args)
             return subprocess.CompletedProcess(command,0,'' if result is None else json.dumps(result),'')
         with patch.object(r.subprocess,'run',side_effect=call),patch.object(r.pub,'now',return_value=NOW), \
-             patch.object(r.n,'reviewed_entries',side_effect=lambda catalog,runtime,api:catalog['entries']),patch.object(r.tools,'authorize'):
+             patch.object(r.n,'reviewed_entries',side_effect=lambda catalog,runtime,api:catalog['entries']),patch.object(r.tools,'authorize'), \
+             patch.object(r,'stream_transfer',side_effect=lambda source,target:json.loads(call(target,stdin=io.BytesIO(data.bundle())).stdout)):
             result=r.run(policy,data.catalog,data.lock,'config',data.root/'controller',api=lambda path:{})
         self.assertTrue(result['complete']);self.assertTrue(result['helper_pods_absent'])
         self.assertEqual(len(result['targets']),2);self.assertEqual(len(result['deleted']),3)
@@ -80,6 +83,20 @@ class ControllerGuard(unittest.TestCase):
         self.assertTrue(all(kind=='Pod' for verb,kind,name in mutations if verb=='delete'))
         self.assertIn(('pvc',policy['name']),live)
         self.assertEqual(result['compiler_invocations'],0)
+        self.assertEqual(result['payload']['controller_archive_bytes'],0)
+
+    def test_real_bounded_pipe_uses_no_archive_file(self):
+        source=[sys.executable,'-c','import sys;sys.stdout.buffer.write(b"x"*1048576)']
+        target=[sys.executable,'-c','import sys,json,hashlib;data=sys.stdin.buffer.read();print(json.dumps({"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()}))']
+        result=r.stream_transfer(source,target,timeout=10)
+        self.assertEqual(result['bytes'],1048576)
+
+    def test_pipe_failure_is_not_accepted(self):
+        for source,target in [([sys.executable,'-c','raise SystemExit(2)'],
+                               [sys.executable,'-c','import sys;sys.stdin.buffer.read();print("{}")']),
+                              ([sys.executable,'-c','import sys;sys.stdout.buffer.write(b"x"*1048576)'],
+                               [sys.executable,'-c','raise SystemExit(3)'])]:
+            with self.assertRaises(ValueError):r.stream_transfer(source,target,timeout=10)
 
     def test_small_copy_pod_guard_is_not_a_ut_runner_gate(self):
         policy,snapshot=fixture()
