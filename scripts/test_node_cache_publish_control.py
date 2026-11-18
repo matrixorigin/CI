@@ -144,18 +144,21 @@ class ControlTest(unittest.TestCase):
 
     def test_separately_verified_listener_uid_cannot_be_replaced(self):
         policy,s=fixture()
-        pod={'metadata':{'name':'own-listener','namespace':'cicd','uid':'exact-listener-uid',
+        pod={'metadata':{'name':'own-listener','namespace':'cicd','uid':U,
              'ownerReferences':[{'kind':'AutoscalingListener'}]},
              'spec':{'nodeName':policy['node'],'containers':[{'resources':{}}]},
              'status':{'phase':'Running','conditions':[{'type':'Ready','status':'True'}],
                        'containerStatuses':[{'restartCount':0}]}}
         policy['workloads']=[p.workload(pod)];s['pods']['items']=[pod]
-        policy['verified_workload_uids']={'cicd/own-listener':'exact-listener-uid'}
+        policy['verified_workload_uids']={'cicd/own-listener':U}
         p.guard(policy,s,at=NOW)
         pod['metadata']['uid']='replacement'
         with self.assertRaisesRegex(ValueError,'verified workload identity changed'):p.guard(policy,s,at=NOW)
         policy['verified_workload_uids']={'cicd/not-in-baseline':'other'}
         with self.assertRaisesRegex(ValueError,'verified workload inventory differs'):p.guard(policy,s,at=NOW)
+        for invalid in (None,'',123,'not-a-uid'):
+            policy['verified_workload_uids']={'cicd/own-listener':invalid}
+            with self.assertRaisesRegex(ValueError,'verified workload inventory differs'):p.guard(policy,s,at=NOW)
 
     def test_bound_identity_multilabel_topology(self):
         policy,s=fixture();cm,pvc,pod=p.objects(policy,{})

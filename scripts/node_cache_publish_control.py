@@ -100,7 +100,9 @@ def guard(policy,snapshot,own_uid=None,after_allocation=False,at=None):
                   for d in snapshot['drives']['items']),'physical disk reserve')
     baseline={(x['namespace'],x['name']):x for x in policy['workloads']};seen=set();cpu=1.;memory=c.GIB;init_counts={}
     verified=policy.get('verified_workload_uids',{})
-    c.require(isinstance(verified,dict) and set(verified)<={'/'.join(k) for k in baseline},
+    c.require(isinstance(verified,dict) and set(verified)<={'/'.join(k) for k in baseline} and
+              all(isinstance(uid,str) and re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}',uid)
+                  for uid in verified.values()),
               'verified workload inventory differs')
     for pod in snapshot['pods']['items']:
         status=pod.get('status',{})

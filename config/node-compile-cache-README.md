@@ -5,9 +5,10 @@
 The legacy reviewed archive remains unchanged and opt-out behavior is preserved.
 `coverage-ut.yaml` adds `node_compile_cache: false` by default. When enabled it
 uses **new** `cs-<environment>-node-cache-7c14g` pools, not the original pool.
-The node-cache catalog is intentionally empty until real node bindings and
-producer evidence have been reviewed. No stack or production caller is enabled
-by this change.
+The experimental catalog contains independently reviewed node-zero bindings
+for MTY, MNL2, JED and RUH. Only their new isolated fleets use this path; no
+original pool or production caller has been switched. Further nodes require
+their own reviewed bindings and publication receipts before activation.
 
 `incremental_cache.py` implements Go's GOCACHEPROG protocol. Go supplies the
 ActionID derived from source, dependencies, toolchain and build flags. The cache
@@ -94,10 +95,18 @@ staging. The existing publisher then copies new objects and publishes the index
 last. Generations have explicit reviewed node/PVC/PV `bindings`; an unpopulated
 node cold-builds instead of trying to load another node's absent index.
 
-Protected-cluster invocation, live catalog population and automatic promotion
-from successful trusted main-branch builds still require rollout wiring. The
-default workflow does not auto-publish unreviewed PR objects. This code is not
-evidence that all existing runner pools are live on this path.
+Protected-cluster initial publication and delta append now have separate
+guarded controllers. Each append rechecks the full old inventory, writes only
+new objects/indexes, independently verifies the result, and UID-deletes only
+its own temporary Pod. The wrapper checks the isolated fleet and accounts for
+its exact verified listener before a fresh append; a future partial operation
+requires a separate exact-resource review, never an automatic retry.
+
+Successful test artifacts are still only candidates: explicit review and
+publication must precede catalog activation. Automatic promotion from trusted
+main builds and original-pool rollout remain unfinished. The default workflow
+does not auto-publish unreviewed PR objects. This code is not evidence that all
+existing runners are live on this path.
 
 ## Validation and rollout boundary
 
