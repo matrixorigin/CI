@@ -152,13 +152,19 @@ def recovery_authority(approval,entry,name,api):
     return old
 
 
-def run(policy,catalog,lock,evidence,entry,base,config,directory,api=q.base.n.legacy.api,recovery=None):
+def run(policy,catalog,lock,evidence,entry,base,config,directory,api=q.base.n.legacy.api,recovery=None,operation=None):
     c.require(not directory.exists(),'CPU publication intent exists; reconcile, never retry')
-    binding,name=scope(policy,catalog,entry,base);node=binding['node']
+    # Default CPU-repair scope remains unchanged. A different protected
+    # operation must supply its own independently reviewed scope and copied
+    # base authentication; there is no CLI/user-input override of these hooks.
+    c.require(operation is None or recovery is None,'native recovery requires a separately reviewed design')
+    binding,name=(scope(policy,catalog,entry,base) if operation is None else operation.scope(policy,catalog,entry,base))
+    node=binding['node'];profiles=PROFILES if operation is None else operation.profiles
     directory.mkdir();state={'environment':'mty','node':node,'name':name,'complete':False,
         'created':[],'deleted':[],'automatic_retry':False,'started_at':initial.now().isoformat(),
         'compiler_invocations':0,'existing_cache_pvc_preserved':True,'catalog_activated':False,
-        'cpu_profile_sha256':PROFILES[node],'cpu_inventory_run':CPU_RUN,'targets':{}}
+        'cpu_profile_sha256':profiles[node],'cpu_inventory_run':CPU_RUN,'targets':{}}
+    if operation is not None:state.update(native_only=True,native_key=next(iter(entry['native_manifests'])),source=entry['source'])
     session=q.Session(policy,config,state,directory/'state.json')
     try:
         if recovery is not None:
@@ -167,7 +173,10 @@ def run(policy,catalog,lock,evidence,entry,base,config,directory,api=q.base.n.le
             state['adopted_resources']=copy.deepcopy(old['created'])
             state['recovery_of']={'run_id':recovery['run_id'],'canonical_report_sha256':recovery['canonical_report_sha256'],
                 'pre_stage_failure_only':True,'new_pvcs':0,'new_pods':0}
-        session.journal();q.authenticate(catalog,lock,evidence,'mty',api);cpu_authority(api);fresh(entry,base,api)
+        session.journal()
+        if operation is None:q.authenticate(catalog,lock,evidence,'mty',api)
+        else:operation.authenticate(catalog,lock,evidence,api)
+        cpu_authority(api);fresh(entry,base,api)
         state['provenance_verified_before_write']=True
         original=session.call(['get','autoscalingrunnerset','cs-mty-large-7c14g','-n','cicd','-o','json'])
         original_identity={'uid':original['metadata']['uid'],'spec_sha256':core.cache.hash_value(original['spec'])}

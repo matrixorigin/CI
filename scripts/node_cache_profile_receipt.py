@@ -13,16 +13,17 @@ import node_cache_profile_append as core
 import node_cache_profile_append_control as controller
 
 
-def verify(report, entry, base):
+def verify(report, entry, base,*,profiles=None):
+    profiles=controller.PROFILES if profiles is None else profiles
     core.check_approval(base, entry)
     binding=base['binding'];node=binding['node']
-    c.require(binding['environment']=='mty' and node in controller.PROFILES and
-        core.cpus.checked_cpu(entry['runtime']['cpu'])==controller.PROFILES[node],'CPU receipt scope differs')
+    c.require(binding['environment']=='mty' and node in profiles and
+        core.cpus.checked_cpu(entry['runtime']['cpu'])==profiles[node],'CPU receipt scope differs')
     expected=f"cs-mty-nc-profile-n{node[-1]}-{entry['producer']['id']}-{entry['artifact']['id']}"
     c.require(report['name']==expected and report['environment']=='mty' and report['node']==node and
         report['complete'] is True and report['automatic_retry'] is False and report['compiler_invocations']==0 and
         report['existing_cache_pvc_preserved'] is True and report['catalog_activated'] is False and
-        report['cpu_profile_sha256']==controller.PROFILES[node] and
+        report['cpu_profile_sha256']==profiles[node] and
         report['cpu_inventory_run']==controller.CPU_RUN and report['provenance_verified_before_write'] is True,
         'CPU receipt acceptance fields differ')
     c.require(not set(report)&{'pending_create','pending_delete','active_phase','error_type','failure_sites'},
@@ -54,7 +55,7 @@ def verify(report, entry, base):
                 value['old_metadata_preserved'] is True and value['independently_verified'] is True and
                 value['compatibility_aliases'] is False,'CPU publication removed/aliased old metadata')
     added=report['append']
-    c.require(added['cpu_profile_sha256']==controller.PROFILES[node] and
+    c.require(added['cpu_profile_sha256']==profiles[node] and
         added['new_bytes']>=0 and added['existing_bytes']>=0,'CPU content-addressed publication counters differ')
     c.require(set(report['preflight'])==set(report['postflight'])=={'mo-standard-0','mo-standard-1','mo-standard-2'},
         'CPU all-node resource proof incomplete')
