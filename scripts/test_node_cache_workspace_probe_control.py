@@ -68,6 +68,16 @@ class ProbeChecks(unittest.TestCase):
         policy,snap=self.snapshot();result=q.admission(policy,snap,'mo-standard-0',new_claims=2,new_pods=2)
         self.assertEqual(result['planned_private_claims'],2);self.assertEqual(result['storage_class_uid'],'class-uid')
 
+    def test_existing_workspaces_keep_twenty_gib_but_new_claims_need_full_reservation(self):
+        policy,snap=self.snapshot()
+        snap['drives']['items'][0]['status']['freeCapacity']=24*q.c.GIB
+        q.admission(policy,snap,'mo-standard-0')
+        with self.assertRaises(ValueError):q.admission(policy,snap,'mo-standard-0',new_claims=1,new_pods=1)
+        # The old copy default remains 64Gi, and even retirement may not bypass20Gi.
+        with self.assertRaises(ValueError):q.base.snapshot_guard(policy,snap,'mo-standard-0')
+        snap['drives']['items'][0]['status']['freeCapacity']=19*q.c.GIB
+        with self.assertRaises(ValueError):q.admission(policy,snap,'mo-standard-0')
+
     def test_space_quota_actual_pressure_and_terminating_class_refused(self):
         for fault in ('space','quota','actual-memory','class','identity'):
             policy,snap=self.snapshot()
