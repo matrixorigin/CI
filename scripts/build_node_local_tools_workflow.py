@@ -27,6 +27,10 @@ python3 .ci-toolchain/scripts/node_cache_toolchain_store.py --catalog .ci-toolch
         'uses':'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
         'with':{'name':'persistent-tools-${{ inputs.node_cache_environment }}-${{ matrix.group }}-${{ github.run_id }}',
                 'path':'${{ runner.temp }}/persistent-toolchain.json','if-no-files-found':'ignore','retention-days':7}})
+    steps.append({'name':'Upload allowlisted early cache failure evidence','if':'failure()',
+        'uses':'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
+        'with':{'name':'cache-failure-${{ inputs.node_cache_environment }}-${{ matrix.group }}-${{ github.run_id }}',
+                'path':'${{ runner.temp }}/cs-node-cache/failure-reports/*.json','if-no-files-found':'ignore','retention-days':7}})
     return doc
 
 

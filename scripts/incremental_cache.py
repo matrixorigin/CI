@@ -117,6 +117,12 @@ def atomic_json(path, value):
 def failure_report(exc):
     """Allowlisted diagnostics only: never include exception text or locals."""
     codes = {
+        'node cache startup headroom below 60 GiB': 'startup_disk_reserve',
+        'node cache identity digest mismatch': 'node_identity_digest',
+        'runner identity differs from trusted binding': 'node_binding_mismatch',
+        'shared cache mount is not read-only': 'shared_mount_not_readonly',
+        'reviewed cache index digest mismatch': 'index_digest',
+        'cache runtime mismatch': 'runtime_mismatch',
         'cache disk reserve reached': 'disk_reserve',
         'compile reserve reached': 'compile_reserve',
         'incremental compile failed': 'compile_exit',
