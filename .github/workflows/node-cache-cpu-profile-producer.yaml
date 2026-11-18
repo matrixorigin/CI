@@ -1,0 +1,149 @@
+name: Dedicated missing-CPU compile-only producer (not PR UT)
+on:
+  workflow_call:
+    inputs:
+      node:
+        type: string
+        required: true
+    secrets:
+      CS_COVERAGE_CACHE_READ_TOKEN:
+        required: false
+permissions:
+  contents: read
+  actions: read
+jobs:
+  authorize:
+    if: github.repository == 'matrixorigin/matrixone' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/weilu-runner-test' && github.actor == 'Ariznawlll' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    outputs:
+      route: ${{ steps.scope.outputs.route }}
+    steps:
+      - id: scope
+        env:
+          NODE: ${{ inputs.node }}
+        run: |
+          set -euo pipefail
+          case "$NODE" in
+            mo-standard-1) echo 'route=cs-mty-cpu-producer-n1' >> "$GITHUB_OUTPUT" ;;
+            mo-standard-2) echo 'route=cs-mty-cpu-producer-n2' >> "$GITHUB_OUTPUT" ;;
+            *) exit 1 ;;
+          esac
+  compile-only:
+    needs: authorize
+    if: needs.authorize.outputs.route != ''
+    runs-on: ${{ needs.authorize.outputs.route }}
+    timeout-minutes: 100
+    env:
+      GOMAXPROCS: '7'
+      GOTOOLCHAIN: local
+      GOPROXY: https://goproxy.cn|https://proxy.golang.org|direct
+      CGO_ENABLED: '1'
+      GOFLAGS: ''
+      GOWORK: 'off'
+      COVERAGE_GROUP: '0'
+      CS_CACHE_SOURCE_REPOSITORY: matrixorigin/matrixone
+    steps:
+      - name: Require preinstalled build dependencies (no tool downloads)
+        run: |
+          set -euo pipefail
+          for tool in cc c++ make pkg-config python3 jq git; do command -v "$tool"; done
+          test "$CS_CACHE_ENV" = mty
+          test "$CS_CACHE_NODE" = '${{ inputs.node }}'
+          test "$CS_CACHE_EXPECTED_NODE" = '${{ inputs.node }}'
+      - name: Checkout fixed reviewed source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          repository: matrixorigin/matrixone
+          ref: dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca
+          persist-credentials: false
+      - name: Checkout immutable producer helpers and reviewed catalog
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          repository: matrixorigin/CI
+          ref: 8e7137a920066f03c7adc5b69051378e99d57cec
+          path: .ci-workflow
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+            config
+      - name: Restore verified tools from read-only node PVC
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          python3 .ci-workflow/scripts/node_cache_toolchain_store.py \
+            --catalog .ci-workflow/config/node-compile-cache-catalog.json \
+            --lock .ci-workflow/config/node-toolchain-lock.json \
+            --destination "$RUNNER_TEMP/node-toolchain-install" \
+            --report "$RUNNER_TEMP/persistent-toolchain.json"
+          for path in cs-buildcache-gomod cs-buildcache-go cs-node-cache cpu-profile-candidate; do
+            test ! -e "$RUNNER_TEMP/$path"
+          done
+          echo "GOMODCACHE=$RUNNER_TEMP/cs-buildcache-gomod" >> "$GITHUB_ENV"
+          echo "GOCACHE=$RUNNER_TEMP/cs-buildcache-go" >> "$GITHUB_ENV"
+      - name: Configure read-only cache and require ONLY the observed CPU difference
+        timeout-minutes: 5
+        env:
+          CS_CACHE_READ_TOKEN: ${{ secrets.CS_COVERAGE_CACHE_READ_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          python3 .ci-workflow/scripts/node_compile_cache.py configure \
+            --catalog .ci-workflow/config/node-compile-cache-catalog.json
+          python3 .ci-workflow/scripts/node_cache_cpu_producer_job.py preflight \
+            --state "$RUNNER_TEMP/cs-node-cache/state.json" \
+            --catalog .ci-workflow/config/node-compile-cache-catalog.json
+      - name: Discover the complete fixed-source compilation scope
+        timeout-minutes: 31
+        run: |
+          set -euo pipefail
+          timeout --kill-after=30s 900s go list -mod=readonly ./... > "$RUNNER_TEMP/cpu-producer-packages.txt"
+          grep -v 'driver\|engine/aoe\|engine/memEngine\|pkg/catalog' \
+            "$RUNNER_TEMP/cpu-producer-packages.txt" > "$RUNNER_TEMP/coverage-full-scope.txt"
+          timeout --kill-after=30s 900s go build -o "$RUNNER_TEMP/compact-coverage-profile" \
+            .ci-workflow/scripts/compact_coverage_profile.go
+          "$RUNNER_TEMP/compact-coverage-profile" -packages \
+            < "$RUNNER_TEMP/coverage-full-scope.txt" > "$RUNNER_TEMP/coverage-instrumented-scope.txt"
+      - name: Build own exact-CPU native outputs privately
+        timeout-minutes: 31
+        run: |
+          set -euo pipefail
+          timeout --kill-after=30s 1800s python3 .ci-workflow/scripts/node_compile_cache.py prepare-native \
+            --state "$RUNNER_TEMP/cs-node-cache/state.json" > "$RUNNER_TEMP/cpu-producer-native.log" 2>&1
+          native_id=$(jq -er '.native_output_sha256 | select(test("^[0-9a-f]{64}$"))' "$RUNNER_TEMP/cs-node-cache/native-result.json")
+          echo "CGO_CFLAGS=-I${GITHUB_WORKSPACE}/cgo -I${GITHUB_WORKSPACE}/thirdparties/install/include -DMO_NATIVE_CACHE_${native_id}=1" >> "$GITHUB_ENV"
+          echo "CGO_LDFLAGS=-L${GITHUB_WORKSPACE}/cgo -lmo -Wl,-rpath,${GITHUB_WORKSPACE}/cgo -L${GITHUB_WORKSPACE}/thirdparties/install/lib -lusearch_c -Wl,-rpath,${GITHUB_WORKSPACE}/thirdparties/install/lib -lm" >> "$GITHUB_ENV"
+      - name: Freeze all-package compile-only profile (32-package batches, original 1800s coverage budget)
+        timeout-minutes: 62
+        run: |
+          set -euo pipefail
+          python3 .ci-workflow/scripts/node_cache_cpu_producer_job.py freeze \
+            --state "$RUNNER_TEMP/cs-node-cache/state.json" \
+            --full "$RUNNER_TEMP/coverage-full-scope.txt" \
+            --cover "$RUNNER_TEMP/coverage-instrumented-scope.txt" \
+            --destination "$RUNNER_TEMP/cpu-profile-candidate" > "$RUNNER_TEMP/cpu-producer-compile.log" 2>&1
+      - name: Upload UNPUBLISHED compile-only candidate for independent review
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cpu-profile-candidate-${{ inputs.node }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/cpu-profile-candidate/manifest.json
+            ${{ runner.temp }}/cpu-profile-candidate/index.json
+            ${{ runner.temp }}/cpu-profile-candidate/delta.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+      - name: Upload allowlisted producer evidence (not UT acceptance)
+        if: always() && !cancelled()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cpu-profile-evidence-${{ inputs.node }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/persistent-toolchain.json
+            ${{ runner.temp }}/cpu-producer-preflight.json
+            ${{ runner.temp }}/cs-node-cache/state.json
+            ${{ runner.temp }}/cs-node-cache/native-result.json
+            ${{ runner.temp }}/cs-node-cache/compile-phase-*.json
+            ${{ runner.temp }}/cs-node-cache/validation-failed.json
+            ${{ runner.temp }}/coverage-full-scope.txt
+            ${{ runner.temp }}/coverage-instrumented-scope.txt
+            ${{ runner.temp }}/cpu-producer-native.log
+            ${{ runner.temp }}/cpu-producer-compile.log
+          if-no-files-found: warn
