@@ -9,11 +9,12 @@ import copy
 
 import incremental_cache as c
 import node_cache_fleet_control as bounded
+import node_cache_private_work as private_work
 
 COMMON_ROUTE='cs-node-cache-7c14g'
 
 
-def pool(policy,binding,original):
+def pool(policy,binding,original,storage_class,work_size_gib=128):
     env=policy['environment'];node=policy['node']
     c.require(env in ('mty','jed','ruh','mnl2') and node in ('mo-standard-0','mo-standard-1','mo-standard-2'),
               'unapproved demand-driven node')
@@ -35,4 +36,7 @@ def pool(policy,binding,original):
     # No scale-set-name collision; common LABELS route across unique sets.
     c.require(name!=original['metadata']['name'] and
               COMMON_ROUTE not in original['spec'].get('runnerScaleSetLabels',[]), 'old route overlap')
+    # Never emit a demand-driven shared PR route with writable work on the node
+    # root. Storage admission is a per-Pod PVC request, not a runner-count cap.
+    spec['template']['spec']=private_work.apply(spec['template']['spec'],storage_class,work_size_gib)
     return result

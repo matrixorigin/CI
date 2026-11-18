@@ -49,5 +49,29 @@ class Proposal(unittest.TestCase):
                 if fault=='repeat':catalog=p.propose(catalog,receipts)
                 with self.assertRaises(AssertionError):p.propose(catalog,receipts)
 
+    def test_recovery_adopts_existing_claims_without_replacing_them(self):
+        catalog,receipts=self.fixture();row=receipts['jed']
+        first,second=copy.deepcopy(row['created'])
+        prior={'environment':'jed','compiler_invocations':0,'provenance_verified_before_write':True,
+            'created':[second],'adopted_resources':[first]}
+        row.update(created=[],deleted=[],adopted_resources=copy.deepcopy(prior['created']),resumed_chunk_run_id=17)
+        result=p.propose(catalog,receipts,{17:prior})
+        self.assertEqual(len(result['nodes']),12)
+        self.assertEqual(next(n['pvc_uid'] for n in result['nodes'] if n['environment']=='jed' and n['node']=='mo-standard-1'),first['uid'])
+        for fault in ('missing','replacement','cross-environment','adoption'):
+            bad=copy.deepcopy(prior);current=copy.deepcopy(receipts)
+            if fault=='replacement':bad['adopted_resources'][0]['uid']='changed'
+            if fault=='cross-environment':bad['environment']='ruh'
+            if fault=='adoption':current['jed']['adopted_resources']=[]
+            with self.subTest(fault=fault),self.assertRaises(AssertionError):
+                p.propose(catalog,current,{} if fault=='missing' else {17:bad})
+
+    def test_direct_adoption_is_validated_not_assumed(self):
+        catalog,receipts=self.fixture();row=receipts['mnl2']
+        row['adopted_resources']=[row['created'].pop(0)]
+        self.assertEqual(len(p.propose(catalog,receipts)['nodes']),12)
+        row['adopted_resources'][0]['uid']='changed'
+        with self.assertRaises(AssertionError):p.propose(catalog,receipts)
+
 
 if __name__=='__main__':unittest.main()

@@ -9,7 +9,7 @@ import hashlib
 import json
 
 
-def propose(catalog,receipts):
+def propose(catalog,receipts,predecessors=None):
     result=copy.deepcopy(catalog)
     assert result['schema']==2
     seen=set()
@@ -21,6 +21,18 @@ def propose(catalog,receipts):
         assert receipt['deleted']==[r for r in receipt['created'] if r['kind']=='Pod']
         assert 'pending_create' not in receipt
         assert set(receipt['targets'])=={'mo-standard-1','mo-standard-2'}
+        # A safe recovery preserves its PVC rather than creating another one.
+        # Follow only the exact authenticated predecessor link; callers audit
+        # these original receipts before proposing any catalog publication.
+        resources=copy.deepcopy(receipt['created']+receipt.get('adopted_resources',[]))
+        if 'resumed_chunk_run_id' in receipt:
+            prior_id=receipt['resumed_chunk_run_id']
+            assert predecessors is not None and prior_id in predecessors, 'audited predecessor required'
+            prior=predecessors[prior_id]
+            assert prior['environment']==env and prior['compiler_invocations']==0
+            assert prior['provenance_verified_before_write'] is True
+            assert receipt['adopted_resources']==prior['created'], 'predecessor adoption differs'
+            resources+=copy.deepcopy(prior.get('adopted_resources',[]))
         original=next(n for n in catalog['nodes'] if n['environment']==env and n['node']=='mo-standard-0')
         source_binding={k:original[k] for k in ('node_uid','pvc_uid','pv_uid')}
         entries=[e for e in result['entries'] if e['runtime']['environment']==env and source_binding in e.get('bindings',[])]
@@ -39,8 +51,8 @@ def propose(catalog,receipts):
             assert proof['binding']==binding
             assert not any(n['environment']==env and n['node']==node for n in result['nodes']), 'existing node binding must never be replaced'
             assert not any(n['pvc_uid']==identity['pvc_uid'] or n['pv_uid']==identity['pv_uid'] for n in result['nodes'])
-            made=[x for x in receipt['created'] if x['kind']=='PersistentVolumeClaim' and x['name']==row['claim']]
-            assert len(made)==1 and made[0]['uid']==identity['pvc_uid']
+            made=[x for x in resources if x['kind']=='PersistentVolumeClaim' and x['name']==row['claim']]
+            assert made and {x['uid'] for x in made}=={identity['pvc_uid']}, 'created or preserved claim identity differs'
             result['nodes'].append(binding)
             target_binding={k:identity[k] for k in ('node_uid','pvc_uid','pv_uid')}
             for entry in entries:
