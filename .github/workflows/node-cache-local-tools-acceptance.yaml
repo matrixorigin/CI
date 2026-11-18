@@ -12,7 +12,7 @@ jobs:
     - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
       with:
         repository: matrixorigin/CI
-        ref: fda89a9c2b6b51b72ec5d912d80ce0ecef256e51
+        ref: c48984d3f9a6aff6179b28aa3e3d5466141a56b7
         persist-credentials: false
         sparse-checkout: config/node-cache-validation-sources.json
         sparse-checkout-cone-mode: false
@@ -88,7 +88,7 @@ jobs:
     - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
       with:
         repository: matrixorigin/CI
-        ref: fda89a9c2b6b51b72ec5d912d80ce0ecef256e51
+        ref: c48984d3f9a6aff6179b28aa3e3d5466141a56b7
         persist-credentials: false
         path: .ci-toolchain
         sparse-checkout: 'scripts
@@ -117,7 +117,7 @@ jobs:
       with:
         token: ${{ secrets.TOKEN_ACTION }}
         repository: matrixorigin/CI
-        ref: fda89a9c2b6b51b72ec5d912d80ce0ecef256e51
+        ref: c48984d3f9a6aff6179b28aa3e3d5466141a56b7
         persist-credentials: false
         sparse-checkout: 'scripts/prepare_coverage_cgo.sh
 
@@ -593,6 +593,14 @@ jobs:
         path: ${{ runner.temp }}/persistent-toolchain.json
         if-no-files-found: ignore
         retention-days: 7
+    - name: Upload allowlisted early cache failure evidence
+      if: failure()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: cache-failure-${{ inputs.node_cache_environment }}-${{ matrix.group }}-${{ github.run_id }}
+        path: ${{ runner.temp }}/cs-node-cache/failure-reports/*.json
+        if-no-files-found: ignore
+        retention-days: 7
   merge-coverage-groups:
     needs:
     - ut-coverage-linux-x86
@@ -603,7 +611,7 @@ jobs:
     - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
       with:
         repository: matrixorigin/CI
-        ref: fda89a9c2b6b51b72ec5d912d80ce0ecef256e51
+        ref: c48984d3f9a6aff6179b28aa3e3d5466141a56b7
         token: ${{ secrets.TOKEN_ACTION }}
         persist-credentials: false
         sparse-checkout: 'scripts/coverage_group_collect.py
