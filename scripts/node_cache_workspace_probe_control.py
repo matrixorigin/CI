@@ -110,6 +110,17 @@ def admission(policy,snapshot,node,owned=(),baseline=None,new_claims=0,new_pods=
         'per_claim_bytes':WORK_GIB*c.GIB,'physical_free_bytes':free,'auxiliary_probe_only':True}
 
 
+def auxiliary_slots(snapshot,node):
+    """Capacity-derived AUXILIARY proof slots, never a runner fleet limit."""
+    free=max((d['status'].get('freeCapacity',0) for d in snapshot['drives']['items']
+        if d['metadata'].get('labels',{}).get('directpv.min.io/node')==node
+        and d['metadata']['labels'].get('directpv.min.io/tier')=='ephemeral'
+        and d['status'].get('status')=='Ready'),default=0)
+    slots=min(2,int((free-20*c.GIB)//(WORK_GIB*c.GIB)))
+    c.require(slots>=1,'no private workspace fits reserve; wait without creating resources')
+    return slots
+
+
 def private_volume(pod,pvc,pv,node,cache_binding):
     name=pod['metadata']['name']+'-work';uid=pod['metadata']['uid']
     c.require(pod['spec']['nodeName']==node and pvc['metadata']['name']==name and pvc['metadata']['namespace']=='cicd'
@@ -250,7 +261,7 @@ def run(policy,catalog,lock,evidence,config,directory,api=base.n.legacy.api):
     # MTY r1 completed both first-node readonly proofs but its inherited COPY
     # free-space check prevented owner-GC. A separate reviewed intent must not
     # collide with or overwrite the retained r1 ConfigMap/evidence.
-    cm=f'cs-{environment}-allnode-work-proof-'+('r2' if environment=='mty' else 'r1')
+    cm=f'cs-{environment}-allnode-work-proof-'+('r2' if environment in ('mty','jed') else 'r1')
     try:
         session.journal();authenticate(catalog,lock,evidence,environment,api)
         state['provenance_verified_before_write']=True
@@ -261,7 +272,9 @@ def run(policy,catalog,lock,evidence,config,directory,api=base.n.legacy.api):
         state['original_pool']=original_id
         initial={node:session.snapshot(node) for node in planner.NODES}
         plans=planner.plan(catalog,policy,original,initial['mo-standard-0']['sc'],work_size_gib=WORK_GIB)
-        session.baselines={node:admission(policy,initial[node],node,(),None,2,2) for node in planner.NODES}
+        slots={node:auxiliary_slots(initial[node],node) for node in planner.NODES}
+        state['auxiliary_slots_by_node']=slots
+        session.baselines={node:admission(policy,initial[node],node,(),None,slots[node],slots[node]) for node in planner.NODES}
         state['preflight']=session.baselines
         bindings={n['node']:n for n in catalog['nodes'] if n['environment']==environment}
         for binding in bindings.values():session.cache_volume(binding)
@@ -275,17 +288,37 @@ def run(policy,catalog,lock,evidence,config,directory,api=base.n.legacy.api):
         for planned in plans:
             node=planned['spec']['template']['spec']['nodeSelector']['kubernetes.io/hostname'];binding=bindings[node]
             prefix=cm+'-n'+node[-1];workspaces=[]
-            state['targets'][node]={'binding':binding,'probes':[]};session.journal()
-            for suffix in ('a','b'):
-                workspaces.append(session.create_probe(probe_pod(planned,prefix+'-'+suffix,cm),node,binding))
+            state['targets'][node]={'binding':binding,'probes':[],'simultaneous_workspaces':slots[node]};session.journal()
+            if slots[node]==1:
+                # Leave reviewed reserve untouched. The next private workspace
+                # is queued in this journal, not provisioned into unsafe space.
+                state['targets'][node]['capacity_wait']={'reason':'physical_workspace_reservation',
+                    'queued_at':pub.now().isoformat(),'runner_count_limit':False}
+                first=session.create_probe(probe_pod(planned,prefix+'-a',cm),node,binding)
+                first_result=session.invoke(first,binding)
+                first_recheck=session.invoke(first,binding,'recheck-private')
+                state['targets'][node]['queued_completed_proofs']=[{'workspace':first,**first_result}];session.journal()
+                session.collect_workspace(first,node)
+                state['targets'][node]['capacity_wait']['released_at']=pub.now().isoformat();session.journal()
+                second=session.create_probe(probe_pod(planned,prefix+'-b',cm),node,binding)
+                second_result=session.invoke(second,binding)
+                second_recheck=session.invoke(second,binding,'recheck-private')
+                state['targets'][node]['queued_completed_proofs'].append({'workspace':second,**second_result});session.journal()
+                session.collect_workspace(second,node)
+                workspaces=[first,second];results=[first_result,second_result]
+                rechecks=[first_recheck,second_recheck]
+            else:
+                for suffix in ('a','b'):
+                    workspaces.append(session.create_probe(probe_pod(planned,prefix+'-'+suffix,cm),node,binding))
+                barrier=threading.Barrier(2)
+                def execute(workspace):barrier.wait(timeout=30);return session.invoke(workspace,binding)
+                with ThreadPoolExecutor(max_workers=2) as executor:results=list(executor.map(execute,workspaces))
+                starts=[dt.datetime.fromisoformat(r['started_at']) for r in results]
+                finishes=[dt.datetime.fromisoformat(r['completed_at']) for r in results]
+                c.require(max(starts)<min(finishes),'probe execution did not actually overlap')
+                rechecks=[session.invoke(w,binding,'recheck-private') for w in workspaces]
             c.require(len({w['pvc_uid'] for w in workspaces})==2 and len({w['pv_uid'] for w in workspaces})==2,
                 'concurrent probes share a writable claim')
-            barrier=threading.Barrier(2)
-            def execute(workspace):barrier.wait(timeout=30);return session.invoke(workspace,binding)
-            with ThreadPoolExecutor(max_workers=2) as executor:results=list(executor.map(execute,workspaces))
-            starts=[dt.datetime.fromisoformat(r['started_at']) for r in results]
-            finishes=[dt.datetime.fromisoformat(r['completed_at']) for r in results]
-            c.require(max(starts)<min(finishes),'probe execution did not actually overlap')
             for workspace,result in zip(workspaces,results):
                 c.require(result['proof']['success'] and result['proof']['compiler_invocations']==result['proof']['external_tool_downloads']==0,
                     'auxiliary probe performed compilation/download')
@@ -293,8 +326,8 @@ def run(policy,catalog,lock,evidence,config,directory,api=base.n.legacy.api):
                     and result['proof']['shared_payload_bytes']==accepted['bytes'],'probe payload differs from audited copies')
                 state['targets'][node]['probes'].append({'workspace':workspace,**result})
             session.journal()
-            state['targets'][node]['peer_rechecks']=[session.invoke(w,binding,'recheck-private') for w in workspaces]
-            session.collect_workspace(workspaces[0],node)
+            state['targets'][node]['peer_rechecks']=rechecks
+            if slots[node]==2:session.collect_workspace(workspaces[0],node)
             replacement=session.create_probe(probe_pod(planned,prefix+'-replacement',cm),node,binding)
             c.require(replacement['pvc_uid'] not in {w['pvc_uid'] for w in workspaces},'replacement reused private workspace')
             proof=session.invoke(replacement,binding)
@@ -302,7 +335,8 @@ def run(policy,catalog,lock,evidence,config,directory,api=base.n.legacy.api):
             c.require(proof['proof']['shared_payload_files']==accepted['files']
                 and proof['proof']['shared_payload_bytes']==accepted['bytes'],'replacement payload differs from audited copies')
             state['targets'][node]['replacement']={'workspace':replacement,**proof};session.journal()
-            session.collect_workspace(workspaces[1],node);session.collect_workspace(replacement,node)
+            if slots[node]==2:session.collect_workspace(workspaces[1],node)
+            session.collect_workspace(replacement,node)
             session.cache_volume(binding);state['targets'][node]['postflight']=session.guard(node);session.journal()
         after=session.call(['get','autoscalingrunnerset',f'cs-{environment}-large-7c14g','-n','cicd','-o','json'])
         c.require(after['metadata']['uid']==original_id['uid'] and base.replication.sha(c.canonical(after['spec']))==original_id['spec_sha256'],

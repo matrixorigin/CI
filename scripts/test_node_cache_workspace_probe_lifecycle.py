@@ -44,8 +44,9 @@ class Lifecycle(unittest.TestCase):
                     obj=copy.deepcopy(snapshot['nodes']['items'][0]);obj['metadata'].update(name=binding['node'],uid=binding['node_uid'])
                     obj['metadata']['labels']['directpv.min.io/node']=binding['node'];value['nodes']['items'].append(obj)
                     live_work=sum(1 for (kind,name),v in self.live.items() if kind=='pod' and v['spec']['nodeName']==binding['node'])
+                    capacity=144 if fault=='one-slot' and binding['node']=='mo-standard-2' else 184
                     value['drives']['items'].append({'metadata':{'labels':obj['metadata']['labels']},
-                        'status':{'status':'Ready','freeCapacity':(184-live_work*q.WORK_GIB)*q.c.GIB}})
+                        'status':{'status':'Ready','freeCapacity':(capacity-live_work*q.WORK_GIB)*q.c.GIB}})
                 value['pods']={'items':[copy.deepcopy(v) for (kind,_),v in self.live.items() if kind=='pod']}
                 value['sc']=copy.deepcopy(sc);value['quotas']={'items':[]}
                 for key in ('cpu','memory','fs'):value['stats']['node'][key]['time']=q.pub.now().isoformat()
@@ -93,7 +94,7 @@ class Lifecycle(unittest.TestCase):
                     'private_work':{'private_marker_verified':True,'tmp_on_work_filesystem':True}}
         with tempfile.TemporaryDirectory() as raw,patch.object(q,'Session',Fake),patch.object(q,'authenticate') as authorize:
             directory=Path(raw).resolve()/'intent'
-            if fault:
+            if fault in ('original','unknown-create'):
                 with self.assertRaises((ValueError,subprocess.TimeoutExpired)):
                     q.run(policy,cat,{},evidence,'private',directory)
                 result=json.loads((directory/'state.json').read_text());self.assertFalse(result['complete'])
@@ -113,10 +114,17 @@ class Lifecycle(unittest.TestCase):
         self.assertEqual(sessions[0].live['autoscalingrunnerset',original['metadata']['name']],original)
         self.assertFalse(any(kind=='pod' for kind,_ in sessions[0].live))
         self.assertEqual(len([1 for kind,_ in sessions[0].live if kind=='pvc']),3)
+        if fault=='one-slot':
+            target=result['targets']['mo-standard-2']
+            self.assertEqual(target['simultaneous_workspaces'],1)
+            self.assertEqual(target['capacity_wait']['reason'],'physical_workspace_reservation')
+            self.assertFalse(target['capacity_wait']['runner_count_limit'])
+            self.assertLessEqual(target['probes'][0]['completed_at'],target['probes'][1]['started_at'])
 
     def test_three_nodes_concurrent_pairs_replacements_and_owner_gc(self):self.exercise()
     def test_unknown_create_response_preserves_pending_no_retry(self):self.exercise('unknown-create')
     def test_original_pool_change_is_rejected(self):self.exercise('original')
+    def test_one_slot_node_queues_until_owner_gc_without_runner_count_limit(self):self.exercise('one-slot')
 
 
 if __name__=='__main__':unittest.main()
