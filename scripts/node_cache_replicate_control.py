@@ -198,6 +198,10 @@ def run(policy,catalog,lock,config,directory,api=n.legacy.api):
             state['targets'][node]['received']=json.loads(proc.stdout);journal()
             result=call(exec_args(pod,'verify',target));c.require(result['success'] and result['compiler_invocations']==0,'independent target verification failed')
             state['targets'][node]['verify']=result;state['targets'][node]['completed_at']=pub.now().isoformat();journal()
+        owned=[x['uid'] for x in state['created'] if x['kind']=='Pod']
+        state['post_copy_resources']={node:snapshot_guard(policy,snap(node),node,owned,baselines[node]['workloads'])
+                                      for node in policy['node_uids']}
+        journal()
         # Delete only exact helper UIDs. PVC/cache/ConfigMap/transfer evidence retained.
         for row in state['created']:
             if row['kind']!='Pod':continue
@@ -216,7 +220,11 @@ def run(policy,catalog,lock,config,directory,api=n.legacy.api):
         state['helper_pods_absent']=True
         state.update(complete=True,completed_at=pub.now().isoformat());journal();return state
     except Exception as error:
-        state.update(error_type=type(error).__name__,failed_at=pub.now().isoformat());journal();raise
+        import traceback
+        state.update(error_type=type(error).__name__,failed_at=pub.now().isoformat(),
+            failure_sites=[{'file':Path(x.filename).name,'line':x.lineno} for x in traceback.extract_tb(error.__traceback__)
+                           if Path(x.filename).name.startswith(('node_cache_','node_compile_cache','cs_coverage_cache'))])
+        journal();raise
 
 
 if __name__=='__main__':
