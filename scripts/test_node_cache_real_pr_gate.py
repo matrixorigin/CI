@@ -7,6 +7,34 @@ import build_real_pr_node_cache_workflow as workflow
 
 
 class CurrentPR(unittest.TestCase):
+    def test_membership_uses_existing_checkout_credential_without_relaxing_204_gate(self):
+        calls=[]
+        def reader(path,token):
+            calls.append((path,token));return (404,None) if token=='artifact-fixture' else (204,None)
+        status,checks=gate.membership('trusted-user','artifact-fixture','checkout-fixture',reader)
+        self.assertEqual(status,204)
+        self.assertEqual(checks,[{'credential_role':'actions_read','http_status':404},
+            {'credential_role':'existing_source_checkout','http_status':204}])
+        self.assertEqual(len(calls),2)
+        self.assertNotIn('artifact-fixture',str(checks));self.assertNotIn('checkout-fixture',str(checks))
+
+    def test_nonmembers_missing_or_duplicate_credentials_are_not_authority(self):
+        context,pr=self.fixture()
+        for tokens in (('a','b'),('a','a'),('','a'),('','')):
+            calls=[]
+            def denied(path,token):calls.append(path);return 404,None
+            status,_=gate.membership('trusted-user',*tokens,reader=denied)
+            with self.subTest(tokens=tokens),self.assertRaises(ValueError):gate.authorize(context,pr,status)
+            self.assertLessEqual(len(calls),len(set(t for t in tokens if t)))
+        with self.assertRaises(ValueError):gate.membership('unsafe/name','a','b',reader=denied)
+        with self.assertRaises(ValueError):gate.membership('trusted-user','a','b',reader=lambda *args,**kwargs:(200,None))
+
+    def test_original_membership_204_does_not_read_alternate_credential(self):
+        calls=[]
+        def reader(path,token):calls.append(token);return 204,None
+        status,checks=gate.membership('trusted-user','a','b',reader)
+        self.assertEqual((status,len(checks),calls),(204,1,['a']))
+
     def fixture(self):
         context={'repository':'matrixorigin/matrixone','event':'workflow_dispatch','ref':'refs/heads/weilu-runner-test',
             'actor':'Ariznawlll','attempt':'1','pr_number':32901,'expected_sha':'a'*40}
