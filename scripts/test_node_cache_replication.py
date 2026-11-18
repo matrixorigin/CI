@@ -18,11 +18,12 @@ class Replication(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory(); self.addCleanup(temp.cleanup)
         self.root = Path(temp.name).resolve(); self.source_root = self.root/'source'; self.source_root.mkdir()
-        self.source = r.bound_identity({'environment':'mty','node':'mo-standard-0',
+        environment=getattr(self,'environment','mty')
+        self.source = r.bound_identity({'environment':environment,'node':'mo-standard-0',
             'node_uid':'00000000-0000-4000-8000-000000000001',
             'pvc_uid':'00000000-0000-4000-8000-000000000002',
             'pv_uid':'00000000-0000-4000-8000-000000000003'})
-        runtime = {'environment':'mty', 'tool_binaries':{}, 'schema':2}
+        runtime = {'environment':environment, 'tool_binaries':{}, 'schema':2}
         payload = b'existing reviewed object'; digest = r.sha(payload)
         self.object_name = 'incremental-v2/objects/'+digest[:2]+'/'+digest
         obj = self.source_root/self.object_name; obj.parent.mkdir(parents=True); obj.write_bytes(payload)

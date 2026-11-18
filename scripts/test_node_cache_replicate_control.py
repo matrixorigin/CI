@@ -13,14 +13,27 @@ from test_node_cache_publish_control import fixture, NOW, U
 
 class ControllerGuard(unittest.TestCase):
     def test_full_copy_controller_only_creates_new_resources_uid_deletes_own_pods(self):
+        self.exercise_controller()
+
+    def test_resume_reverifies_node1_without_recopy_creates_only_missing_node2(self):
+        self.exercise_controller(recover=True)
+
+    def test_resume_rejects_replaced_helper_before_any_new_copy(self):
+        self.exercise_controller(recover=True,bad_uid=True)
+
+    def exercise_controller(self,recover=False,bad_uid=False):
         from test_node_cache_replication import Replication
-        data=Replication('test_two_nodes_same_objects_new_bindings_source_unchanged');data.setUp();self.addCleanup(data.doCleanups)
-        policy,s=fixture();policy['node_uids']={f'mo-standard-{i}':data.source['node_uid'] if i==0 else data.target(i)['node_uid'] for i in range(3)}
+        data=Replication('test_two_nodes_same_objects_new_bindings_source_unchanged')
+        data.environment='mnl2' if recover else 'mty';data.setUp();self.addCleanup(data.doCleanups)
+        policy,s=fixture();env=data.environment;policy.update(environment=env,name=f'cs-{env}-incremental-n0-v1')
+        policy['namespace_uids']={k.replace('mocservices-mty','mocservices-'+env):v for k,v in policy['namespace_uids'].items()}
+        s['namespaces']['items']=[{'metadata':{'name':k,'uid':v}} for k,v in policy['namespace_uids'].items()]
+        policy['node_uids']={f'mo-standard-{i}':data.source['node_uid'] if i==0 else data.target(i)['node_uid'] for i in range(3)}
         s['nodes']['items']=[{**copy.deepcopy(s['nodes']['items'][0]),'metadata':{'name':name,'uid':uid,
               'labels':{'directpv.min.io/node':name,'directpv.min.io/tier':'ephemeral'}}} for name,uid in policy['node_uids'].items()]
         s['drives']['items']=[{'metadata':{'labels':x['metadata']['labels']},'status':{'status':'Ready','freeCapacity':200*r.c.GIB}}
                               for x in s['nodes']['items']]
-        live={};mutations=[];destinations={};counter=10
+        live={};mutations=[];destinations={};counter=10;fail_first_verify=recover
         source_pvc={'metadata':{'name':policy['name'],'uid':data.source['pvc_uid']},'status':{'phase':'Bound'},'spec':{'volumeName':'source-pv'}}
         def pv(pvc,node,uid):
             return {'metadata':{'name':pvc['spec']['volumeName'],'uid':uid},'status':{'phase':'Bound'},'spec':{
@@ -29,8 +42,12 @@ class ControllerGuard(unittest.TestCase):
                 'csi':{'driver':'directpv-min-io'},'nodeAffinity':{'required':{'nodeSelectorTerms':[{'matchExpressions':[
                     {'key':'directpv.min.io/node','operator':'In','values':[node]}]}]}}}}
         live['pvc',policy['name']]=source_pvc;live['pv','source-pv']=pv(source_pvc,'mo-standard-0',data.source['pv_uid'])
+        def api(path):
+            return {'head_sha':'ecc89fdfec0b7acd575fb9ef563f6f1d06b9fad6','head_branch':'codex/ruh-pvc-readiness',
+                    'event':'workflow_dispatch','status':'completed','conclusion':'failure','run_attempt':1,
+                    'path':'.github/workflows/cloudsigma-up.yaml','actor':{'login':'Ariznawlll'}} if path.endswith('/44269605748') else {}
         def call(command,**kwargs):
-            nonlocal counter
+            nonlocal counter,fail_first_verify
             args=command[4:];verb=args[0];result=None
             if verb=='create':
                 obj=json.loads(kwargs['input']);counter+=1;name=obj['metadata']['name'];kind=obj['kind']
@@ -38,6 +55,7 @@ class ControllerGuard(unittest.TestCase):
                 live[{'Pod':'pod','PersistentVolumeClaim':'pvc','ConfigMap':'ConfigMap'}[kind],name]=obj
                 mutations.append(('create',kind,name))
                 if kind=='Pod':
+                    obj['metadata']['creationTimestamp']=NOW.isoformat()
                     node=obj['spec']['nodeSelector']['kubernetes.io/hostname'];obj['spec']['nodeName']=node
                     obj['status']={'phase':'Running','conditions':[{'type':'Ready','status':'True'}]}
                     claim=obj['spec']['volumes'][0]['persistentVolumeClaim']['claimName']
@@ -54,7 +72,7 @@ class ControllerGuard(unittest.TestCase):
                 elif kind=='sc':result=s['sc']
                 elif kind=='directpvdrives':result=s['drives']
                 elif kind=='--raw':result=s['stats']
-                else:result=live.get((kind,args[2]))
+                else:result=live.get(('ConfigMap' if kind=='configmap' else kind,args[2]))
             elif verb=='exec':
                 pod=args[1];mode=args[args.index('/probe/node_cache_replication.py')+1]
                 if mode=='plan':result=r.replication.make_plan(data.source_root,data.catalog,data.source,data.lock)
@@ -63,6 +81,9 @@ class ControllerGuard(unittest.TestCase):
                     target=json.loads(args[args.index('--target-json')+1])
                     result=r.replication.receive(destinations[pod],data.catalog,data.source,data.lock,target,kwargs['stdin'])
                 elif mode=='verify':
+                    self.assertEqual(kwargs['timeout'],600)
+                    if fail_first_verify:
+                        fail_first_verify=False;raise subprocess.TimeoutExpired(command,45)
                     target=json.loads(args[args.index('--target-json')+1]);plan=r.replication.make_plan(data.source_root,data.catalog,data.source,data.lock)
                     result=r.replication.verify(destinations[pod],plan,data.catalog,data.source,data.lock,target)
                 else:raise AssertionError(mode)
@@ -74,8 +95,30 @@ class ControllerGuard(unittest.TestCase):
             return subprocess.CompletedProcess(command,0,'' if result is None else json.dumps(result),'')
         with patch.object(r.subprocess,'run',side_effect=call),patch.object(r.pub,'now',return_value=NOW), \
              patch.object(r.n,'reviewed_entries',side_effect=lambda catalog,runtime,api:catalog['entries']),patch.object(r.tools,'authorize'), \
-             patch.object(r,'stream_transfer',side_effect=lambda source,target:json.loads(call(target,stdin=io.BytesIO(data.bundle())).stdout)):
-            result=r.run(policy,data.catalog,data.lock,'config',data.root/'controller',api=lambda path:{})
+             patch.object(r,'stream_transfer',side_effect=lambda source,target:json.loads(call(target,stdin=io.BytesIO(data.bundle())).stdout)) as streaming:
+            if not recover:result=r.run(policy,data.catalog,data.lock,'config',data.root/'controller',api=api)
+            else:
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    r.run(policy,data.catalog,data.lock,'config',data.root/'controller',api=api)
+                old=json.loads((data.root/'controller/state.json').read_text())
+                self.assertEqual(set(old['targets']),{'mo-standard-1'})
+                self.assertTrue(old['targets']['mo-standard-1']['received']['success'])
+                # The approved report came from the original pinned version;
+                # retain its exact diagnostic sites, not the new line numbers.
+                old['failure_sites']=[{'file':'node_cache_replicate_control.py','line':244},
+                                      {'file':'node_cache_replicate_control.py','line':141}]
+                resume={'original_run_id':44269605748,'receipt':old,'node1_reverification':{
+                    'original_run':44269605748,'readonly':True,'mutations':0,
+                    'proof':copy.deepcopy(old['targets']['mo-standard-1']['received'])}}
+                if bad_uid:
+                    live['pod','cs-mnl2-cache-replication-v3-source']['metadata']['uid']='replacement'
+                    before=copy.deepcopy(mutations)
+                    with self.assertRaises(ValueError):r.run(policy,data.catalog,data.lock,'config',data.root/'resume',api=api,resume=resume)
+                    self.assertEqual(mutations,before);self.assertEqual(streaming.call_count,1)
+                    return
+                result=r.run(policy,data.catalog,data.lock,'config',data.root/'resume',api=api,resume=resume)
+                self.assertTrue(result['node1_not_recopied']);self.assertEqual(len(result['adopted_resources']),4)
+            self.assertEqual(streaming.call_count,2)
         self.assertTrue(result['complete']);self.assertTrue(result['helper_pods_absent'])
         self.assertEqual(len(result['targets']),2);self.assertEqual(len(result['deleted']),3)
         self.assertEqual([kind for verb,kind,name in mutations if verb=='create'],

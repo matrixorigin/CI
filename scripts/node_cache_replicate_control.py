@@ -128,17 +128,37 @@ def stream_transfer(source_command,target_command,timeout=3700):
                     if pipe is not None and not pipe.closed:pipe.close()
 
 
-def run(policy,catalog,lock,config,directory,api=n.legacy.api,cleanup=None):
+def run(policy,catalog,lock,config,directory,api=n.legacy.api,cleanup=None,resume=None):
     c.require(not directory.exists(), 'replication intent exists; reconcile without retry')
     directory.mkdir();report=directory/'state.json'
     env=policy['environment'];cm=f'cs-{env}-cache-replication-v3'
     source=next(x for x in catalog['nodes'] if x['environment']==env and x['node']=='mo-standard-0')
     state={'environment':env,'complete':False,'compiler_invocations':0,'created':[],'deleted':[],
            'started_at':pub.now().isoformat(),'targets':{},'automatic_retry':False}
+    if resume is not None:
+        import copy
+        old=resume['receipt']
+        c.require(cleanup is None and env=='mnl2' and resume['original_run_id']==44269605748
+                  and old['environment']==env and old['complete'] is False and old['error_type']=='TimeoutExpired'
+                  and old['failure_sites']==[{'file':'node_cache_replicate_control.py','line':244},
+                                             {'file':'node_cache_replicate_control.py','line':141}]
+                  and 'pending_create' not in old and old['deleted']==[]
+                  and set(old['targets'])=={'mo-standard-1'}
+                  and [x['kind'] for x in old['created']]==['ConfigMap','Pod','PersistentVolumeClaim','Pod'],
+                  'resume is not the independently reviewed verification timeout')
+        proof=resume['node1_reverification']
+        c.require(proof['original_run']==resume['original_run_id'] and proof['readonly'] is True and proof['mutations']==0
+                  and proof['proof']==old['targets']['mo-standard-1']['received']
+                  and proof['proof']['success'] is True and proof['proof']['independently_verified'] is True,
+                  'resume node1 proof differs')
+        state['created']=copy.deepcopy(old['created']);state['targets']=copy.deepcopy(old['targets'])
+        state['adopted_resources']=copy.deepcopy(old['created'])
+        state['resumed_from']={'run_id':resume['original_run_id'],'started_at':old['started_at'],'failed_at':old['failed_at']}
+        state['node1_not_recopied']=True
     def journal():pub.write_journal(report,state)
     def cmd(args):return ['kubectl','--kubeconfig',str(config),'--request-timeout=30s',*args]
-    def call(args,data=None):
-        proc=subprocess.run(cmd(args),input=None if data is None else c.canonical(data).decode(),capture_output=True,text=True,timeout=45)
+    def call(args,data=None,timeout=45):
+        proc=subprocess.run(cmd(args),input=None if data is None else c.canonical(data).decode(),capture_output=True,text=True,timeout=timeout)
         c.require(proc.returncode==0,'scoped replication API operation failed')
         return json.loads(proc.stdout) if proc.stdout.strip() else None
     def snap(node):return {key:call(args) for key,args in {
@@ -179,6 +199,13 @@ def run(policy,catalog,lock,config,directory,api=n.legacy.api,cleanup=None):
         tools.authorize(lock,api(f'repos/{lock["producer"]["repository"]}/actions/runs/{lock["producer"]["id"]}'),
                         api(f'repos/{lock["producer"]["repository"]}/actions/artifacts/{lock["artifact"]["id"]}'))
         state['provenance_verified_before_write']=True
+        if resume is not None:
+            original_run=api('repos/matrixorigin/cloudsigma-gitops/actions/runs/44269605748')
+            c.require(original_run['head_sha']=='ecc89fdfec0b7acd575fb9ef563f6f1d06b9fad6'
+                      and original_run['head_branch']=='codex/ruh-pvc-readiness' and original_run['event']=='workflow_dispatch'
+                      and original_run['status']=='completed' and original_run['conclusion']=='failure'
+                      and original_run['run_attempt']==1 and original_run['path']=='.github/workflows/cloudsigma-up.yaml'
+                      and original_run['actor']['login']=='Ariznawlll','resume original run provenance differs')
         if cleanup is not None:
             c.require(cleanup['environment']==env and cleanup['targets']=={} and cleanup['complete'] is False
                       and cleanup['failure_sites'][-1]=={'file':'node_cache_replicate_control.py','line':175}
@@ -197,8 +224,11 @@ def run(policy,catalog,lock,config,directory,api=n.legacy.api,cleanup=None):
                 c.require(time.monotonic()<deadline,'old helper cleanup not yet confirmed');time.sleep(2)
             state['previous_readonly_helper_deleted']=row;journal()
         baselines={}
+        adopted_uids=[x['uid'] for x in state.get('adopted_resources',[]) if x['kind']=='Pod']
         for node in policy['node_uids']:
-            baselines[node]=snapshot_guard(policy,snap(node),node,allocate=node!='mo-standard-0')
+            baselines[node]=snapshot_guard(policy,snap(node),node,owned=adopted_uids,
+                allocate=node!='mo-standard-0' and node not in state['targets'])
+        state['preflight']=baselines;journal()
         source_pvc=call(['get','pvc',policy['name'],'-n','cicd','-o','json'])
         source_pv=call(['get','pv',source_pvc['spec']['volumeName'],'-o','json'])
         c.require(source_pvc['metadata']['uid']==source['pvc_uid'] and source_pv['metadata']['uid']==source['pv_uid']
@@ -207,20 +237,38 @@ def run(policy,catalog,lock,config,directory,api=n.legacy.api,cleanup=None):
         data.update({'catalog.json':c.canonical(catalog).decode(),'lock.json':c.canonical(lock).decode(),
                      'source.json':c.canonical(source).decode()})
         c.require(sum(len(k.encode())+len(v.encode()) for k,v in data.items())<900000,'replication ConfigMap budget')
-        snapshot_guard(policy,snap('mo-standard-0'),'mo-standard-0',baseline=baselines['mo-standard-0']['workloads'])
-        create({'apiVersion':'v1','kind':'ConfigMap','immutable':True,'metadata':{'name':cm,'namespace':'cicd'},'data':data})
-        source_pod=cm+'-source';create(helper(source_pod,'mo-standard-0',policy['name'],cm,True));wait_pod(source_pod,'mo-standard-0',policy['name'],True)
+        snapshot_guard(policy,snap('mo-standard-0'),'mo-standard-0',owned=adopted_uids,baseline=baselines['mo-standard-0']['workloads'])
+        source_pod=cm+'-source'
+        if resume is None:
+            create({'apiVersion':'v1','kind':'ConfigMap','immutable':True,'metadata':{'name':cm,'namespace':'cicd'},'data':data})
+            create(helper(source_pod,'mo-standard-0',policy['name'],cm,True))
+        else:
+            adopted={(x['kind'],x['name']):x['uid'] for x in state['adopted_resources']}
+            actual_cm=call(['get','configmap',cm,'-n','cicd','-o','json'])
+            c.require(actual_cm['metadata']['uid']==adopted['ConfigMap',cm] and actual_cm.get('immutable') is True
+                      and actual_cm['data']==data,'resume ConfigMap identity or content differs')
+            actual_source=call(['get','pod',source_pod,'-n','cicd','-o','json'])
+            c.require(actual_source['metadata']['uid']==adopted['Pod',source_pod],'resume source Pod replaced')
+            stamp=dt.datetime.fromisoformat(actual_source['metadata']['creationTimestamp'].replace('Z','+00:00'))
+            remaining=actual_source['spec']['activeDeadlineSeconds']-(pub.now()-stamp).total_seconds()
+            c.require(remaining>=1800,'resume source helper lifetime insufficient; preserve data')
+        wait_pod(source_pod,'mo-standard-0',policy['name'],True)
         plan=call(exec_args(source_pod,'plan'));payload=replication.expected_files(plan,catalog,source,lock)
         state['payload']={'bytes':sum(x[0] for x in payload.values()),'files':len(payload),
                           'streamed':True,'controller_archive_bytes':0};journal()
         for number in (1,2):
             node=f'mo-standard-{number}';claim=f'cs-{env}-incremental-n{number}-v1';pod=cm+f'-n{number}'
+            already_copied=node in state['targets']
             owned=[x['uid'] for x in state['created'] if x['kind']=='Pod']
-            snapshot_guard(policy,snap(node),node,owned,baselines[node]['workloads'],True)
-            made=create({'apiVersion':'v1','kind':'PersistentVolumeClaim','metadata':{'name':claim,'namespace':'cicd'},
+            snapshot_guard(policy,snap(node),node,owned,baselines[node]['workloads'],not already_copied)
+            if already_copied:
+                made={'metadata':{'uid':state['targets'][node]['binding']['pvc_uid']}}
+            else:
+                made=create({'apiVersion':'v1','kind':'PersistentVolumeClaim','metadata':{'name':claim,'namespace':'cicd'},
                  'spec':{'accessModes':['ReadWriteOnce'],'volumeMode':'Filesystem','storageClassName':'directpv-min-io-ephemeral',
                          'resources':{'requests':{'storage':'64Gi'}}}})
-            create(helper(pod,node,claim,cm,False));wait_pod(pod,node,claim,False)
+                create(helper(pod,node,claim,cm,False))
+            wait_pod(pod,node,claim,False)
             pvc=call(['get','pvc',claim,'-n','cicd','-o','json']);pv=call(['get','pv',pvc['spec']['volumeName'],'-o','json'])
             c.require(pvc['metadata']['uid']==made['metadata']['uid'] and pvc['status']['phase']=='Bound'
                       and pv['status']['phase']=='Bound' and pv['spec']['claimRef']['uid']==pvc['metadata']['uid']
@@ -236,12 +284,19 @@ def run(policy,catalog,lock,config,directory,api=n.legacy.api,cleanup=None):
                      for x in terms[0]['matchExpressions']),'target PV topology differs')
             target={'environment':env,'node':node,'node_uid':policy['node_uids'][node],
                     'pvc_uid':pvc['metadata']['uid'],'pv_uid':pv['metadata']['uid']}
-            state['targets'][node]={'claim':claim,'binding':target,'started_at':pub.now().isoformat()};journal()
+            if already_copied:
+                c.require(target==state['targets'][node]['binding'],'resume target volume identity changed')
+            else:state['targets'][node]={'claim':claim,'binding':target,'started_at':pub.now().isoformat()}
+            journal()
             owned=[x['uid'] for x in state['created'] if x['kind']=='Pod']
             snapshot_guard(policy,snap(node),node,owned,baselines[node]['workloads'])
-            state['targets'][node]['received']=stream_transfer(cmd(exec_args(source_pod,'export')),cmd(exec_args(pod,'receive',target)))
+            if not already_copied:
+                state['targets'][node]['received']=stream_transfer(cmd(exec_args(source_pod,'export')),cmd(exec_args(pod,'receive',target)))
             journal()
-            result=call(exec_args(pod,'verify',target));c.require(result['success'] and result['compiler_invocations']==0,'independent target verification failed')
+            # Full readonly rehash of ~9 GiB is not a short API inventory call.
+            # Keep it bounded separately; no compilation/UT deadline changes.
+            result=call(exec_args(pod,'verify',target),timeout=600);c.require(result['success'] and result['compiler_invocations']==0,'independent target verification failed')
+            c.require(result==state['targets'][node]['received'],'independent verification differs from received content')
             state['targets'][node]['verify']=result;state['targets'][node]['completed_at']=pub.now().isoformat();journal()
         owned=[x['uid'] for x in state['created'] if x['kind']=='Pod']
         state['post_copy_resources']={node:snapshot_guard(policy,snap(node),node,owned,baselines[node]['workloads'])
@@ -276,10 +331,12 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser()
     for name in ('policy','catalog','lock','kubeconfig','directory'):parser.add_argument('--'+name,type=Path,required=True)
     parser.add_argument('--cleanup-approved',type=Path)
+    parser.add_argument('--resume-approved',type=Path)
     args=parser.parse_args()
     try:
         result=run(c.read_json(args.policy),c.read_json(args.catalog),c.read_json(args.lock),args.kubeconfig,args.directory,
-                   cleanup=c.read_json(args.cleanup_approved) if args.cleanup_approved else None)
+                   cleanup=c.read_json(args.cleanup_approved) if args.cleanup_approved else None,
+                   resume=c.read_json(args.resume_approved) if args.resume_approved else None)
         print(json.dumps({'complete':result['complete'],'environment':result['environment'],'compiler_invocations':0}))
     except Exception as error:
         print(json.dumps({'complete':False,'error_type':type(error).__name__,'automatic_retry':False}));raise SystemExit(1)
