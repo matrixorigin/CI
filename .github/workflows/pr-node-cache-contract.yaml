@@ -31,6 +31,7 @@ jobs:
           python3 -m unittest discover -s scripts -p test_node_compile_cache.py -v
           python3 -m unittest discover -s scripts -p test_node_cache_toolchain_store.py -v
           python3 -m unittest discover -s scripts -p test_node_cache_replication.py -v
+          python3 -m unittest discover -s scripts -p test_node_cache_partial_replication.py -v
           python3 -m unittest discover -s scripts -p test_node_cache_replicate_control.py -v
           python3 -m unittest discover -s scripts -p test_node_cache_replication_catalog.py -v
           python3 -m unittest discover -s scripts -p test_node_cache_demand_fleet.py -v
