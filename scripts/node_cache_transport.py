@@ -82,7 +82,7 @@ def unpack_verified_transport(directory, reviewed):
 
 
 def receive(reviewed, directory, candidate, api=n.legacy.api, url_factory=signed_archive_url,
-            open_url=urllib.request.urlopen):
+            open_url=urllib.request.urlopen,unpack=unpack_verified_transport):
     directory = c.safe_path(directory); candidate = c.safe_path(candidate)
     c.require(not directory.exists() and not candidate.exists() and directory != candidate and
               directory not in candidate.parents and candidate not in directory.parents,
@@ -113,7 +113,7 @@ def receive(reviewed, directory, candidate, api=n.legacy.api, url_factory=signed
     # Unique fresh directory: publish only this verified transfer, not an old partial.
     os.link(partial, directory/'transport.zip')
     partial.unlink()
-    unpack_verified_transport(directory, reviewed)
+    unpack(directory, reviewed)
     return bundle.stage(directory, reviewed, candidate, api)
 
 

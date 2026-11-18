@@ -18,6 +18,8 @@ SOURCE='87c44445f83e308ef12dd7ca0e570cec1e6690d9'
 
 
 class NativeOnlyPolicy:
+    script='node_cache_native_append_job.py'
+
     def __init__(self,request,original,proof):
         c.require(request['schema']==1 and request['source_repository']=='matrixorigin/matrixone'
             and request['source_sha']==SOURCE and request['current_pr']==32871
@@ -71,6 +73,13 @@ class NativeOnlyPolicy:
             and all(artifact[k]==v for k,v in approved['artifact'].items())
             and artifact['workflow_run']['id']==run['id'] and artifact['workflow_run']['head_sha']==run['head_sha'],
             'accepted CPU append raw artifact API changed')
+
+    def instructions(self,entry,base):
+        data=engine.instructions(entry,base)
+        for name in (self.script,'node_cache_native_transport.py'):
+            data[name]=(Path(__file__).parent/name).read_text()
+        c.require(sum(len(k.encode())+len(v.encode()) for k,v in data.items())<900000,'native publisher ConfigMap budget')
+        return data
 
     def verify_receipt(self,report,entry,base,policy,catalog):
         self.scope(policy,catalog,entry,base)

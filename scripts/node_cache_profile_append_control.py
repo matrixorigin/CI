@@ -187,7 +187,8 @@ def run(policy,catalog,lock,evidence,entry,base,config,directory,api=q.base.n.le
         state['preflight']=session.baselines;session.cache_volume(binding)
         planned=next(p for p in q.planner.plan(catalog,policy,original,snapshots[node]['sc'],work_size_gib=q.WORK_GIB)
             if p['spec']['template']['spec']['nodeSelector']['kubernetes.io/hostname']==node)
-        data=instructions(entry,base)
+        data=instructions(entry,base) if operation is None else operation.instructions(entry,base)
+        script=SCRIPT if operation is None else operation.script
         session.guard(node)
         if recovery is None:
             session.create({'apiVersion':'v1','kind':'ConfigMap','metadata':{'name':name,'namespace':'cicd'},
@@ -227,7 +228,7 @@ def run(policy,catalog,lock,evidence,entry,base,config,directory,api=q.base.n.le
             request=fresh(entry,base,api)
             if phase=='stage':request['url']=transport.signed_archive_url(entry)
             state['active_phase']=phase;session.journal();started=time.monotonic()
-            result=session.call(['exec','-i',workspace['pod_name'],'-n','cicd','--','python3','/probe/'+SCRIPT,phase],request,3700)
+            result=session.call(['exec','-i',workspace['pod_name'],'-n','cicd','--','python3','/probe/'+script,phase],request,3700)
             c.require(result['success'] is True and result['phase']==phase and result['compiler_invocations']==0,'CPU publisher phase failed')
             state[phase]={**result,'controller_seconds':round(time.monotonic()-started,3)};session.journal()
         c.require(state['verify']['independently_verified'] and state['verify']['compatibility_aliases'] is False
