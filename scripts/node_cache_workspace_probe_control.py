@@ -22,7 +22,9 @@ import node_cache_demand_plan as planner
 import node_cache_partial_recover_control as volume_checks
 import node_cache_chunk_resume_control as sessions
 
-WORK_GIB=128
+# Auxiliary proof volume only, within the reviewed 80..256Gi work contract.
+# Normal demand fleet defaults remain independent and require real UT sizing.
+WORK_GIB=80
 PROBE_RESOURCES={'requests':{'cpu':'100m','memory':'128Mi'},'limits':{'cpu':'1','memory':'512Mi'}}
 
 
@@ -32,6 +34,8 @@ def probe_pod(pool,name,config_map):
     spec=copy.deepcopy(pool['spec']['template']['spec'])
     c.require('ephemeral' in spec['volumes'][0] and spec['volumes'][1]['persistentVolumeClaim']['readOnly'] is True
         and spec['automountServiceAccountToken'] is False,'private work/cache boundaries missing')
+    claim=spec['volumes'][0]['ephemeral']['volumeClaimTemplate']['spec']
+    c.require(pub.quantity(claim['resources']['requests']['storage'])==WORK_GIB*c.GIB,'auxiliary workspace size differs')
     spec.pop('serviceAccountName',None)
     spec.update(restartPolicy='Never',activeDeadlineSeconds=3600)
     runner=spec['containers'][0]
@@ -250,7 +254,7 @@ def run(policy,catalog,lock,evidence,config,directory,api=base.n.legacy.api):
         original_id={'uid':original['metadata']['uid'],'spec_sha256':base.replication.sha(c.canonical(original['spec']))}
         state['original_pool']=original_id
         initial={node:session.snapshot(node) for node in planner.NODES}
-        plans=planner.plan(catalog,policy,original,initial['mo-standard-0']['sc'])
+        plans=planner.plan(catalog,policy,original,initial['mo-standard-0']['sc'],work_size_gib=WORK_GIB)
         session.baselines={node:admission(policy,initial[node],node,(),None,2,2) for node in planner.NODES}
         state['preflight']=session.baselines
         bindings={n['node']:n for n in catalog['nodes'] if n['environment']==environment}
