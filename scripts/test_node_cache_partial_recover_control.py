@@ -14,7 +14,7 @@ from test_node_cache_publish_control import fixture,NOW
 
 
 class PartialController(unittest.TestCase):
-    def exercise(self,bad=None):
+    def exercise(self,bad=None,retry=False):
         data=fixtures.Replication('test_two_nodes_same_objects_new_bindings_source_unchanged')
         data.environment='jed';data.setUp();self.addCleanup(data.doCleanups)
         policy,s=fixture();policy.update(environment='jed',name='cs-jed-incremental-n0-v1')
@@ -57,7 +57,7 @@ class PartialController(unittest.TestCase):
         if bad=='uid':live['pod',made[1]['name']]['metadata']['uid']='replacement'
         if bad=='proof':approval['stage_reverification']['bad']=['wrong']
         if bad=='hash':existing.chmod(0o644);existing.write_bytes(b'X'*existing.stat().st_size)
-        def api(path):return {'head_sha':q.OLD_REV,'head_branch':'codex/ruh-pvc-readiness','event':'workflow_dispatch',
+        def api(path):return {'head_sha':'185274d735086446e0caafd9766f38c2a743a6dc' if path.endswith('/44278016051') else q.OLD_REV,'head_branch':'codex/ruh-pvc-readiness','event':'workflow_dispatch',
             'conclusion':'failure','status':'completed','run_attempt':1,'path':'.github/workflows/cloudsigma-up.yaml','actor':{'login':'Ariznawlll'}}
         def call(command,**kwargs):
             nonlocal counter
@@ -103,10 +103,15 @@ class PartialController(unittest.TestCase):
                 else:raise AssertionError(mode)
             else:raise AssertionError(verb)
             return subprocess.CompletedProcess(command,0,'' if value is None else json.dumps(value),'')
+        fail_first=retry
         def streaming(source_cmd,target_cmd,**kwargs):
+            nonlocal fail_first
+            self.assertIn('-i',target_cmd[:target_cmd.index('--')])
+            self.assertNotIn('-i',source_cmd[:source_cmd.index('--')])
             args=target_cmd[4:];name=args[1];script=next(x for x in args if x.startswith('/probe/'));mode=args[args.index(script)+1]
             identity=json.loads(args[args.index('--target-json')+1]);claim=live['pod',name]['spec']['volumes'][0]['persistentVolumeClaim']['claimName']
             if mode=='finish-tool':
+                if fail_first:fail_first=False;raise ValueError('simulated missing stdin in original reviewed run')
                 out=io.BytesIO();p.export_tool(data.source_root,data.catalog,data.source,data.lock,out);self.assertEqual(len(out.getvalue()),data.lock['archive_size'])
                 out.seek(0);return p.finish_tool(roots[claim],data.catalog,data.source,data.lock,identity,out)
             self.assertEqual(mode,'receive-batch');self.assertLessEqual(kwargs['timeout'],900)
@@ -121,14 +126,28 @@ class PartialController(unittest.TestCase):
                 self.assertEqual(transfer.call_count,0)
                 if bad in ('uid','proof'):self.assertEqual(mutations,[])
                 return
-            result=q.run(policy,data.catalog,data.lock,approval,'private',data.root/'recovery',api=api)
-            self.assertEqual(transfer.call_count,2)
+            if retry:
+                with self.assertRaises(ValueError):q.run(policy,data.catalog,data.lock,approval,'private',data.root/'failed-recovery',api=api)
+                failed=json.loads((data.root/'failed-recovery/state.json').read_text())
+                failed['failure_sites']=[{'file':'node_cache_partial_recover_control.py','line':165},
+                                         {'file':'node_cache_replicate_control.py','line':116}]
+                approval['failed_recovery']={'run_id':44278016051,'receipt':failed}
+                first_creates=len([m for m in mutations if m[0]=='create'])
+                result=q.run(policy,data.catalog,data.lock,approval,'private',data.root/'recovery',api=api)
+                self.assertEqual(transfer.call_count,3)
+                self.assertEqual(result['retired_recovery_helpers'],failed['created'][1:])
+                self.assertEqual(result['adopted_recovery_configmap'],failed['created'][0])
+                self.assertEqual(len([m for m in mutations if m[0]=='create'])-first_creates,4)
+            else:
+                result=q.run(policy,data.catalog,data.lock,approval,'private',data.root/'recovery',api=api)
+                self.assertEqual(transfer.call_count,2)
         obj=destination/data.object_name
         self.assertEqual(before,(obj.stat().st_ino,obj.stat().st_mtime_ns,obj.read_bytes()))
         self.assertTrue(result['complete']);self.assertTrue(result['helper_pods_absent'])
         self.assertEqual(result['retired_helpers'],[made[1],made[3]])
         self.assertEqual(len(result['deleted']),3)
-        self.assertEqual([k for v,k,n in mutations if v=='create'],['ConfigMap','Pod','Pod','PersistentVolumeClaim','Pod'])
+        self.assertEqual([r['kind'] for r in result['created']],['ConfigMap','Pod','Pod','PersistentVolumeClaim','Pod'])
+        if not retry:self.assertEqual([k for v,k,n in mutations if v=='create'],['ConfigMap','Pod','Pod','PersistentVolumeClaim','Pod'])
         self.assertIn(('pvc','cs-jed-incremental-n1-v1'),live);self.assertIn(('configmap',oldcm),live)
         self.assertEqual(len([k for k,n in live if k=='pvc']),3)
 
@@ -136,3 +155,11 @@ class PartialController(unittest.TestCase):
     def test_replaced_old_helper_refuses_all_mutations(self):self.exercise('uid')
     def test_bad_approved_proof_refuses_all_mutations(self):self.exercise('proof')
     def test_live_corrupt_stage_never_streamed_or_published(self):self.exercise('hash')
+
+    def test_kubectl_stdin_forwarding_contract(self):
+        for mode in ('finish-tool','receive-batch','inspect','verify','export-tool','export-batch','finish','plan-batches'):
+            args=q.exec_args('owned-helper',mode)
+            self.assertEqual('-i' in args[:args.index('--')],mode in ('finish-tool','receive-batch'))
+            self.assertNotIn('-t',args)
+
+    def test_reviewed_stdin_failure_reuses_configmap_preserves_stage_replaces_only_own_helpers(self):self.exercise(retry=True)
