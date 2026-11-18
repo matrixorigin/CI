@@ -1,6 +1,7 @@
 self-hosted-runner:
   labels:
     - cs-large-7c14g
+    - cs-node-cache-7c14g
     - amd64-mo-shanghai-8c16g
     - amd64-mo-guangzhou-2xlarge16
     - amd64-mo-guangzhou-2xlarge32
@@ -13,6 +14,11 @@ self-hosted-runner:
     - mac-arm64-mini
 
 paths:
+  .github/workflows/coverage-node-cache-pr.yaml:
+    ignore:
+      # Documented GitHub.com reusable-workflow identity; installed linter
+      # predates these fields. Do not suppress any other expression checks.
+      - 'property "workflow_(repository|sha)" is not defined'
   .github/workflows/node-cache-migrate-isolated.yaml:
     ignore:
       # GitHub.com documents these reusable-workflow contexts; installed

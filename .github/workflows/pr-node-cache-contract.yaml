@@ -1,0 +1,32 @@
+name: PR two-group node-cache contract
+on:
+  push:
+    branches: [codex/pr-node-cache-two-group-capacity]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contract:
+    # No cluster credentials, CS runners, PVC mutations or real PR workloads.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - run: python3 -m pip install PyYAML==6.0.2
+      - name: PR trust, two-group partition, local tools and cache correctness
+        env:
+          GOMAXPROCS: '2'
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s scripts -p test_pr_node_cache_workflow.py -v
+          python3 -m unittest discover -s scripts -p test_coverage_two_groups.py -v
+          python3 -m unittest discover -s scripts -p test_coverage_two_groups_merge.py -v
+          python3 -m unittest discover -s scripts -p test_coverage_group_collect.py -v
+          python3 -m unittest discover -s scripts -p test_node_compile_cache.py -v
+          python3 -m unittest discover -s scripts -p test_node_cache_toolchain_store.py -v
