@@ -7,10 +7,14 @@ import build_node_consumer_workflow as consumer
 
 def build(helper):
     doc=consumer.build(helper)
-    doc['name']='Isolated two-group consumer with persistent local tools'
+    doc['name']='Isolated two-or-three-group consumer with persistent local tools'
+    gate=doc['jobs']['check_coverage_eligibility']['steps'][-1]
+    gate['run']=gate['run'].replace('test "$GROUP_COUNT" = 2',
+        'case "$GROUP_COUNT" in 2|3) ;; *) exit 1 ;; esac')
     del doc['jobs']['prepare-toolchain']
     job=doc['jobs']['ut-coverage-linux-x86']
     job['needs'].remove('prepare-toolchain')
+    job['strategy']['matrix']['group']="${{ fromJSON(inputs.group_count == 3 && '[0,1,2]' || '[0,1]') }}"
     steps=job['steps']
     steps[:]=[s for s in steps if s.get('name')!='Download verified toolchain artifact']
     checkout=next(s for s in steps if s.get('with',{}).get('path')=='.ci-toolchain')

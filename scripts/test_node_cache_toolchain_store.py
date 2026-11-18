@@ -118,10 +118,15 @@ class Workflow(unittest.TestCase):
         self.assertEqual(pod['spec']['containers'][0]['resources']['limits'],{'cpu':'1','memory':'1Gi'})
         self.assertIn('node_cache_toolchain_job.py',cm['data'])
 
-    def test_only_local_tools_two_groups_no_precompile(self):
+    def test_only_local_tools_two_or_three_groups_no_precompile(self):
         doc=flow.build('a'*40);job=doc['jobs']['ut-coverage-linux-x86']
         self.assertNotIn('prepare-toolchain',doc['jobs'])
-        self.assertEqual(job['strategy']['matrix']['group'],[0,1]);self.assertEqual(job['strategy']['max-parallel'],2)
+        self.assertEqual(job['strategy']['matrix']['group'],
+            "${{ fromJSON(inputs.group_count == 3 && '[0,1,2]' || '[0,1]') }}")
+        self.assertEqual(job['strategy']['max-parallel'],2)
+        gate=doc['jobs']['check_coverage_eligibility']['steps'][-1]['run']
+        self.assertIn('case "$GROUP_COUNT" in 2|3) ;; *) exit 1 ;; esac',gate)
+        self.assertIn('test "$CANDIDATE" = false',gate)
         steps=job['steps'];names=[s.get('name','') for s in steps]
         self.assertNotIn('Download verified toolchain artifact',names)
         restore=next(s for s in steps if s.get('id')=='persistent_toolchain')

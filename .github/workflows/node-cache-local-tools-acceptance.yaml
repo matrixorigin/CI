@@ -1,4 +1,4 @@
-name: Isolated two-group consumer with persistent local tools
+name: Isolated two-or-three-group consumer with persistent local tools
 jobs:
   check_coverage_eligibility:
     name: Authorize isolated full-suite incremental acceptance
@@ -32,7 +32,7 @@ jobs:
 
         case "$ENVIRONMENT" in mty|jed|ruh|mnl2) ;; *) exit 1 ;; esac
 
-        test "$GROUP_COUNT" = 2
+        case "$GROUP_COUNT" in 2|3) ;; *) exit 1 ;; esac
 
         test "$NODE_CACHE" = true
 
@@ -55,9 +55,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        group:
-        - 0
-        - 1
+        group: ${{ fromJSON(inputs.group_count == 3 && '[0,1,2]' || '[0,1]') }}
     outputs:
       status: ${{ steps.coverage_status.outputs.status }}
     needs:
