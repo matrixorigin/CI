@@ -12,7 +12,7 @@ jobs:
     - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
       with:
         repository: matrixorigin/CI
-        ref: 939c63bebe705d7753e06ae946a1c42d8e1a2403
+        ref: ab15b250de1d62cd23f9ae678a4b64f75aa9bf38
         persist-credentials: false
         sparse-checkout: config/node-cache-validation-sources.json
         sparse-checkout-cone-mode: false
@@ -102,7 +102,7 @@ jobs:
       with:
         token: ${{ secrets.TOKEN_ACTION }}
         repository: matrixorigin/CI
-        ref: 939c63bebe705d7753e06ae946a1c42d8e1a2403
+        ref: ab15b250de1d62cd23f9ae678a4b64f75aa9bf38
         persist-credentials: false
         sparse-checkout: 'scripts/prepare_coverage_cgo.sh
 
@@ -593,7 +593,7 @@ jobs:
     - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
       with:
         repository: matrixorigin/CI
-        ref: 939c63bebe705d7753e06ae946a1c42d8e1a2403
+        ref: ab15b250de1d62cd23f9ae678a4b64f75aa9bf38
         token: ${{ secrets.TOKEN_ACTION }}
         persist-credentials: false
         sparse-checkout: 'scripts/coverage_group_collect.py
