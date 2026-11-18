@@ -15,6 +15,7 @@ import node_cache_replicate_control as base
 import node_cache_partial_replication as partial
 
 ORIGINAL=44269608611
+ORIGINAL_RUNS={'jed':44269608611,'ruh':44269605041}
 OLD_REV='ecc89fdfec0b7acd575fb9ef563f6f1d06b9fad6'
 CM='cs-jed-cache-partial-r1'
 
@@ -30,25 +31,30 @@ def exec_args(pod,mode,target=None,module='node_cache_replication.py',number=Non
 
 
 def approved(approval,policy,lock):
+    env=policy['environment'];c.require(env in ORIGINAL_RUNS,'partial environment not approved')
+    original=ORIGINAL_RUNS[env]
     old=approval['receipt'];proof=approval['stage_reverification']
-    c.require(policy['environment']=='jed' and approval['original_run_id']==ORIGINAL
-        and old['environment']=='jed' and old['complete'] is False and old['error_type']=='ValueError'
+    c.require(approval['original_run_id']==original
+        and old['environment']==env and old['complete'] is False and old['error_type']=='ValueError'
         and old['failure_sites']==[{'file':'node_cache_replicate_control.py','line':242},
                                   {'file':'node_cache_replicate_control.py','line':116}]
         and old['deleted']==[] and 'pending_create' not in old
         and [r['kind'] for r in old['created']]==['ConfigMap','Pod','PersistentVolumeClaim','Pod']
         and set(old['targets'])=={'mo-standard-1'}
         and 'received' not in old['targets']['mo-standard-1'],'not the reviewed partial-copy failure')
-    c.require(proof['original_run_id']==ORIGINAL and proof['environment']=='jed'
-        and proof['readonly'] is True and proof['mutations']==0 and proof['bad']==[]
+    c.require(proof['original_run_id']==original and proof['environment']==env
+        and proof['readonly'] is True and proof.get('mutations',proof.get('filesystem_writes'))==0 and proof['bad']==[]
+        and proof.get('bad_count',0)==proof.get('extra_count',0)==0
         and proof['verified_files']+1==proof['expected_files']==old['payload']['files']
         and proof['verified_bytes']+lock['archive_size']==old['payload']['bytes']
-        and proof['missing']==[partial.tool_name(lock)] and proof['published'] is False
+        and (proof['missing']==[partial.tool_name(lock)] or proof['missing']==[{
+            'path':partial.tool_name(lock),'bytes':lock['archive_size'],'sha256':lock['archive_sha256']}])
+        and proof['published'] is False
         and proof['compiler_invocations']==proof['external_downloads']==0,'partial proof differs')
-    c.require(old['created'][0]['name']=='cs-jed-cache-replication-v3'
-        and old['created'][1]['name']=='cs-jed-cache-replication-v3-source'
-        and old['created'][2]['name']=='cs-jed-incremental-n1-v1'
-        and old['created'][3]['name']=='cs-jed-cache-replication-v3-n1','old helper scope differs')
+    c.require(old['created'][0]['name']==f'cs-{env}-cache-replication-v3'
+        and old['created'][1]['name']==f'cs-{env}-cache-replication-v3-source'
+        and old['created'][2]['name']==f'cs-{env}-incremental-n1-v1'
+        and old['created'][3]['name']==f'cs-{env}-cache-replication-v3-n1','old helper scope differs')
     return old,proof
 
 
@@ -68,7 +74,7 @@ def volume(policy,node,claim,pvc,pv,expected=None):
     c.require(len(terms)==1 and not terms[0].get('matchFields')
         and any(x=={'key':'directpv.min.io/node','operator':'In','values':[node]}
                 for x in terms[0]['matchExpressions']),'partial recovery topology differs')
-    binding={'environment':'jed','node':node,'node_uid':policy['node_uids'][node],
+    binding={'environment':policy['environment'],'node':node,'node_uid':policy['node_uids'][node],
         'pvc_uid':pvc['metadata']['uid'],'pv_uid':pv['metadata']['uid']}
     c.require(expected is None or binding==expected,'existing volume replaced')
     return binding
@@ -77,23 +83,24 @@ def volume(policy,node,claim,pvc,pv,expected=None):
 def run(policy,catalog,lock,approval,config,directory,api=base.n.legacy.api):
     c.require(not directory.exists(),'intent exists: reconcile without retry')
     old,proof=approved(approval,policy,lock)
+    env=policy['environment'];original_run=ORIGINAL_RUNS[env];cm=f'cs-{env}-cache-partial-r1'
     directory.mkdir();report=directory/'state.json'
-    source=next(n for n in catalog['nodes'] if n['environment']=='jed' and n['node']=='mo-standard-0')
-    state={'environment':'jed','complete':False,'compiler_invocations':0,'automatic_retry':False,
-        'started_at':base.pub.now().isoformat(),'resumed_from':{'run_id':ORIGINAL,'started_at':old['started_at']},
+    source=next(n for n in catalog['nodes'] if n['environment']==env and n['node']=='mo-standard-0')
+    state={'environment':env,'complete':False,'compiler_invocations':0,'automatic_retry':False,
+        'started_at':base.pub.now().isoformat(),'resumed_from':{'run_id':original_run,'started_at':old['started_at']},
         'adopted_resources':old['created'],'existing_compile_objects_not_recopied':True,
         'missing_tool_only_bytes':lock['archive_size'],'retired_helpers':[],'created':[],'deleted':[],'targets':{}}
     previous=approval.get('failed_recovery')
     if previous is not None:
         failed=previous['receipt']
-        c.require(previous['run_id']==44278016051 and failed['environment']=='jed' and failed['complete'] is False
+        c.require(env=='jed' and previous['run_id']==44278016051 and failed['environment']=='jed' and failed['complete'] is False
             and failed['error_type']=='ValueError' and failed['targets']=={} and failed['deleted']==[]
             and 'pending_create' not in failed and failed['adopted_resources']==old['created']
             and failed['retired_helpers']==[old['created'][1],old['created'][3]]
             and failed['failure_sites']==[{'file':'node_cache_partial_recover_control.py','line':165},
                                           {'file':'node_cache_replicate_control.py','line':116}]
             and [r['kind'] for r in failed['created']]==['ConfigMap','Pod','Pod']
-            and [r['name'] for r in failed['created']]==[CM,CM+'-source',CM+'-n1']
+            and [r['name'] for r in failed['created']]==[cm,cm+'-source',cm+'-n1']
             and failed['partial_reverified_before_write']['success'] is True
             and failed['partial_reverified_before_write']['verified_files']==proof['verified_files'],
             'not the reviewed stdin-forwarding failure')
@@ -102,7 +109,16 @@ def run(policy,catalog,lock,approval,config,directory,api=base.n.legacy.api):
         state['adopted_recovery_configmap']=failed['created'][0]
         state['retired_recovery_helpers']=[]
         state['created']=[failed['created'][0]]
-    prefix=CM if previous is None else 'cs-jed-cache-partial-r2'
+    prefix=cm if previous is None else 'cs-jed-cache-partial-r2'
+    copy_budget=7200 if env=='ruh' else 3700
+    def fresh_helper(name,node,claim,readonly):
+        result=base.helper(name,node,claim,cm,readonly)
+        if env=='ruh':
+            # RUH's measured first copy exceeded an hour. This new COPY-only
+            # budget does not alter UT limits or an already-running Pod.
+            result['spec']['activeDeadlineSeconds']=9000
+            result['spec']['containers'][0]['command']=['/bin/bash','-euc','python3 --version; sleep 8900']
+        return result
     def journal():base.pub.write_journal(report,state)
     def command(args):return ['kubectl','--kubeconfig',str(config),'--request-timeout=30s',*args]
     def call(args,data=None,timeout=45):
@@ -142,7 +158,7 @@ def run(policy,catalog,lock,approval,config,directory,api=base.n.legacy.api):
         row=next(r for r in state['created'] if r['kind']=='Pod' and r['name']==name)
         while True:
             pod=call(['get','pod',name,'-n','cicd','-o','json'])
-            c.require(pod['metadata']['uid']==row['uid'] and base.checked_helper_spec(base.helper(name,node,claim,CM,readonly)['spec'],pod['spec']),
+            c.require(pod['metadata']['uid']==row['uid'] and base.checked_helper_spec(fresh_helper(name,node,claim,readonly)['spec'],pod['spec']),
                       'new copy helper template differs')
             if pod.get('status',{}).get('phase')=='Running' and any(cn['type']=='Ready' and cn['status']=='True' for cn in pod['status'].get('conditions',[])):
                 c.require(pod['spec']['nodeName']==node,'new helper node differs');return
@@ -152,7 +168,7 @@ def run(policy,catalog,lock,approval,config,directory,api=base.n.legacy.api):
         pvc=call(['get','pvc',claim,'-n','cicd','-o','json']);pv=call(['get','pv',pvc['spec']['volumeName'],'-o','json'])
         return volume(policy,node,claim,pvc,pv,expected)
     try:
-        journal();original=api('repos/matrixorigin/cloudsigma-gitops/actions/runs/'+str(ORIGINAL))
+        journal();original=api('repos/matrixorigin/cloudsigma-gitops/actions/runs/'+str(original_run))
         c.require(original['head_sha']==OLD_REV and original['head_branch']=='codex/ruh-pvc-readiness'
             and original['event']=='workflow_dispatch' and original['conclusion']=='failure' and original['status']=='completed'
             and original['run_attempt']==1 and original['path']=='.github/workflows/cloudsigma-up.yaml'
@@ -164,6 +180,14 @@ def run(policy,catalog,lock,approval,config,directory,api=base.n.legacy.api):
                 and prior['status']=='completed' and prior['conclusion']=='failure' and prior['run_attempt']==1
                 and prior['path']=='.github/workflows/cloudsigma-up.yaml' and prior['actor']['login']=='Ariznawlll',
                 'previous recovery provenance differs')
+        if env=='ruh':
+            c.require(approval['readonly_inspection_run_id']==44280524562,'RUH inspection approval differs')
+            checked=api('repos/matrixorigin/cloudsigma-gitops/actions/runs/44280524562')
+            c.require(checked['head_sha']=='0cd28ed7774ff8f4e6c453336ae8ead2624d2e1f'
+                and checked['head_branch']=='codex/ruh-pvc-readiness' and checked['event']=='workflow_dispatch'
+                and checked['status']=='completed' and checked['conclusion']=='success' and checked['run_attempt']==1
+                and checked['path']=='.github/workflows/cloudsigma-up.yaml' and checked['actor']['login']=='Ariznawlll',
+                'protected RUH readonly inspection provenance differs')
         for entry in base.replication.entries_for(catalog,source):
             c.require(base.n.reviewed_entries({'entries':[entry]},entry['runtime'],api)==[entry],'unreviewed producer')
         base.tools.authorize(lock,api(f'repos/{lock["producer"]["repository"]}/actions/runs/{lock["producer"]["id"]}'),
@@ -173,26 +197,26 @@ def run(policy,catalog,lock,approval,config,directory,api=base.n.legacy.api):
         state['preflight']=baselines;journal()
         source_identity={k:source[k] for k in ('environment','node','node_uid','pvc_uid','pv_uid')}
         bound('mo-standard-0',policy['name'],source_identity)
-        target1=bound('mo-standard-1','cs-jed-incremental-n1-v1',old['targets']['mo-standard-1']['binding'])
-        c.require(call(['get','pvc','cs-jed-incremental-n2-v1','-n','cicd','--ignore-not-found','-o','json']) is None,'node2 already exists: reconcile')
+        target1=bound('mo-standard-1',f'cs-{env}-incremental-n1-v1',old['targets']['mo-standard-1']['binding'])
+        c.require(call(['get','pvc',f'cs-{env}-incremental-n2-v1','-n','cicd','--ignore-not-found','-o','json']) is None,'node2 already exists: reconcile')
         old_cm=call(['get','configmap',old['created'][0]['name'],'-n','cicd','-o','json'])
         c.require(old_cm['metadata']['uid']==old['created'][0]['uid'] and old_cm.get('immutable') is True,'old ConfigMap replaced')
         helpers=[(old['created'][1],'mo-standard-0',policy['name'],True),
-                 (old['created'][3],'mo-standard-1','cs-jed-incremental-n1-v1',False)]
+                 (old['created'][3],'mo-standard-1',f'cs-{env}-incremental-n1-v1',False)]
         if previous:
             absent(state['retired_helpers'])
             helpers=[(previous['receipt']['created'][1],'mo-standard-0',policy['name'],True),
-                     (previous['receipt']['created'][2],'mo-standard-1','cs-jed-incremental-n1-v1',False)]
+                     (previous['receipt']['created'][2],'mo-standard-1',f'cs-{env}-incremental-n1-v1',False)]
         for row,node,claim,readonly in helpers:
             pod=call(['get','pod',row['name'],'-n','cicd','-o','json'])
-            helper_cm=CM if previous else old['created'][0]['name']
+            helper_cm=cm if previous else old['created'][0]['name']
             c.require(pod['metadata']['uid']==row['uid'] and base.checked_helper_spec(base.helper(row['name'],node,claim,helper_cm,readonly)['spec'],pod['spec']),
                       'old helper identity or template differs')
         data={name:(base.HERE/name).read_text() for name in base.FILES+('node_cache_partial_replication.py','node_cache_chunk_replication.py')}
         data.update({'catalog.json':c.canonical(catalog).decode(),'lock.json':c.canonical(lock).decode(),'source.json':c.canonical(source).decode()})
         c.require(sum(len(k.encode())+len(v.encode()) for k,v in data.items())<900000,'recovery ConfigMap budget')
         if previous:
-            actual=call(['get','configmap',CM,'-n','cicd','-o','json'])
+            actual=call(['get','configmap',cm,'-n','cicd','-o','json'])
             c.require(actual['metadata']['uid']==state['adopted_recovery_configmap']['uid'] and actual.get('immutable') is True
                 and actual['data']==data,'recovery ConfigMap changed')
         # No producer data is touched. Only exact approved own helper Pods retire.
@@ -200,26 +224,26 @@ def run(policy,catalog,lock,approval,config,directory,api=base.n.legacy.api):
         for row,_,_,_ in helpers:guard('mo-standard-0');delete(row,retired_key)
         absent(state[retired_key])
         if not previous:
-            guard('mo-standard-0');create({'apiVersion':'v1','kind':'ConfigMap','immutable':True,'metadata':{'name':CM,'namespace':'cicd'},'data':data})
+            guard('mo-standard-0');create({'apiVersion':'v1','kind':'ConfigMap','immutable':True,'metadata':{'name':cm,'namespace':'cicd'},'data':data})
         src=prefix+'-source';pod1=prefix+'-n1'
-        guard('mo-standard-0');create(base.helper(src,'mo-standard-0',policy['name'],CM,True));wait(src,'mo-standard-0',policy['name'],True)
-        guard('mo-standard-1');create(base.helper(pod1,'mo-standard-1','cs-jed-incremental-n1-v1',CM,False));wait(pod1,'mo-standard-1','cs-jed-incremental-n1-v1',False)
-        bound('mo-standard-1','cs-jed-incremental-n1-v1',target1)
+        guard('mo-standard-0');create(fresh_helper(src,'mo-standard-0',policy['name'],True));wait(src,'mo-standard-0',policy['name'],True)
+        guard('mo-standard-1');create(fresh_helper(pod1,'mo-standard-1',f'cs-{env}-incremental-n1-v1',False));wait(pod1,'mo-standard-1',f'cs-{env}-incremental-n1-v1',False)
+        bound('mo-standard-1',f'cs-{env}-incremental-n1-v1',target1)
         inspected=call(execute(pod1,'inspect',target1,'node_cache_partial_replication.py'),timeout=600)
-        c.require(inspected['success'] and inspected['verified_files']==proof['verified_files'] and inspected['missing']==proof['missing'],'live partial stage changed')
+        c.require(inspected['success'] and inspected['verified_files']==proof['verified_files'] and inspected['missing']==[partial.tool_name(lock)],'live partial stage changed')
         state['partial_reverified_before_write']=inspected;journal();guard('mo-standard-1')
         result=base.stream_transfer(command(execute(src,'export-tool',module='node_cache_partial_replication.py')),
             command(execute(pod1,'finish-tool',target1,'node_cache_partial_replication.py')))
-        state['targets']['mo-standard-1']={'claim':'cs-jed-incremental-n1-v1','binding':target1,'received':result,'tool_only_recovery':True}
+        state['targets']['mo-standard-1']={'claim':f'cs-{env}-incremental-n1-v1','binding':target1,'received':result,'tool_only_recovery':True}
         journal();verified=call(execute(pod1,'verify',target1),timeout=600)
         c.require(verified==result and verified['success'],'partial independent verification differs')
         state['targets']['mo-standard-1']['verify']=verified;journal()
-        node='mo-standard-2';claim='cs-jed-incremental-n2-v1';pod2=prefix+'-n2'
+        node='mo-standard-2';claim=f'cs-{env}-incremental-n2-v1';pod2=prefix+'-n2'
         base.snapshot_guard(policy,snapshot(node),node,owned(),baselines[node]['workloads'],True)
         pvc=create({'apiVersion':'v1','kind':'PersistentVolumeClaim','metadata':{'name':claim,'namespace':'cicd'},'spec':{
             'accessModes':['ReadWriteOnce'],'volumeMode':'Filesystem','storageClassName':'directpv-min-io-ephemeral',
             'resources':{'requests':{'storage':'64Gi'}}}})
-        guard(node);create(base.helper(pod2,node,claim,CM,False));wait(pod2,node,claim,False)
+        guard(node);create(fresh_helper(pod2,node,claim,False));wait(pod2,node,claim,False)
         target2=bound(node,claim);c.require(target2['pvc_uid']==pvc['metadata']['uid'],'new node2 claim replaced')
         state['targets'][node]={'claim':claim,'binding':target2};journal();guard(node)
         planned=call(execute(src,'plan-batches',module='node_cache_chunk_replication.py'),timeout=600)
@@ -227,9 +251,9 @@ def run(policy,catalog,lock,approval,config,directory,api=base.n.legacy.api):
             and 0<planned['batches']<=256,'node2 batch plan differs')
         state['targets'][node]['batches']=[];journal();copy_start=time.monotonic()
         for number in range(planned['batches']):
-            # Preserve the original whole-node transfer deadline; bound every
-            # connection separately and acknowledge only hash-verified batches.
-            guard(node);left=3700-(time.monotonic()-copy_start);c.require(left>0,'whole-node transfer deadline')
+            # Bound COPY duration and each connection separately. Only RUH's
+            # new copy budget is extended from measured transfer evidence.
+            guard(node);left=copy_budget-(time.monotonic()-copy_start);c.require(left>0,'whole-node transfer deadline')
             batch=base.stream_transfer(command(execute(src,'export-batch',module='node_cache_chunk_replication.py',number=number)),
                 command(execute(pod2,'receive-batch',target2,'node_cache_chunk_replication.py',number)),timeout=min(900,left))
             c.require(batch['success'] is True and batch['number']==number and batch['batches']==planned['batches']
@@ -248,6 +272,7 @@ def run(policy,catalog,lock,approval,config,directory,api=base.n.legacy.api):
         absent(state['deleted']);state.update(helper_pods_absent=True,complete=True,completed_at=base.pub.now().isoformat());journal()
         return state
     except Exception as error:
+        if hasattr(error,'transfer_diagnostic'):state['transfer_diagnostic']=error.transfer_diagnostic
         state.update(error_type=type(error).__name__,failed_at=base.pub.now().isoformat(),
             failure_sites=[{'file':Path(x.filename).name,'line':x.lineno} for x in traceback.extract_tb(error.__traceback__)
                            if Path(x.filename).name.startswith('node_cache_')]);journal();raise

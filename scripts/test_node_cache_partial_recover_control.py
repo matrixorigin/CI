@@ -14,17 +14,17 @@ from test_node_cache_publish_control import fixture,NOW
 
 
 class PartialController(unittest.TestCase):
-    def exercise(self,bad=None,retry=False):
+    def exercise(self,bad=None,retry=False,env='jed'):
         data=fixtures.Replication('test_two_nodes_same_objects_new_bindings_source_unchanged')
-        data.environment='jed';data.setUp();self.addCleanup(data.doCleanups)
-        policy,s=fixture();policy.update(environment='jed',name='cs-jed-incremental-n0-v1')
-        policy['namespace_uids']={k.replace('mocservices-mty','mocservices-jed'):v for k,v in policy['namespace_uids'].items()}
+        data.environment=env;data.setUp();self.addCleanup(data.doCleanups)
+        policy,s=fixture();policy.update(environment=env,name=f'cs-{env}-incremental-n0-v1')
+        policy['namespace_uids']={k.replace('mocservices-mty','mocservices-'+env):v for k,v in policy['namespace_uids'].items()}
         s['namespaces']['items']=[{'metadata':{'name':k,'uid':v}} for k,v in policy['namespace_uids'].items()]
         policy['node_uids']={f'mo-standard-{i}':data.source['node_uid'] if i==0 else data.target(i)['node_uid'] for i in range(3)}
         s['nodes']['items']=[{**copy.deepcopy(s['nodes']['items'][0]),'metadata':{'name':name,'uid':uid,
             'labels':{'directpv.min.io/node':name,'directpv.min.io/tier':'ephemeral'}}} for name,uid in policy['node_uids'].items()]
         s['drives']['items']=[{'metadata':{'labels':n['metadata']['labels']},'status':{'status':'Ready','freeCapacity':200*b.c.GIB}} for n in s['nodes']['items']]
-        live={};mutations=[];counter=10;roots={policy['name']:data.source_root};target=data.target(env='jed')
+        live={};mutations=[];counter=10;roots={policy['name']:data.source_root};target=data.target(env=env)
         def pvc(claim,node,identity):
             claim_obj={'metadata':{'name':claim,'namespace':'cicd','uid':identity['pvc_uid']},'status':{'phase':'Bound','capacity':{'storage':'64Gi'}},
                 'spec':{'volumeName':claim+'-pv','accessModes':['ReadWriteOnce'],'storageClassName':'directpv-min-io-ephemeral'}}
@@ -33,32 +33,37 @@ class PartialController(unittest.TestCase):
                 'storageClassName':'directpv-min-io-ephemeral','csi':{'driver':'directpv-min-io'},
                 'nodeAffinity':{'required':{'nodeSelectorTerms':[{'matchExpressions':[{'key':'directpv.min.io/node','operator':'In','values':[node]}]}]}}}}
             live['pvc',claim]=claim_obj;live['pv',claim+'-pv']=pv_obj
-        pvc(policy['name'],'mo-standard-0',data.source);pvc('cs-jed-incremental-n1-v1','mo-standard-1',target)
-        destination=data.root/'partial';destination.mkdir();roots['cs-jed-incremental-n1-v1']=destination
+        pvc(policy['name'],'mo-standard-0',data.source);pvc(f'cs-{env}-incremental-n1-v1','mo-standard-1',target)
+        destination=data.root/'partial';destination.mkdir();roots[f'cs-{env}-incremental-n1-v1']=destination
         truncated=data.rewrite(lambda rows:[x for x in rows if x[0].name!=p.tool_name(data.lock)])
         with self.assertRaises(ValueError):b.replication.receive(destination,data.catalog,data.source,data.lock,target,io.BytesIO(truncated))
         existing=destination/'.replication-stage'/data.object_name;before=(existing.stat().st_ino,existing.stat().st_mtime_ns,existing.read_bytes())
-        oldcm='cs-jed-cache-replication-v3'
+        oldcm=f'cs-{env}-cache-replication-v3'
         made=[{'kind':kind,'name':name,'uid':f'80000000-0000-4000-8000-{i:012d}'} for i,(kind,name) in enumerate([
-            ('ConfigMap',oldcm),('Pod',oldcm+'-source'),('PersistentVolumeClaim','cs-jed-incremental-n1-v1'),('Pod',oldcm+'-n1')],1)]
+            ('ConfigMap',oldcm),('Pod',oldcm+'-source'),('PersistentVolumeClaim',f'cs-{env}-incremental-n1-v1'),('Pod',oldcm+'-n1')],1)]
         made[2]['uid']=target['pvc_uid'];live['configmap',oldcm]={'metadata':{'uid':made[0]['uid']},'immutable':True}
-        for row,node,claim,ro in [(made[1],'mo-standard-0',policy['name'],True),(made[3],'mo-standard-1','cs-jed-incremental-n1-v1',False)]:
+        for row,node,claim,ro in [(made[1],'mo-standard-0',policy['name'],True),(made[3],'mo-standard-1',f'cs-{env}-incremental-n1-v1',False)]:
             pod=b.helper(row['name'],node,claim,oldcm,ro);pod['metadata']['uid']=row['uid'];pod['spec']['nodeName']=node
             pod['status']={'phase':'Running','conditions':[{'type':'Ready','status':'True'}]};live['pod',row['name']]=pod
         plan=b.replication.make_plan(data.source_root,data.catalog,data.source,data.lock)
         payload=b.replication.expected_files(plan,data.catalog,data.source,data.lock)
-        approval={'original_run_id':q.ORIGINAL,'receipt':{'environment':'jed','complete':False,'error_type':'ValueError',
+        approval={'original_run_id':q.ORIGINAL_RUNS[env],'receipt':{'environment':env,'complete':False,'error_type':'ValueError',
             'failure_sites':[{'file':'node_cache_replicate_control.py','line':242},{'file':'node_cache_replicate_control.py','line':116}],
             'deleted':[],'created':made,'started_at':'original-start','targets':{'mo-standard-1':{'binding':target}},
             'payload':{'bytes':sum(x[0] for x in payload.values()),'files':len(payload)}},
-            'stage_reverification':{'original_run_id':q.ORIGINAL,'environment':'jed','readonly':True,'mutations':0,'bad':[],
+            'stage_reverification':{'original_run_id':q.ORIGINAL_RUNS[env],'environment':env,'readonly':True,'mutations':0,'bad':[],
                 'verified_files':len(payload)-1,'expected_files':len(payload),'verified_bytes':sum(x[0] for x in payload.values())-data.lock['archive_size'],
                 'missing':[p.tool_name(data.lock)],'published':False,'compiler_invocations':0,'external_downloads':0}}
+        if env=='ruh':
+            approval['readonly_inspection_run_id']=44280524562
+            proof=approval['stage_reverification'];proof.pop('mutations');proof['filesystem_writes']=0
+            proof['missing']=[{'path':p.tool_name(data.lock),'bytes':data.lock['archive_size'],'sha256':data.lock['archive_sha256']}]
+            proof.update(missing_count=1,bad_count=0,extra_count=0)
         if bad=='uid':live['pod',made[1]['name']]['metadata']['uid']='replacement'
         if bad=='proof':approval['stage_reverification']['bad']=['wrong']
         if bad=='hash':existing.chmod(0o644);existing.write_bytes(b'X'*existing.stat().st_size)
-        def api(path):return {'head_sha':'185274d735086446e0caafd9766f38c2a743a6dc' if path.endswith('/44278016051') else q.OLD_REV,'head_branch':'codex/ruh-pvc-readiness','event':'workflow_dispatch',
-            'conclusion':'failure','status':'completed','run_attempt':1,'path':'.github/workflows/cloudsigma-up.yaml','actor':{'login':'Ariznawlll'}}
+        def api(path):return {'head_sha':'0cd28ed7774ff8f4e6c453336ae8ead2624d2e1f' if path.endswith('/44280524562') else '185274d735086446e0caafd9766f38c2a743a6dc' if path.endswith('/44278016051') else q.OLD_REV,'head_branch':'codex/ruh-pvc-readiness','event':'workflow_dispatch',
+            'conclusion':'success' if path.endswith('/44280524562') else 'failure','status':'completed','run_attempt':1,'path':'.github/workflows/cloudsigma-up.yaml','actor':{'login':'Ariznawlll'}}
         def call(command,**kwargs):
             nonlocal counter
             args=command[4:];verb=args[0];value=None
@@ -80,7 +85,7 @@ class PartialController(unittest.TestCase):
                     obj['status']={'phase':'Running','conditions':[{'type':'Ready','status':'True'}]}
                     claim=obj['spec']['volumes'][0]['persistentVolumeClaim']['claimName']
                     if claim not in roots:
-                        identity={**data.target(2,env='jed'),'pvc_uid':live['pvc',claim]['metadata']['uid']}
+                        identity={**data.target(2,env=env),'pvc_uid':live['pvc',claim]['metadata']['uid']}
                         pvc(claim,node,identity);roots[claim]=data.root/'node2';roots[claim].mkdir()
                 value=obj
             elif verb=='delete':
@@ -148,7 +153,7 @@ class PartialController(unittest.TestCase):
         self.assertEqual(len(result['deleted']),3)
         self.assertEqual([r['kind'] for r in result['created']],['ConfigMap','Pod','Pod','PersistentVolumeClaim','Pod'])
         if not retry:self.assertEqual([k for v,k,n in mutations if v=='create'],['ConfigMap','Pod','Pod','PersistentVolumeClaim','Pod'])
-        self.assertIn(('pvc','cs-jed-incremental-n1-v1'),live);self.assertIn(('configmap',oldcm),live)
+        self.assertIn(('pvc',f'cs-{env}-incremental-n1-v1'),live);self.assertIn(('configmap',oldcm),live)
         self.assertEqual(len([k for k,n in live if k=='pvc']),3)
 
     def test_exact_scope_partial_tool_and_only_missing_node2(self):self.exercise()
@@ -163,3 +168,5 @@ class PartialController(unittest.TestCase):
             self.assertNotIn('-t',args)
 
     def test_reviewed_stdin_failure_reuses_configmap_preserves_stage_replaces_only_own_helpers(self):self.exercise(retry=True)
+
+    def test_ruh_protected_inspection_selective_copy_and_own_helper_scope(self):self.exercise(env='ruh')

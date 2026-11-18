@@ -113,7 +113,24 @@ def stream_transfer(source_command,target_command,timeout=3700):
         target=subprocess.Popen(target_command,stdin=source.stdout,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         source.stdout.close()
         output,errors=target.communicate(timeout=timeout)
-        c.require(target.returncode==0 and len(output)<1024**2,'target stream stopped; preserve partial data')
+        if target.returncode!=0 or len(output)>=1024**2:
+            # Retain only allowlisted transport facts, never stderr text,
+            # command arguments, credentials or signed artifact URLs.
+            types=[];signals=[]
+            for line in (errors or b'')[:65536].decode(errors='replace').splitlines():
+                try:
+                    value=json.loads(line)
+                    if value.get('error_type') in ('ValueError','ReadError','EOFError','BrokenPipeError','FileNotFoundError','OSError'):
+                        types.append(value['error_type'])
+                except (ValueError,AttributeError):pass
+                for needle,code in (('i/o timeout','io_timeout'),('unexpected EOF','unexpected_eof'),
+                    ('connection reset by peer','connection_reset'),('context deadline exceeded','context_deadline')):
+                    if needle in line:signals.append(code)
+            error=ValueError('target stream stopped; preserve partial data')
+            error.transfer_diagnostic={'target_exit_code':target.returncode,'source_exit_code_observed':source.poll(),
+                'receiver_error_types':sorted(set(types)),'transport_signal_codes':sorted(set(signals)),
+                'stderr_text_retained':False}
+            raise error
         source.wait(timeout=max(1,timeout-(time.monotonic()-started)))
         c.require(source.returncode==0,'source stream stopped; target must not be admitted')
         return json.loads(output)

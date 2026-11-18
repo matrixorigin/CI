@@ -141,6 +141,15 @@ class ControllerGuard(unittest.TestCase):
                                [sys.executable,'-c','raise SystemExit(3)'])]:
             with self.assertRaises(ValueError):r.stream_transfer(source,target,timeout=10)
 
+    def test_transfer_failure_keeps_only_allowlisted_diagnostics(self):
+        source=[sys.executable,'-c','import sys;sys.stdout.buffer.write(b"x"*1048576)']
+        target=[sys.executable,'-c','import sys,json;print(json.dumps({"error_type":"ReadError","private":"PRIVATE_DIAGNOSTIC_SENTINEL"}),file=sys.stderr);print("i/o timeout PRIVATE_DIAGNOSTIC_SENTINEL",file=sys.stderr);raise SystemExit(3)']
+        with self.assertRaises(ValueError) as failed:r.stream_transfer(source,target,timeout=10)
+        value=failed.exception.transfer_diagnostic
+        self.assertEqual(value['target_exit_code'],3);self.assertEqual(value['receiver_error_types'],['ReadError'])
+        self.assertEqual(value['transport_signal_codes'],['io_timeout'])
+        self.assertFalse(value['stderr_text_retained']);self.assertNotIn('PRIVATE_DIAGNOSTIC_SENTINEL',json.dumps(value))
+
     def test_small_copy_pod_guard_is_not_a_ut_runner_gate(self):
         policy,snapshot=fixture()
         snapshot['stats']['node']['memory']['availableBytes']=17*r.c.GIB
