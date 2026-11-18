@@ -44,3 +44,4 @@ jobs:
           python3 -m unittest discover -s scripts -p 'test_node_cache_workspace_probe*.py' -v
           python3 -m unittest discover -s scripts -p test_node_cache_cpu_inventory.py -v
           python3 -m unittest discover -s scripts -p 'test_node_cache_profile_append*.py' -v
+          python3 -m unittest discover -s scripts -p 'test_node_cache_cpu_producer*.py' -v
