@@ -6,6 +6,7 @@ for this repair; implementing this controller does not authorize a dispatch.
 """
 import argparse
 import copy
+import datetime as dt
 import json
 from pathlib import Path
 import time
@@ -86,8 +87,10 @@ def instructions(entry,base):
 def publisher_pod(planned,name,cm):
     pod=q.probe_pod(planned,name,cm);spec=pod['spec'];container=spec['containers'][0]
     # This is the separately authorized writer, NEVER an ordinary PR consumer.
-    spec['volumes'][1]['persistentVolumeClaim']['readOnly']=False
-    container['volumeMounts'][1]['readOnly']=False
+    # Kubernetes omits these non-pointer bools when false. Author the canonical
+    # writable default, not explicit false which cannot survive an API roundtrip.
+    spec['volumes'][1]['persistentVolumeClaim'].pop('readOnly')
+    container['volumeMounts'][1].pop('readOnly')
     container['resources']={'requests':{'cpu':'100m','memory':'256Mi'},'limits':{'cpu':'1','memory':'1Gi'}}
     container['env'] += [{'name':'ACTUAL_NODE','valueFrom':{'fieldRef':{'fieldPath':'spec.nodeName'}}},
                          {'name':'PYTHONDONTWRITEBYTECODE','value':'1'}]
@@ -100,7 +103,56 @@ def publisher_pod(planned,name,cm):
     return pod
 
 
-def run(policy,catalog,lock,evidence,entry,base,config,directory,api=q.base.n.legacy.api):
+def checked_publisher_pod(expected,actual,uid):
+    ready=q.checked_pod(expected,actual,uid)
+    spec=actual['spec']
+    c.require(spec['volumes'][1]['persistentVolumeClaim'].get('readOnly',False) is False
+        and spec['containers'][0]['volumeMounts'][1].get('readOnly',False) is False,
+        'separately authorized publisher cache mount is not writable')
+    return ready
+
+
+def recovery_scope(approval,entry,name):
+    """Only the independently inspected pre-stage API-normalization failure."""
+    c.require(approval['schema']==1 and approval['run_id']==44338220751
+        and approval['gitops_revision']=='5dacdfb7d951c70c42db216606672f7dd9d61586',
+        'unreviewed CPU publisher recovery')
+    old=approval['receipt']
+    c.require(core.cache.hash_value(old)==approval['canonical_report_sha256']
+        and old['complete'] is False and old['error_type']=='ValueError' and old['name']==name
+        and old['node']=='mo-standard-1' and entry['producer']['id']==44326799783
+        and old['failure_sites']==[{'file':'node_cache_profile_append_control.py','line':126},
+            {'file':'node_cache_workspace_probe_control.py','line':203},
+            {'file':'node_cache_workspace_probe_control.py','line':53},
+            {'file':'incremental_cache.py','line':29}]
+        and not set(old)&{'pending_create','pending_delete','active_phase','workspace','stage','append','verify'}
+        and old['provenance_verified_before_write'] is True and old['deleted']==[]
+        and [r['kind'] for r in old['created']]==['ConfigMap','Pod']
+        and [r['name'] for r in old['created']]==[name,name+'-writer'],
+        'publisher had progressed beyond the reviewed pre-stage failure')
+    c.require(approval['artifact']=={'id':14442721595,'name':'node-cache-profile-append-mty-44338220751',
+        'size_in_bytes':2598,'digest':'sha256:64478db06c8f1a9d94f67cde6c555975eec9e3d1a96f45124bf9b7b28952807f'},
+        'failed publication artifact differs')
+    return old
+
+
+def recovery_authority(approval,entry,name,api):
+    old=recovery_scope(approval,entry,name)
+    run=api('repos/matrixorigin/cloudsigma-gitops/actions/runs/44338220751')
+    c.require(run['head_sha']==approval['gitops_revision'] and run['status']=='completed'
+        and run['conclusion']=='failure' and run['run_attempt']==1 and run['event']=='workflow_dispatch'
+        and run['head_branch']=='codex/ruh-pvc-readiness' and run['path']=='.github/workflows/cloudsigma-up.yaml'
+        and run['actor']['login']==run['triggering_actor']['login']=='Ariznawlll'
+        and run['display_title']=='up cs-component / mty / node-cache-profile-append',
+        'failed protected run authority differs')
+    artifact=api('repos/matrixorigin/cloudsigma-gitops/actions/artifacts/14442721595')
+    c.require(all(artifact[k]==v for k,v in approval['artifact'].items()) and artifact['expired'] is False
+        and artifact['workflow_run']['id']==44338220751
+        and artifact['workflow_run']['head_sha']==approval['gitops_revision'],'failed raw receipt authority differs')
+    return old
+
+
+def run(policy,catalog,lock,evidence,entry,base,config,directory,api=q.base.n.legacy.api,recovery=None):
     c.require(not directory.exists(),'CPU publication intent exists; reconcile, never retry')
     binding,name=scope(policy,catalog,entry,base);node=binding['node']
     directory.mkdir();state={'environment':'mty','node':node,'name':name,'complete':False,
@@ -109,21 +161,48 @@ def run(policy,catalog,lock,evidence,entry,base,config,directory,api=q.base.n.le
         'cpu_profile_sha256':PROFILES[node],'cpu_inventory_run':CPU_RUN,'targets':{}}
     session=q.Session(policy,config,state,directory/'state.json')
     try:
+        if recovery is not None:
+            old=recovery_authority(recovery,entry,name,api)
+            state['created']=copy.deepcopy(old['created'])
+            state['adopted_resources']=copy.deepcopy(old['created'])
+            state['recovery_of']={'run_id':recovery['run_id'],'canonical_report_sha256':recovery['canonical_report_sha256'],
+                'pre_stage_failure_only':True,'new_pvcs':0,'new_pods':0}
         session.journal();q.authenticate(catalog,lock,evidence,'mty',api);cpu_authority(api);fresh(entry,base,api)
         state['provenance_verified_before_write']=True
         original=session.call(['get','autoscalingrunnerset','cs-mty-large-7c14g','-n','cicd','-o','json'])
         original_identity={'uid':original['metadata']['uid'],'spec_sha256':core.cache.hash_value(original['spec'])}
         state['original_pool']=original_identity
         snapshots={n:session.snapshot(n) for n in q.planner.NODES}
-        session.baselines={n:q.admission(policy,snapshots[n],n,(),None,1 if n==node else 0,1 if n==node else 0) for n in q.planner.NODES}
+        session.baselines={n:q.admission(policy,snapshots[n],n,session.owned(),None,
+            int(n==node and recovery is None),int(n==node and recovery is None)) for n in q.planner.NODES}
         state['preflight']=session.baselines;session.cache_volume(binding)
         planned=next(p for p in q.planner.plan(catalog,policy,original,snapshots[node]['sc'],work_size_gib=q.WORK_GIB)
             if p['spec']['template']['spec']['nodeSelector']['kubernetes.io/hostname']==node)
         data=instructions(entry,base)
-        session.guard(node);session.create({'apiVersion':'v1','kind':'ConfigMap','metadata':{'name':name,'namespace':'cicd'},
-            'immutable':True,'data':data})
+        session.guard(node)
+        if recovery is None:
+            session.create({'apiVersion':'v1','kind':'ConfigMap','metadata':{'name':name,'namespace':'cicd'},
+                'immutable':True,'data':data})
         cm={'uid':state['created'][0]['uid'],'sha256':core.cache.hash_value(data)}
-        workspace=session.create_probe(publisher_pod(planned,name+'-writer',name),node,binding)
+        template=publisher_pod(planned,name+'-writer',name)
+        if recovery is None:workspace=session.create_probe(template,node,binding)
+        else:
+            current=session.call(['get','configmap',name,'-n','cicd','-o','json'])
+            c.require(current['metadata']['uid']==cm['uid'] and current['immutable']
+                and core.cache.hash_value(current['data'])==cm['sha256'],'adopted publisher instructions changed')
+            pod=session.call(['get','pod',name+'-writer','-n','cicd','-o','json'])
+            c.require(checked_publisher_pod(template,pod,state['created'][1]['uid']),'adopted publisher not Ready/exact')
+            elapsed=(initial.now()-dt.datetime.fromisoformat(pod['metadata']['creationTimestamp'].replace('Z','+00:00'))).total_seconds()
+            c.require(0<=elapsed<=900 and pod['spec']['activeDeadlineSeconds']==3600,
+                'existing helper lifetime insufficient; preserve and design a fresh scoped recovery')
+            pvc=session.call(['get','pvc',name+'-writer-work','-n','cicd','-o','json'])
+            pv=session.call(['get','pv',pvc['spec']['volumeName'],'-o','json'])
+            workspace={**q.private_volume(pod,pvc,pv,node,binding),'pod_name':name+'-writer','pv_name':pv['metadata']['name']}
+            session.templates[workspace['pod_name']]=template;state['workspaces']=[workspace]
+            empty=session.call(['exec',workspace['pod_name'],'-n','cicd','--','python3','-c',
+                'import json;from pathlib import Path;print(json.dumps({"stage_empty":not any(Path("/stage").iterdir())}))'])
+            c.require(empty=={'stage_empty':True},'unexpected staged data; preserve rather than overwrite')
+            state['recovery_of']['empty_private_stage_verified']=True
         state['workspace']=workspace;session.journal()
         for phase in ('stage','append','verify'):
             session.cache_volume(binding);state['latest_resources']=session.guard(node)
@@ -131,7 +210,7 @@ def run(policy,catalog,lock,evidence,entry,base,config,directory,api=q.base.n.le
             c.require(current['metadata']['uid']==cm['uid'] and current['immutable']
                 and core.cache.hash_value(current['data'])==cm['sha256'],'CPU publisher instructions changed')
             pod=session.call(['get','pod',workspace['pod_name'],'-n','cicd','-o','json'])
-            c.require(q.checked_pod(session.templates[workspace['pod_name']],pod,workspace['pod_uid']),'CPU publisher no longer Ready')
+            c.require(checked_publisher_pod(session.templates[workspace['pod_name']],pod,workspace['pod_uid']),'CPU publisher no longer Ready')
             pvc=session.call(['get','pvc',workspace['pvc_name'],'-n','cicd','-o','json'])
             pv=session.call(['get','pv',workspace['pv_name'],'-o','json'])
             actual=q.private_volume(pod,pvc,pv,node,binding)
@@ -164,8 +243,10 @@ def run(policy,catalog,lock,evidence,entry,base,config,directory,api=q.base.n.le
 if __name__=='__main__':
     parser=argparse.ArgumentParser()
     for name in ('policy','catalog','lock','evidence','entry','base','kubeconfig','directory'):parser.add_argument('--'+name,type=Path,required=True)
+    parser.add_argument('--recovery',type=Path)
     a=parser.parse_args()
     try:run(c.read_json(a.policy),c.read_json(a.catalog),c.read_json(a.lock),c.read_json(a.evidence),
-        c.read_json(a.entry),c.read_json(a.base),a.kubeconfig,a.directory)
+        c.read_json(a.entry),c.read_json(a.base),a.kubeconfig,a.directory,
+        recovery=None if a.recovery is None else c.read_json(a.recovery))
     except Exception as error:
         print(json.dumps({'complete':False,'error_type':type(error).__name__,'automatic_retry':False}));raise SystemExit(1)
