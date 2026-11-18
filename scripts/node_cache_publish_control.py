@@ -99,6 +99,9 @@ def guard(policy,snapshot,own_uid=None,after_allocation=False,at=None):
                   d['status'].get('freeCapacity',0)>=(64 if after_allocation else 128)*c.GIB
                   for d in snapshot['drives']['items']),'physical disk reserve')
     baseline={(x['namespace'],x['name']):x for x in policy['workloads']};seen=set();cpu=1.;memory=c.GIB;init_counts={}
+    verified=policy.get('verified_workload_uids',{})
+    c.require(isinstance(verified,dict) and set(verified)<={'/'.join(k) for k in baseline},
+              'verified workload inventory differs')
     for pod in snapshot['pods']['items']:
         status=pod.get('status',{})
         if status.get('phase') in ('Succeeded','Failed'):continue
@@ -108,6 +111,9 @@ def guard(policy,snapshot,own_uid=None,after_allocation=False,at=None):
         if pod['spec'].get('nodeName')!=target:continue
         if own_uid and pod['metadata']['uid']==own_uid:continue
         observed=workload(pod);key=(observed['namespace'],observed['name'])
+        expected_uid=verified.get('/'.join(key))
+        if expected_uid is not None:
+            c.require(pod['metadata']['uid']==expected_uid,'verified workload identity changed')
         c.require(key in baseline and observed==baseline[key] and status.get('phase')=='Running' and
                   any(x['type']=='Ready' and x['status']=='True' for x in status.get('conditions',[])),
                   'target workload changed, restarted or unready')

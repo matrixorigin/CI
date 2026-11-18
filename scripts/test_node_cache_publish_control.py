@@ -142,6 +142,21 @@ class ControlTest(unittest.TestCase):
         policy['name']='existing-business-volume'
         with self.assertRaises(ValueError):p.objects(policy,{})
 
+    def test_separately_verified_listener_uid_cannot_be_replaced(self):
+        policy,s=fixture()
+        pod={'metadata':{'name':'own-listener','namespace':'cicd','uid':'exact-listener-uid',
+             'ownerReferences':[{'kind':'AutoscalingListener'}]},
+             'spec':{'nodeName':policy['node'],'containers':[{'resources':{}}]},
+             'status':{'phase':'Running','conditions':[{'type':'Ready','status':'True'}],
+                       'containerStatuses':[{'restartCount':0}]}}
+        policy['workloads']=[p.workload(pod)];s['pods']['items']=[pod]
+        policy['verified_workload_uids']={'cicd/own-listener':'exact-listener-uid'}
+        p.guard(policy,s,at=NOW)
+        pod['metadata']['uid']='replacement'
+        with self.assertRaisesRegex(ValueError,'verified workload identity changed'):p.guard(policy,s,at=NOW)
+        policy['verified_workload_uids']={'cicd/not-in-baseline':'other'}
+        with self.assertRaisesRegex(ValueError,'verified workload inventory differs'):p.guard(policy,s,at=NOW)
+
     def test_bound_identity_multilabel_topology(self):
         policy,s=fixture();cm,pvc,pod=p.objects(policy,{})
         for value in (pvc,pod):value['metadata']=copy.deepcopy(value['metadata']);value['metadata']['uid']=U
