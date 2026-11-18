@@ -118,7 +118,7 @@ jobs:
         GROUP: ${{ matrix.group }}
       run: |
         set -euo pipefail
-        for path in "$RUNNER_TEMP/cs-buildcache-gomod" "$RUNNER_TEMP/cs-buildcache-go" "$RUNNER_TEMP/cs-reviewed-artifact" "$RUNNER_TEMP/cs-reviewed-entry.json"; do
+        for path in "$RUNNER_TEMP/cs-buildcache-gomod" "$RUNNER_TEMP/cs-buildcache-go" "$RUNNER_TEMP/cs-reviewed-artifact" "$RUNNER_TEMP/cs-reviewed-entry.json" "$RUNNER_TEMP/cs-reviewed-native-catalog.json"; do
           test ! -e "$path"
         done
         echo "GOMODCACHE=$RUNNER_TEMP/cs-buildcache-gomod" >> "$GITHUB_ENV"
@@ -141,8 +141,8 @@ jobs:
         set -euo pipefail
         case "${CS_CACHE_ENV:-}" in mty|mnl2|jed|ruh) ;; *) exit 1 ;; esac
         python3 .ci-workflow/scripts/node_cache_pr_source.py check
-        python3 .ci-workflow/scripts/node_cache_pr_catalog.py check
-        python3 .ci-workflow/scripts/node_compile_cache.py configure --catalog .ci-workflow/config/node-compile-cache-pr-catalog.json
+        python3 .ci-workflow/scripts/node_cache_pr_native_catalog.py materialize
+        python3 .ci-workflow/scripts/node_compile_cache.py configure --catalog "$RUNNER_TEMP/cs-reviewed-native-catalog.json"
         python3 .ci-workflow/scripts/node_cache_pr_source.py record
     - id: coverage_ut
       name: Run coverage unit tests
@@ -776,6 +776,7 @@ jobs:
           ${{ runner.temp }}/cs-node-cache/acceptance.json
           ${{ runner.temp }}/cs-node-cache/validation.json
           ${{ runner.temp }}/cs-node-cache/pr-source.json
+          ${{ runner.temp }}/cs-reviewed-native-catalog.json
         if-no-files-found: warn
         retention-days: 7
     - id: upload_coverage_diagnostics

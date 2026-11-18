@@ -59,12 +59,16 @@ def build():
             step['env'].pop('REQUESTED_CACHE_ENV', None)
             step['run'] = ('set -euo pipefail\ncase "${CS_CACHE_ENV:-}" in mty|mnl2|jed|ruh) ;; *) exit 1 ;; esac\n'
                 'python3 .ci-workflow/scripts/node_cache_pr_source.py check\n'
-                'python3 .ci-workflow/scripts/node_cache_pr_catalog.py check\n'
+                'python3 .ci-workflow/scripts/node_cache_pr_native_catalog.py materialize\n'
                 'python3 .ci-workflow/scripts/node_compile_cache.py configure '
-                '--catalog .ci-workflow/config/node-compile-cache-pr-catalog.json\n'
+                '--catalog "$RUNNER_TEMP/cs-reviewed-native-catalog.json"\n'
                 'python3 .ci-workflow/scripts/node_cache_pr_source.py record\n')
+        if step.get('name') == 'Prepare fresh per-job compilation paths':
+            step['run']=step['run'].replace('"$RUNNER_TEMP/cs-reviewed-entry.json"; do',
+                '"$RUNNER_TEMP/cs-reviewed-entry.json" "$RUNNER_TEMP/cs-reviewed-native-catalog.json"; do')
         if step.get('name') == 'Upload readable coverage UT report':
             step['with']['path']+='${{ runner.temp }}/cs-node-cache/pr-source.json\n'
+            step['with']['path']+='${{ runner.temp }}/cs-reviewed-native-catalog.json\n'
         if step.get('id') == 'coverage_ut':
             step['env']['CS_COMPILE_CACHE_HIT'] = 'false'
             step['env']['COVERAGE_GROUP_COUNT'] = '2'

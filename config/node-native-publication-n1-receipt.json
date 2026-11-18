@@ -1,0 +1,1028 @@
+{
+  "append": {
+    "binding": {
+      "environment": "mty",
+      "node": "mo-standard-1",
+      "node_uid": "3a3f68b5-9fca-4c62-9dd6-8a9b92559517",
+      "pv_uid": "26fd0368-7b17-4669-a249-8f67a78ac4af",
+      "pvc_uid": "3db987eb-9c02-4dd0-ba0a-83462c5ff454"
+    },
+    "compatibility_aliases": false,
+    "compiler_invocations": 0,
+    "controller_seconds": 58.566,
+    "cpu_profile_sha256": "36928e1c2d96ed3c0a80a3f3b29eaeb068634bd5cf0d6ec102767901bd134499",
+    "existing_bytes": 89678389,
+    "independently_verified": true,
+    "index_sha256": "b89aa2874f9d133040a29fe042eead7377f54eb1360ae268f56f2d664f0f4bb5",
+    "marker_sha256": "41348447dbb48e74cf64a8eca9142cdc2a763608f6e6cd820f05d2d79857ac10",
+    "new_bytes": 405687,
+    "old_metadata_preserved": true,
+    "phase": "append",
+    "publication_seconds": 19.184952,
+    "success": true
+  },
+  "automatic_retry": false,
+  "catalog_activated": false,
+  "compiler_invocations": 0,
+  "complete": true,
+  "completed_at": "2026-11-18T20:42:40.344070+00:00",
+  "cpu_inventory_run": 44311269341,
+  "cpu_profile_sha256": "36928e1c2d96ed3c0a80a3f3b29eaeb068634bd5cf0d6ec102767901bd134499",
+  "created": [
+    {
+      "kind": "ConfigMap",
+      "name": "cs-mty-nc-profile-n1-44387585602-14466178859",
+      "uid": "b6f0a653-acbb-4cd9-b5cc-a57d64a11205"
+    },
+    {
+      "kind": "Pod",
+      "name": "cs-mty-nc-profile-n1-44387585602-14466178859-writer",
+      "uid": "765477c6-cf8e-429e-9b3e-85a1cfbee354"
+    }
+  ],
+  "deleted": [
+    {
+      "kind": "Pod",
+      "name": "cs-mty-nc-profile-n1-44387585602-14466178859-writer",
+      "uid": "765477c6-cf8e-429e-9b3e-85a1cfbee354"
+    }
+  ],
+  "environment": "mty",
+  "existing_cache_pvc_preserved": true,
+  "helper_pods_absent": true,
+  "latest_resources": {
+    "auxiliary_probe_only": true,
+    "checked_at": "2026-11-18T20:41:47.537751+00:00",
+    "memory_available_bytes": 124264042496,
+    "node": "mo-standard-1",
+    "per_claim_bytes": 85899345920,
+    "physical_free_bytes": 111511732224,
+    "planned_private_claims": 0,
+    "root_free_bytes": 82587291648,
+    "storage_class_uid": "eb340425-2296-4b08-8388-e30dadf1d795",
+    "workloads": {
+      "019f8521-0f12-7b55-8b1a-d47e2e4c386f/normal-cn-qznnr": {
+        "init_restarts": 0,
+        "name": "normal-cn-qznnr",
+        "namespace": "019f8521-0f12-7b55-8b1a-d47e2e4c386f",
+        "owners": [
+          "CloneSet"
+        ],
+        "restarts": 3,
+        "uid": "d8ed2fd2-5697-48f3-8541-a6257acd12e9"
+      },
+      "01a01908-e065-7e6a-99b2-b016b0ed5856/normal-cn-l92hc": {
+        "init_restarts": 0,
+        "name": "normal-cn-l92hc",
+        "namespace": "01a01908-e065-7e6a-99b2-b016b0ed5856",
+        "owners": [
+          "CloneSet"
+        ],
+        "restarts": 1,
+        "uid": "c9751627-97cc-4be9-a5d8-65cbc5afff01"
+      },
+      "calico-system/calico-node-qwzxc": {
+        "init_restarts": 1,
+        "name": "calico-node-qwzxc",
+        "namespace": "calico-system",
+        "owners": [
+          "DaemonSet"
+        ],
+        "restarts": 1,
+        "uid": "549a370d-a707-4a4a-93a7-68d6c9626013"
+      },
+      "calico-system/csi-node-driver-r2dcx": {
+        "init_restarts": 0,
+        "name": "csi-node-driver-r2dcx",
+        "namespace": "calico-system",
+        "owners": [
+          "DaemonSet"
+        ],
+        "restarts": 2,
+        "uid": "f900e1c1-7d85-4fab-b195-16c6e45b0719"
+      },
+      "directpv/node-server-9prbd": {
+        "init_restarts": 0,
+        "name": "node-server-9prbd",
+        "namespace": "directpv",
+        "owners": [
+          "DaemonSet"
+        ],
+        "restarts": 4,
+        "uid": "ed77ce7b-44db-4c8d-8503-7383625d91d0"
+      },
+      "kruise-system/kruise-daemon-cngvz": {
+        "init_restarts": 0,
+        "name": "kruise-daemon-cngvz",
+        "namespace": "kruise-system",
+        "owners": [
+          "DaemonSet"
+        ],
+        "restarts": 0,
+        "uid": "0f1d617e-ac68-4d89-bf4a-81e1f1a88b4e"
+      },
+      "kube-system/kube-proxy-z87ds": {
+        "init_restarts": 0,
+        "name": "kube-proxy-z87ds",
+        "namespace": "kube-system",
+        "owners": [
+          "DaemonSet"
+        ],
+        "restarts": 1,
+        "uid": "376bb3ac-8053-4fc6-87ff-da9fc84557d2"
+      },
+      "mo-ob/mo-ob-opensource-prometheus-node-exporter-x6569": {
+        "init_restarts": 0,
+        "name": "mo-ob-opensource-prometheus-node-exporter-x6569",
+        "namespace": "mo-ob",
+        "owners": [
+          "DaemonSet"
+        ],
+        "restarts": 0,
+        "uid": "3a820c73-cbe4-45ac-bc7c-edd6f85c63dd"
+      },
+      "mo-ob/mo-ob-opensource-promtail-lxglh": {
+        "init_restarts": 0,
+        "name": "mo-ob-opensource-promtail-lxglh",
+        "namespace": "mo-ob",
+        "owners": [
+          "DaemonSet"
+        ],
+        "restarts": 1,
+        "uid": "529cf5da-6ef0-4dde-92b0-bddb232e6cd0"
+      }
+    }
+  },
+  "name": "cs-mty-nc-profile-n1-44387585602-14466178859",
+  "native_key": "4736f6c5e5f987bdf0479ac3dd6b28d28a37047d63064e92a3b7f7dd3e5bee54",
+  "native_only": true,
+  "node": "mo-standard-1",
+  "original_pool": {
+    "spec_sha256": "da7a82f1589f3bdea722a9a3d7ed4644d2961a641e7c5002a0fa0b47334c957d",
+    "uid": "feef57e4-cf58-44f8-a7e2-3b6fb7629f2a"
+  },
+  "postflight": {
+    "mo-standard-0": {
+      "auxiliary_probe_only": true,
+      "checked_at": "2026-11-18T20:42:32.741489+00:00",
+      "memory_available_bytes": 121723310080,
+      "node": "mo-standard-0",
+      "per_claim_bytes": 85899345920,
+      "physical_free_bytes": 197411078144,
+      "planned_private_claims": 0,
+      "root_free_bytes": 82537807872,
+      "storage_class_uid": "eb340425-2296-4b08-8388-e30dadf1d795",
+      "workloads": {
+        "019f8433-f7c0-79b6-b0a1-1c2c3bf18758/normal-cn-dh7sf": {
+          "init_restarts": 0,
+          "name": "normal-cn-dh7sf",
+          "namespace": "019f8433-f7c0-79b6-b0a1-1c2c3bf18758",
+          "owners": [
+            "CloneSet"
+          ],
+          "restarts": 3,
+          "uid": "c2af4107-d5af-404c-9702-0d8d04045275"
+        },
+        "01a01908-e065-7e6a-99b2-b016b0ed5856/normal-cn-68q4v": {
+          "init_restarts": 0,
+          "name": "normal-cn-68q4v",
+          "namespace": "01a01908-e065-7e6a-99b2-b016b0ed5856",
+          "owners": [
+            "CloneSet"
+          ],
+          "restarts": 1,
+          "uid": "9478cd6f-36ca-4094-b184-31e3283f08dc"
+        },
+        "calico-system/calico-node-2whfn": {
+          "init_restarts": 1,
+          "name": "calico-node-2whfn",
+          "namespace": "calico-system",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 1,
+          "uid": "6f69f918-ac26-4fa0-920d-806ed67ed894"
+        },
+        "calico-system/csi-node-driver-qk226": {
+          "init_restarts": 0,
+          "name": "csi-node-driver-qk226",
+          "namespace": "calico-system",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 2,
+          "uid": "a1aea091-851f-4c69-bc8c-17b58d7b3bbc"
+        },
+        "cicd/cs-mty-nc-n0-pr-v1-79d6ffb5-listener": {
+          "init_restarts": 0,
+          "name": "cs-mty-nc-n0-pr-v1-79d6ffb5-listener",
+          "namespace": "cicd",
+          "owners": [
+            "AutoscalingListener"
+          ],
+          "restarts": 0,
+          "uid": "fa1e65df-1109-48a7-bdad-2af1678babde"
+        },
+        "cicd/cs-mty-nc-n1-pr-v1-79d6ffb5-listener": {
+          "init_restarts": 0,
+          "name": "cs-mty-nc-n1-pr-v1-79d6ffb5-listener",
+          "namespace": "cicd",
+          "owners": [
+            "AutoscalingListener"
+          ],
+          "restarts": 0,
+          "uid": "bbee1aa8-1549-405a-b192-86ff2b768ffa"
+        },
+        "cicd/cs-mty-profile-n1-v1-79d6ffb5-listener": {
+          "init_restarts": 0,
+          "name": "cs-mty-profile-n1-v1-79d6ffb5-listener",
+          "namespace": "cicd",
+          "owners": [
+            "AutoscalingListener"
+          ],
+          "restarts": 0,
+          "uid": "8fa7405e-b73b-4e20-9911-23f7f8db3bf8"
+        },
+        "directpv/node-server-vf7xh": {
+          "init_restarts": 0,
+          "name": "node-server-vf7xh",
+          "namespace": "directpv",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 4,
+          "uid": "2658e506-b6ee-45c6-8c5a-c9202e69fd67"
+        },
+        "kruise-system/kruise-daemon-flpr7": {
+          "init_restarts": 0,
+          "name": "kruise-daemon-flpr7",
+          "namespace": "kruise-system",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 0,
+          "uid": "34baa6e0-88a2-4ba2-9c96-4b7ed72c28b3"
+        },
+        "kube-system/kube-proxy-9px82": {
+          "init_restarts": 0,
+          "name": "kube-proxy-9px82",
+          "namespace": "kube-system",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 1,
+          "uid": "512dfef3-bf6f-4fde-81d6-68501f8f2960"
+        },
+        "mo-ob/mo-ob-opensource-prometheus-node-exporter-wnxgh": {
+          "init_restarts": 0,
+          "name": "mo-ob-opensource-prometheus-node-exporter-wnxgh",
+          "namespace": "mo-ob",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 0,
+          "uid": "5ff22619-3347-42e4-a25c-30d3edbd5f69"
+        },
+        "mo-ob/mo-ob-opensource-promtail-9g5p5": {
+          "init_restarts": 0,
+          "name": "mo-ob-opensource-promtail-9g5p5",
+          "namespace": "mo-ob",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 1,
+          "uid": "bdb1205f-4e63-409d-b64a-e2aedfa0a36f"
+        }
+      }
+    },
+    "mo-standard-1": {
+      "auxiliary_probe_only": true,
+      "checked_at": "2026-11-18T20:42:37.308793+00:00",
+      "memory_available_bytes": 124327489536,
+      "node": "mo-standard-1",
+      "per_claim_bytes": 85899345920,
+      "physical_free_bytes": 197411078144,
+      "planned_private_claims": 0,
+      "root_free_bytes": 82587656192,
+      "storage_class_uid": "eb340425-2296-4b08-8388-e30dadf1d795",
+      "workloads": {
+        "019f8521-0f12-7b55-8b1a-d47e2e4c386f/normal-cn-qznnr": {
+          "init_restarts": 0,
+          "name": "normal-cn-qznnr",
+          "namespace": "019f8521-0f12-7b55-8b1a-d47e2e4c386f",
+          "owners": [
+            "CloneSet"
+          ],
+          "restarts": 3,
+          "uid": "d8ed2fd2-5697-48f3-8541-a6257acd12e9"
+        },
+        "01a01908-e065-7e6a-99b2-b016b0ed5856/normal-cn-l92hc": {
+          "init_restarts": 0,
+          "name": "normal-cn-l92hc",
+          "namespace": "01a01908-e065-7e6a-99b2-b016b0ed5856",
+          "owners": [
+            "CloneSet"
+          ],
+          "restarts": 1,
+          "uid": "c9751627-97cc-4be9-a5d8-65cbc5afff01"
+        },
+        "calico-system/calico-node-qwzxc": {
+          "init_restarts": 1,
+          "name": "calico-node-qwzxc",
+          "namespace": "calico-system",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 1,
+          "uid": "549a370d-a707-4a4a-93a7-68d6c9626013"
+        },
+        "calico-system/csi-node-driver-r2dcx": {
+          "init_restarts": 0,
+          "name": "csi-node-driver-r2dcx",
+          "namespace": "calico-system",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 2,
+          "uid": "f900e1c1-7d85-4fab-b195-16c6e45b0719"
+        },
+        "directpv/node-server-9prbd": {
+          "init_restarts": 0,
+          "name": "node-server-9prbd",
+          "namespace": "directpv",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 4,
+          "uid": "ed77ce7b-44db-4c8d-8503-7383625d91d0"
+        },
+        "kruise-system/kruise-daemon-cngvz": {
+          "init_restarts": 0,
+          "name": "kruise-daemon-cngvz",
+          "namespace": "kruise-system",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 0,
+          "uid": "0f1d617e-ac68-4d89-bf4a-81e1f1a88b4e"
+        },
+        "kube-system/kube-proxy-z87ds": {
+          "init_restarts": 0,
+          "name": "kube-proxy-z87ds",
+          "namespace": "kube-system",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 1,
+          "uid": "376bb3ac-8053-4fc6-87ff-da9fc84557d2"
+        },
+        "mo-ob/mo-ob-opensource-prometheus-node-exporter-x6569": {
+          "init_restarts": 0,
+          "name": "mo-ob-opensource-prometheus-node-exporter-x6569",
+          "namespace": "mo-ob",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 0,
+          "uid": "3a820c73-cbe4-45ac-bc7c-edd6f85c63dd"
+        },
+        "mo-ob/mo-ob-opensource-promtail-lxglh": {
+          "init_restarts": 0,
+          "name": "mo-ob-opensource-promtail-lxglh",
+          "namespace": "mo-ob",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 1,
+          "uid": "529cf5da-6ef0-4dde-92b0-bddb232e6cd0"
+        }
+      }
+    },
+    "mo-standard-2": {
+      "auxiliary_probe_only": true,
+      "checked_at": "2026-11-18T20:42:40.339338+00:00",
+      "memory_available_bytes": 19116851200,
+      "node": "mo-standard-2",
+      "per_claim_bytes": 85899345920,
+      "physical_free_bytes": 218885914624,
+      "planned_private_claims": 0,
+      "root_free_bytes": 85601095680,
+      "storage_class_uid": "eb340425-2296-4b08-8388-e30dadf1d795",
+      "workloads": {
+        "calico-system/calico-node-q4k2w": {
+          "init_restarts": 2,
+          "name": "calico-node-q4k2w",
+          "namespace": "calico-system",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 2,
+          "uid": "a8cf7655-65f7-4522-b7df-e3c267a43069"
+        },
+        "calico-system/csi-node-driver-tbddg": {
+          "init_restarts": 0,
+          "name": "csi-node-driver-tbddg",
+          "namespace": "calico-system",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 4,
+          "uid": "f66aacb2-16c1-470d-9ae1-3fe10a9badfc"
+        },
+        "cicd/cs-mty-dind-2c8g-79d6ffb5-listener": {
+          "init_restarts": 0,
+          "name": "cs-mty-dind-2c8g-79d6ffb5-listener",
+          "namespace": "cicd",
+          "owners": [
+            "AutoscalingListener"
+          ],
+          "restarts": 0,
+          "uid": "05fe3aa7-bbb3-46f3-8596-5922bf325228"
+        },
+        "cicd/cs-mty-large-7c14g-79d6ffb5-listener": {
+          "init_restarts": 0,
+          "name": "cs-mty-large-7c14g-79d6ffb5-listener",
+          "namespace": "cicd",
+          "owners": [
+            "AutoscalingListener"
+          ],
+          "restarts": 0,
+          "uid": "5c803943-3306-41f2-8672-acd0c93e5ad7"
+        },
+        "cicd/cs-mty-medium-2c8g-79d6ffb5-listener": {
+          "init_restarts": 0,
+          "name": "cs-mty-medium-2c8g-79d6ffb5-listener",
+          "namespace": "cicd",
+          "owners": [
+            "AutoscalingListener"
+          ],
+          "restarts": 0,
+          "uid": "a6b2c0f2-7806-455a-bbbd-9eb3c1822965"
+        },
+        "cicd/cs-mty-nc-n0-v1-79d6ffb5-listener": {
+          "init_restarts": 0,
+          "name": "cs-mty-nc-n0-v1-79d6ffb5-listener",
+          "namespace": "cicd",
+          "owners": [
+            "AutoscalingListener"
+          ],
+          "restarts": 0,
+          "uid": "98c9b43c-d295-43fc-9754-577ba1ccc48b"
+        },
+        "cicd/cs-mty-pvc-g0-cpe8k-bdcc79b6-listener": {
+          "init_restarts": 0,
+          "name": "cs-mty-pvc-g0-cpe8k-bdcc79b6-listener",
+          "namespace": "cicd",
+          "owners": [
+            "AutoscalingListener"
+          ],
+          "restarts": 0,
+          "uid": "93c45775-49bd-43c1-b738-e10aa147025c"
+        },
+        "cicd/cs-mty-pvc-g1-cpe8k-bdcc79b6-listener": {
+          "init_restarts": 0,
+          "name": "cs-mty-pvc-g1-cpe8k-bdcc79b6-listener",
+          "namespace": "cicd",
+          "owners": [
+            "AutoscalingListener"
+          ],
+          "restarts": 0,
+          "uid": "87b5b4c8-5bb8-4754-b5d8-d9192ef6ab0d"
+        },
+        "cicd/cs-mty-pvc-g2-cpe8k-bdcc79b6-listener": {
+          "init_restarts": 0,
+          "name": "cs-mty-pvc-g2-cpe8k-bdcc79b6-listener",
+          "namespace": "cicd",
+          "owners": [
+            "AutoscalingListener"
+          ],
+          "restarts": 0,
+          "uid": "a4ca46d1-37d9-433c-8517-a7de7924202b"
+        },
+        "cicd/gha-mty-helm-gha-arc-gha-rs-controller-867d89dcdd-cvqw5": {
+          "init_restarts": 0,
+          "name": "gha-mty-helm-gha-arc-gha-rs-controller-867d89dcdd-cvqw5",
+          "namespace": "cicd",
+          "owners": [
+            "ReplicaSet"
+          ],
+          "restarts": 0,
+          "uid": "0d9e19ce-d2f8-4ad5-80c9-129eb7538d5f"
+        },
+        "directpv/node-server-bt7bc": {
+          "init_restarts": 0,
+          "name": "node-server-bt7bc",
+          "namespace": "directpv",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 9,
+          "uid": "a8111a7e-dda6-4493-a91d-b9a4a3c2af5a"
+        },
+        "kruise-system/kruise-daemon-tk87m": {
+          "init_restarts": 0,
+          "name": "kruise-daemon-tk87m",
+          "namespace": "kruise-system",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 1,
+          "uid": "baa350a5-9788-4e3f-af40-d706bdb56b0d"
+        },
+        "kube-system/kube-proxy-4p4zv": {
+          "init_restarts": 0,
+          "name": "kube-proxy-4p4zv",
+          "namespace": "kube-system",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 2,
+          "uid": "a15148a3-e10c-4d13-91a5-15c71f9ea170"
+        },
+        "mo-ob/mo-ob-opensource-prometheus-node-exporter-f8tv4": {
+          "init_restarts": 0,
+          "name": "mo-ob-opensource-prometheus-node-exporter-f8tv4",
+          "namespace": "mo-ob",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 1,
+          "uid": "8384f22b-dab0-42af-a32f-2fb486a9dc4e"
+        },
+        "mo-ob/mo-ob-opensource-promtail-vrxtg": {
+          "init_restarts": 0,
+          "name": "mo-ob-opensource-promtail-vrxtg",
+          "namespace": "mo-ob",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 2,
+          "uid": "802963b6-6eb6-4f3c-b48b-7584e8fc8caa"
+        }
+      }
+    }
+  },
+  "preflight": {
+    "mo-standard-0": {
+      "auxiliary_probe_only": true,
+      "checked_at": "2026-11-18T20:39:34.880224+00:00",
+      "memory_available_bytes": 121725476864,
+      "node": "mo-standard-0",
+      "per_claim_bytes": 85899345920,
+      "physical_free_bytes": 197411078144,
+      "planned_private_claims": 0,
+      "root_free_bytes": 82537877504,
+      "storage_class_uid": "eb340425-2296-4b08-8388-e30dadf1d795",
+      "workloads": {
+        "019f8433-f7c0-79b6-b0a1-1c2c3bf18758/normal-cn-dh7sf": {
+          "init_restarts": 0,
+          "name": "normal-cn-dh7sf",
+          "namespace": "019f8433-f7c0-79b6-b0a1-1c2c3bf18758",
+          "owners": [
+            "CloneSet"
+          ],
+          "restarts": 3,
+          "uid": "c2af4107-d5af-404c-9702-0d8d04045275"
+        },
+        "01a01908-e065-7e6a-99b2-b016b0ed5856/normal-cn-68q4v": {
+          "init_restarts": 0,
+          "name": "normal-cn-68q4v",
+          "namespace": "01a01908-e065-7e6a-99b2-b016b0ed5856",
+          "owners": [
+            "CloneSet"
+          ],
+          "restarts": 1,
+          "uid": "9478cd6f-36ca-4094-b184-31e3283f08dc"
+        },
+        "calico-system/calico-node-2whfn": {
+          "init_restarts": 1,
+          "name": "calico-node-2whfn",
+          "namespace": "calico-system",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 1,
+          "uid": "6f69f918-ac26-4fa0-920d-806ed67ed894"
+        },
+        "calico-system/csi-node-driver-qk226": {
+          "init_restarts": 0,
+          "name": "csi-node-driver-qk226",
+          "namespace": "calico-system",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 2,
+          "uid": "a1aea091-851f-4c69-bc8c-17b58d7b3bbc"
+        },
+        "cicd/cs-mty-nc-n0-pr-v1-79d6ffb5-listener": {
+          "init_restarts": 0,
+          "name": "cs-mty-nc-n0-pr-v1-79d6ffb5-listener",
+          "namespace": "cicd",
+          "owners": [
+            "AutoscalingListener"
+          ],
+          "restarts": 0,
+          "uid": "fa1e65df-1109-48a7-bdad-2af1678babde"
+        },
+        "cicd/cs-mty-nc-n1-pr-v1-79d6ffb5-listener": {
+          "init_restarts": 0,
+          "name": "cs-mty-nc-n1-pr-v1-79d6ffb5-listener",
+          "namespace": "cicd",
+          "owners": [
+            "AutoscalingListener"
+          ],
+          "restarts": 0,
+          "uid": "bbee1aa8-1549-405a-b192-86ff2b768ffa"
+        },
+        "cicd/cs-mty-profile-n1-v1-79d6ffb5-listener": {
+          "init_restarts": 0,
+          "name": "cs-mty-profile-n1-v1-79d6ffb5-listener",
+          "namespace": "cicd",
+          "owners": [
+            "AutoscalingListener"
+          ],
+          "restarts": 0,
+          "uid": "8fa7405e-b73b-4e20-9911-23f7f8db3bf8"
+        },
+        "directpv/node-server-vf7xh": {
+          "init_restarts": 0,
+          "name": "node-server-vf7xh",
+          "namespace": "directpv",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 4,
+          "uid": "2658e506-b6ee-45c6-8c5a-c9202e69fd67"
+        },
+        "kruise-system/kruise-daemon-flpr7": {
+          "init_restarts": 0,
+          "name": "kruise-daemon-flpr7",
+          "namespace": "kruise-system",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 0,
+          "uid": "34baa6e0-88a2-4ba2-9c96-4b7ed72c28b3"
+        },
+        "kube-system/kube-proxy-9px82": {
+          "init_restarts": 0,
+          "name": "kube-proxy-9px82",
+          "namespace": "kube-system",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 1,
+          "uid": "512dfef3-bf6f-4fde-81d6-68501f8f2960"
+        },
+        "mo-ob/mo-ob-opensource-prometheus-node-exporter-wnxgh": {
+          "init_restarts": 0,
+          "name": "mo-ob-opensource-prometheus-node-exporter-wnxgh",
+          "namespace": "mo-ob",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 0,
+          "uid": "5ff22619-3347-42e4-a25c-30d3edbd5f69"
+        },
+        "mo-ob/mo-ob-opensource-promtail-9g5p5": {
+          "init_restarts": 0,
+          "name": "mo-ob-opensource-promtail-9g5p5",
+          "namespace": "mo-ob",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 1,
+          "uid": "bdb1205f-4e63-409d-b64a-e2aedfa0a36f"
+        }
+      }
+    },
+    "mo-standard-1": {
+      "auxiliary_probe_only": true,
+      "checked_at": "2026-11-18T20:39:34.881205+00:00",
+      "memory_available_bytes": 124336566272,
+      "node": "mo-standard-1",
+      "per_claim_bytes": 85899345920,
+      "physical_free_bytes": 197411078144,
+      "planned_private_claims": 1,
+      "root_free_bytes": 82587881472,
+      "storage_class_uid": "eb340425-2296-4b08-8388-e30dadf1d795",
+      "workloads": {
+        "019f8521-0f12-7b55-8b1a-d47e2e4c386f/normal-cn-qznnr": {
+          "init_restarts": 0,
+          "name": "normal-cn-qznnr",
+          "namespace": "019f8521-0f12-7b55-8b1a-d47e2e4c386f",
+          "owners": [
+            "CloneSet"
+          ],
+          "restarts": 3,
+          "uid": "d8ed2fd2-5697-48f3-8541-a6257acd12e9"
+        },
+        "01a01908-e065-7e6a-99b2-b016b0ed5856/normal-cn-l92hc": {
+          "init_restarts": 0,
+          "name": "normal-cn-l92hc",
+          "namespace": "01a01908-e065-7e6a-99b2-b016b0ed5856",
+          "owners": [
+            "CloneSet"
+          ],
+          "restarts": 1,
+          "uid": "c9751627-97cc-4be9-a5d8-65cbc5afff01"
+        },
+        "calico-system/calico-node-qwzxc": {
+          "init_restarts": 1,
+          "name": "calico-node-qwzxc",
+          "namespace": "calico-system",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 1,
+          "uid": "549a370d-a707-4a4a-93a7-68d6c9626013"
+        },
+        "calico-system/csi-node-driver-r2dcx": {
+          "init_restarts": 0,
+          "name": "csi-node-driver-r2dcx",
+          "namespace": "calico-system",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 2,
+          "uid": "f900e1c1-7d85-4fab-b195-16c6e45b0719"
+        },
+        "directpv/node-server-9prbd": {
+          "init_restarts": 0,
+          "name": "node-server-9prbd",
+          "namespace": "directpv",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 4,
+          "uid": "ed77ce7b-44db-4c8d-8503-7383625d91d0"
+        },
+        "kruise-system/kruise-daemon-cngvz": {
+          "init_restarts": 0,
+          "name": "kruise-daemon-cngvz",
+          "namespace": "kruise-system",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 0,
+          "uid": "0f1d617e-ac68-4d89-bf4a-81e1f1a88b4e"
+        },
+        "kube-system/kube-proxy-z87ds": {
+          "init_restarts": 0,
+          "name": "kube-proxy-z87ds",
+          "namespace": "kube-system",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 1,
+          "uid": "376bb3ac-8053-4fc6-87ff-da9fc84557d2"
+        },
+        "mo-ob/mo-ob-opensource-prometheus-node-exporter-x6569": {
+          "init_restarts": 0,
+          "name": "mo-ob-opensource-prometheus-node-exporter-x6569",
+          "namespace": "mo-ob",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 0,
+          "uid": "3a820c73-cbe4-45ac-bc7c-edd6f85c63dd"
+        },
+        "mo-ob/mo-ob-opensource-promtail-lxglh": {
+          "init_restarts": 0,
+          "name": "mo-ob-opensource-promtail-lxglh",
+          "namespace": "mo-ob",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 1,
+          "uid": "529cf5da-6ef0-4dde-92b0-bddb232e6cd0"
+        }
+      }
+    },
+    "mo-standard-2": {
+      "auxiliary_probe_only": true,
+      "checked_at": "2026-11-18T20:39:34.882009+00:00",
+      "memory_available_bytes": 19115999232,
+      "node": "mo-standard-2",
+      "per_claim_bytes": 85899345920,
+      "physical_free_bytes": 218885914624,
+      "planned_private_claims": 0,
+      "root_free_bytes": 85601157120,
+      "storage_class_uid": "eb340425-2296-4b08-8388-e30dadf1d795",
+      "workloads": {
+        "calico-system/calico-node-q4k2w": {
+          "init_restarts": 2,
+          "name": "calico-node-q4k2w",
+          "namespace": "calico-system",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 2,
+          "uid": "a8cf7655-65f7-4522-b7df-e3c267a43069"
+        },
+        "calico-system/csi-node-driver-tbddg": {
+          "init_restarts": 0,
+          "name": "csi-node-driver-tbddg",
+          "namespace": "calico-system",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 4,
+          "uid": "f66aacb2-16c1-470d-9ae1-3fe10a9badfc"
+        },
+        "cicd/cs-mty-dind-2c8g-79d6ffb5-listener": {
+          "init_restarts": 0,
+          "name": "cs-mty-dind-2c8g-79d6ffb5-listener",
+          "namespace": "cicd",
+          "owners": [
+            "AutoscalingListener"
+          ],
+          "restarts": 0,
+          "uid": "05fe3aa7-bbb3-46f3-8596-5922bf325228"
+        },
+        "cicd/cs-mty-large-7c14g-79d6ffb5-listener": {
+          "init_restarts": 0,
+          "name": "cs-mty-large-7c14g-79d6ffb5-listener",
+          "namespace": "cicd",
+          "owners": [
+            "AutoscalingListener"
+          ],
+          "restarts": 0,
+          "uid": "5c803943-3306-41f2-8672-acd0c93e5ad7"
+        },
+        "cicd/cs-mty-medium-2c8g-79d6ffb5-listener": {
+          "init_restarts": 0,
+          "name": "cs-mty-medium-2c8g-79d6ffb5-listener",
+          "namespace": "cicd",
+          "owners": [
+            "AutoscalingListener"
+          ],
+          "restarts": 0,
+          "uid": "a6b2c0f2-7806-455a-bbbd-9eb3c1822965"
+        },
+        "cicd/cs-mty-nc-n0-v1-79d6ffb5-listener": {
+          "init_restarts": 0,
+          "name": "cs-mty-nc-n0-v1-79d6ffb5-listener",
+          "namespace": "cicd",
+          "owners": [
+            "AutoscalingListener"
+          ],
+          "restarts": 0,
+          "uid": "98c9b43c-d295-43fc-9754-577ba1ccc48b"
+        },
+        "cicd/cs-mty-pvc-g0-cpe8k-bdcc79b6-listener": {
+          "init_restarts": 0,
+          "name": "cs-mty-pvc-g0-cpe8k-bdcc79b6-listener",
+          "namespace": "cicd",
+          "owners": [
+            "AutoscalingListener"
+          ],
+          "restarts": 0,
+          "uid": "93c45775-49bd-43c1-b738-e10aa147025c"
+        },
+        "cicd/cs-mty-pvc-g1-cpe8k-bdcc79b6-listener": {
+          "init_restarts": 0,
+          "name": "cs-mty-pvc-g1-cpe8k-bdcc79b6-listener",
+          "namespace": "cicd",
+          "owners": [
+            "AutoscalingListener"
+          ],
+          "restarts": 0,
+          "uid": "87b5b4c8-5bb8-4754-b5d8-d9192ef6ab0d"
+        },
+        "cicd/cs-mty-pvc-g2-cpe8k-bdcc79b6-listener": {
+          "init_restarts": 0,
+          "name": "cs-mty-pvc-g2-cpe8k-bdcc79b6-listener",
+          "namespace": "cicd",
+          "owners": [
+            "AutoscalingListener"
+          ],
+          "restarts": 0,
+          "uid": "a4ca46d1-37d9-433c-8517-a7de7924202b"
+        },
+        "cicd/gha-mty-helm-gha-arc-gha-rs-controller-867d89dcdd-cvqw5": {
+          "init_restarts": 0,
+          "name": "gha-mty-helm-gha-arc-gha-rs-controller-867d89dcdd-cvqw5",
+          "namespace": "cicd",
+          "owners": [
+            "ReplicaSet"
+          ],
+          "restarts": 0,
+          "uid": "0d9e19ce-d2f8-4ad5-80c9-129eb7538d5f"
+        },
+        "directpv/node-server-bt7bc": {
+          "init_restarts": 0,
+          "name": "node-server-bt7bc",
+          "namespace": "directpv",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 9,
+          "uid": "a8111a7e-dda6-4493-a91d-b9a4a3c2af5a"
+        },
+        "kruise-system/kruise-daemon-tk87m": {
+          "init_restarts": 0,
+          "name": "kruise-daemon-tk87m",
+          "namespace": "kruise-system",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 1,
+          "uid": "baa350a5-9788-4e3f-af40-d706bdb56b0d"
+        },
+        "kube-system/kube-proxy-4p4zv": {
+          "init_restarts": 0,
+          "name": "kube-proxy-4p4zv",
+          "namespace": "kube-system",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 2,
+          "uid": "a15148a3-e10c-4d13-91a5-15c71f9ea170"
+        },
+        "mo-ob/mo-ob-opensource-prometheus-node-exporter-f8tv4": {
+          "init_restarts": 0,
+          "name": "mo-ob-opensource-prometheus-node-exporter-f8tv4",
+          "namespace": "mo-ob",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 1,
+          "uid": "8384f22b-dab0-42af-a32f-2fb486a9dc4e"
+        },
+        "mo-ob/mo-ob-opensource-promtail-vrxtg": {
+          "init_restarts": 0,
+          "name": "mo-ob-opensource-promtail-vrxtg",
+          "namespace": "mo-ob",
+          "owners": [
+            "DaemonSet"
+          ],
+          "restarts": 2,
+          "uid": "802963b6-6eb6-4f3c-b48b-7584e8fc8caa"
+        }
+      }
+    }
+  },
+  "private_stage_collected": true,
+  "provenance_verified_before_write": true,
+  "source": "87c44445f83e308ef12dd7ca0e570cec1e6690d9",
+  "stage": {
+    "compiler_invocations": 0,
+    "controller_seconds": 29.043,
+    "index_sha256": "b89aa2874f9d133040a29fe042eead7377f54eb1360ae268f56f2d664f0f4bb5",
+    "phase": "stage",
+    "shared_cache_modified": false,
+    "success": true
+  },
+  "started_at": "2026-11-18T20:39:01.772002+00:00",
+  "targets": {},
+  "verify": {
+    "binding": {
+      "environment": "mty",
+      "node": "mo-standard-1",
+      "node_uid": "3a3f68b5-9fca-4c62-9dd6-8a9b92559517",
+      "pv_uid": "26fd0368-7b17-4669-a249-8f67a78ac4af",
+      "pvc_uid": "3db987eb-9c02-4dd0-ba0a-83462c5ff454"
+    },
+    "compatibility_aliases": false,
+    "compiler_invocations": 0,
+    "controller_seconds": 21.467,
+    "independently_verified": true,
+    "index_sha256": "b89aa2874f9d133040a29fe042eead7377f54eb1360ae268f56f2d664f0f4bb5",
+    "marker_sha256": "41348447dbb48e74cf64a8eca9142cdc2a763608f6e6cd820f05d2d79857ac10",
+    "old_metadata_preserved": true,
+    "phase": "verify",
+    "success": true
+  },
+  "workspace": {
+    "bytes": 85899345920,
+    "pod_name": "cs-mty-nc-profile-n1-44387585602-14466178859-writer",
+    "pod_uid": "765477c6-cf8e-429e-9b3e-85a1cfbee354",
+    "pv_name": "pvc-09162813-4c9c-4efa-a2bf-c2aaef573795",
+    "pv_uid": "7e4e602a-9a4e-41ce-9d47-e3b5b331d749",
+    "pvc_name": "cs-mty-nc-profile-n1-44387585602-14466178859-writer-work",
+    "pvc_uid": "09162813-4c9c-4efa-a2bf-c2aaef573795"
+  },
+  "workspace_gc": [
+    {
+      "bytes": 85899345920,
+      "pod_name": "cs-mty-nc-profile-n1-44387585602-14466178859-writer",
+      "pod_uid": "765477c6-cf8e-429e-9b3e-85a1cfbee354",
+      "pv_name": "pvc-09162813-4c9c-4efa-a2bf-c2aaef573795",
+      "pv_uid": "7e4e602a-9a4e-41ce-9d47-e3b5b331d749",
+      "pvc_name": "cs-mty-nc-profile-n1-44387585602-14466178859-writer-work",
+      "pvc_uid": "09162813-4c9c-4efa-a2bf-c2aaef573795"
+    }
+  ],
+  "workspaces": [
+    {
+      "bytes": 85899345920,
+      "pod_name": "cs-mty-nc-profile-n1-44387585602-14466178859-writer",
+      "pod_uid": "765477c6-cf8e-429e-9b3e-85a1cfbee354",
+      "pv_name": "pvc-09162813-4c9c-4efa-a2bf-c2aaef573795",
+      "pv_uid": "7e4e602a-9a4e-41ce-9d47-e3b5b331d749",
+      "pvc_name": "cs-mty-nc-profile-n1-44387585602-14466178859-writer-work",
+      "pvc_uid": "09162813-4c9c-4efa-a2bf-c2aaef573795"
+    }
+  ]
+}

@@ -50,7 +50,8 @@ class PRConsumerContract(unittest.TestCase):
         self.assertEqual(node['env']['CS_CACHE_SOURCE_REPOSITORY'],'matrixorigin/matrixone')
         self.assertEqual(node['env']['ACTUAL_PR_SOURCE_REPOSITORY'],'${{ github.event.pull_request.head.repo.full_name }}')
         self.assertEqual(node['env']['ACTUAL_PR_HEAD_SHA'],'${{ github.event.pull_request.head.sha }}')
-        self.assertIn('node-compile-cache-pr-catalog.json',node['run'])
+        self.assertIn('node_cache_pr_native_catalog.py materialize',node['run'])
+        self.assertIn('--catalog "$RUNNER_TEMP/cs-reviewed-native-catalog.json"',node['run'])
         self.assertIn('node_cache_pr_source.py record',node['run'])
         for s in self.j['steps']:
             if s.get('with', {}).get('repository') == '${{ job.workflow_repository }}':

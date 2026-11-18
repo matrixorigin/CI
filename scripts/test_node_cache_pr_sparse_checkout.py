@@ -17,13 +17,16 @@ import build_real_pr_node_cache_workflow as actual_pr
 CODE=r'''
 import json,sys
 from pathlib import Path
-root=Path(sys.argv[1]);sys.path.insert(0,str(root/'scripts'))
+root=Path(sys.argv[1]).resolve();sys.path.insert(0,str(root/'scripts'))
 import node_cache_pr_source
 import node_cache_pr_catalog as catalog
+import node_cache_pr_native_catalog as native
 values=[json.loads((root/'config'/name).read_text()) for name in (
     'node-compile-cache-catalog.json','node-cache-all-node-copy-evidence.json',
     'node-compile-cache-pr-catalog.json','node-cache-pr-profile-proof.json')]
-print(json.dumps(catalog.validate(*values)))
+result=catalog.validate(*values)
+result['native_additions']=native.load(root/'config')[1]['native_additions']
+print(json.dumps(result))
 '''
 
 
@@ -52,10 +55,12 @@ class SparseRuntime(unittest.TestCase):
                 self.assertEqual(result.returncode,0,result.stderr)
                 proof=json.loads(result.stdout)
                 self.assertTrue(proof['old_copy_authority_preserved']);self.assertFalse(proof['live_pr_ut_accepted'])
+                self.assertEqual(proof['native_additions'],2)
 
     def test_missing_provenance_transitive_helper_config_or_mutated_proof_fails(self):
         for fault in ('scripts/node_cache_pr_source.py','scripts/node_cache_profile_receipt.py',
-                'config/node-cache-all-node-copy-evidence.json','changed-proof'):
+                'config/node-cache-all-node-copy-evidence.json','scripts/node_cache_pr_native_catalog.py',
+                'config/node-native-publication-n1-receipt.json','changed-proof'):
             with self.subTest(fault=fault),tempfile.TemporaryDirectory(prefix='pr-sparse-negative-') as tmp:
                 path=Path(tmp);self.materialize(path,consumer.build())
                 if fault=='changed-proof':
