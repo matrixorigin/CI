@@ -117,6 +117,7 @@ def atomic_json(path, value):
 def failure_report(exc):
     """Allowlisted diagnostics only: never include exception text or locals."""
     codes = {
+        'per-job cache must be fresh': 'private_cache_already_exists',
         'node cache startup headroom below 60 GiB': 'startup_disk_reserve',
         'node cache identity digest mismatch': 'node_identity_digest',
         'runner identity differs from trusted binding': 'node_binding_mismatch',

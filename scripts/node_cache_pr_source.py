@@ -16,10 +16,24 @@ def checked(repository,head,actual,project='matrixorigin/matrixone'):
         'actual_pr_head_sha':head,'checked_out_head_sha':actual,'shared_cache_writes':0}
 
 
-if __name__=='__main__':
-    c.require(sys.argv[1:] == ['record'],'unknown PR provenance operation')
-    source=Path(os.environ['GITHUB_WORKSPACE'])
+def provenance(mode,source,temp,repository,head,project):
+    c.require(mode in ('check','record'),'unknown PR provenance operation')
+    source=Path(source);temp=Path(temp)
     actual=subprocess.check_output(['git','rev-parse','HEAD'],cwd=source,text=True,timeout=30).strip()
-    value=checked(os.environ['ACTUAL_PR_SOURCE_REPOSITORY'],os.environ['ACTUAL_PR_HEAD_SHA'],actual,
-        os.environ['CS_CACHE_SOURCE_REPOSITORY'])
-    c.atomic_json(Path(os.environ['RUNNER_TEMP'])/'cs-node-cache/pr-source.json',value)
+    value=checked(repository,head,actual,project)
+    if mode=='record':
+        directory=temp/'cs-node-cache';target=directory/'pr-source.json'
+        state=c.read_json(directory/'state.json')
+        c.require(state['source']==str(source) and state['config']['runtime']['repository']==project,
+            'PR provenance does not match the configured private cache source')
+        c.require(not target.exists(),'PR provenance already exists; do not overwrite')
+        c.atomic_json(target,value)
+    # check MUST NOT create the per-job cache directory. configure owns its
+    # exclusive first creation, preserving the original fresh-cache invariant.
+    return value
+
+
+if __name__=='__main__':
+    c.require(len(sys.argv)==2,'unknown PR provenance operation')
+    print(c.canonical(provenance(sys.argv[1],os.environ['GITHUB_WORKSPACE'],os.environ['RUNNER_TEMP'],
+        os.environ['ACTUAL_PR_SOURCE_REPOSITORY'],os.environ['ACTUAL_PR_HEAD_SHA'],os.environ['CS_CACHE_SOURCE_REPOSITORY'])).decode())

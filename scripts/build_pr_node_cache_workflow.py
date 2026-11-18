@@ -58,10 +58,11 @@ def build():
             step['env']['ACTUAL_PR_HEAD_SHA'] = '${{ github.event.pull_request.head.sha }}'
             step['env'].pop('REQUESTED_CACHE_ENV', None)
             step['run'] = ('set -euo pipefail\ncase "${CS_CACHE_ENV:-}" in mty|mnl2|jed|ruh) ;; *) exit 1 ;; esac\n'
-                'python3 .ci-workflow/scripts/node_cache_pr_source.py record\n'
+                'python3 .ci-workflow/scripts/node_cache_pr_source.py check\n'
                 'python3 .ci-workflow/scripts/node_cache_pr_catalog.py check\n'
                 'python3 .ci-workflow/scripts/node_compile_cache.py configure '
-                '--catalog .ci-workflow/config/node-compile-cache-pr-catalog.json\n')
+                '--catalog .ci-workflow/config/node-compile-cache-pr-catalog.json\n'
+                'python3 .ci-workflow/scripts/node_cache_pr_source.py record\n')
         if step.get('name') == 'Upload readable coverage UT report':
             step['with']['path']+='${{ runner.temp }}/cs-node-cache/pr-source.json\n'
         if step.get('id') == 'coverage_ut':
