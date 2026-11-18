@@ -91,11 +91,16 @@ def resume_created(resume,environment,name):
     return copy.deepcopy(created)
 
 
-def run(policy,entry,base,receipt,config,path,resume=None):
+def run(policy,entry,base,receipt,config,path,resume=None,backend=None):
     c.require(not path.exists() and entry['runtime']['environment']==policy['environment'] and
               not entry['bindings'],'fresh append operation required')
-    name=f"cs-{policy['environment']}-nc-append-{entry['producer']['id']}-{entry['artifact']['id']}"
-    resources=objects(policy,entry,base,name)
+    c.require(backend is None or resume is None,'alternate publication cannot resume')
+    name=(backend.name(policy,entry) if backend else
+          f"cs-{policy['environment']}-nc-append-{entry['producer']['id']}-{entry['artifact']['id']}")
+    resources=(backend.objects(policy,entry,base,name) if backend else objects(policy,entry,base,name))
+    authorize=backend.authorize if backend else authorization.authorize
+    signed_url=backend.signed_url if backend else transport.signed_archive_url
+    script=backend.script if backend else 'node_cache_append_job.py'
     result={'complete':False,'environment':policy['environment'],'name':name,'created':[],
             'started_at':initial.now().isoformat(),'compiler_invocations':0,'existing_pvc_preserved':True}
     if resume is not None:
@@ -114,7 +119,8 @@ def run(policy,entry,base,receipt,config,path,resume=None):
             'drives':['get','directpvdrives','-o','json'],'pods':['get','pods','-A','-o','json'],
             'stats':['get','--raw','/api/v1/nodes/'+policy['node']+'/proxy/stats/summary']}.items()}
     def fresh_authorization():
-        token=os.environ['CS_CACHE_READ_TOKEN'];prefix='repos/matrixorigin/matrixone/actions/'
+        token=os.environ['CS_CACHE_READ_TOKEN']
+        prefix='repos/'+(backend.repository if backend else 'matrixorigin/matrixone')+'/actions/'
         def api(suffix):
             req=urllib.request.Request('https://api.github.com/'+prefix+suffix,
                 headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json'})
@@ -123,7 +129,7 @@ def run(policy,entry,base,receipt,config,path,resume=None):
             with urllib.request.build_opener(NoRedirect()).open(req,timeout=30) as body:return json.load(body)
         auth={'run':api('runs/'+str(entry['producer']['id'])),
               'artifact':api('artifacts/'+str(entry['artifact']['id'])),'checked_at':initial.now().isoformat()}
-        authorization.authorize(entry,auth)
+        authorize(entry,auth)
         return auth
     def volume():
         pvc=call(['get','pvc',policy['name'],'-n','cicd','-o','json'])
@@ -138,7 +144,7 @@ def run(policy,entry,base,receipt,config,path,resume=None):
             call(['get','configmap',name,'-n','cicd','-o','json']),
             call(['get','pod',name,'-n','cicd','-o','json']),pvc,pv,node)
     try:
-        fresh_authorization();authorization.validate_url(transport.signed_archive_url(entry))
+        fresh_authorization();authorization.validate_url(signed_url(entry))
         own_uid=next((x['uid'] for x in result['created'] if x['kind']=='Pod'),None)
         snap=snapshot();result['preflight']=initial.guard(policy,snap,own_uid,after_allocation=True)
         c.require(result['preflight']['root_free_bytes']>=60*c.GIB,'append startup disk reserve')
@@ -171,9 +177,9 @@ def run(policy,entry,base,receipt,config,path,resume=None):
             result['latest_resources']=initial.guard(policy,snapshot(),uid,True)
             c.require(current_identity()==result['binding'],'append binding changed')
             request={**fresh_authorization(),'binding':result['binding']}
-            if phase=='stage':request['url']=transport.signed_archive_url(entry)
+            if phase=='stage':request['url']=signed_url(entry)
             result['active_phase']=phase;journal();start=time.monotonic()
-            response=call(['exec','-i','-n','cicd',name,'--','python3','/probe/node_cache_append_job.py',phase],request,3700)
+            response=call(['exec','-i','-n','cicd',name,'--','python3','/probe/'+script,phase],request,3700)
             c.require(response['success'] is True and response['phase']==phase,'append phase rejected')
             result[phase]={**response,'controller_seconds':round(time.monotonic()-start,3)};journal()
         c.require(current_identity()==result['binding'],'append identity changed before cleanup')

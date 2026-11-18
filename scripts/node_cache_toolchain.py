@@ -75,6 +75,23 @@ def unpack(archive, sha, destination, catalog):
     check(destination, expected(catalog))
 
 
+def install(root):
+    """Restore original paths from a verified private extraction only."""
+    cache = Path(os.environ['RUNNER_TOOL_CACHE'])
+    targets = {tool:cache/tool/version/'x64' for tool,version in VERSIONS.items()}
+    if any(path.exists() for path in targets.values()):
+        raise ValueError('unexpected existing tool installation')
+    paths = []
+    for tool,target in targets.items():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(root/tool), target)
+        paths.append(str(target/'bin'))
+    with open(os.environ['GITHUB_PATH'], 'a') as f:
+        f.write('\n'.join(paths)+'\n')
+    with open(os.environ['GITHUB_ENV'], 'a') as f:
+        f.write('GOROOT='+str(cache/'go'/VERSIONS['go']/'x64')+'\n')
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('mode', choices=('pack', 'restore'))
@@ -89,20 +106,7 @@ def main():
             f.write('sha256='+sha+'\n')
     else:
         unpack(args.archive, args.sha, args.root, args.catalog)
-        # Preserve the original setup-go/setup-cmake locations, not temp paths.
-        cache = Path(os.environ['RUNNER_TOOL_CACHE'])
-        paths = []
-        for tool, version in VERSIONS.items():
-            target = cache/tool/version/'x64'
-            if target.exists():
-                raise ValueError('unexpected existing tool installation')
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(args.root/tool), target)
-            paths.append(str(target/'bin'))
-        with open(os.environ['GITHUB_PATH'], 'a') as f:
-            f.write('\n'.join(paths)+'\n')
-        with open(os.environ['GITHUB_ENV'], 'a') as f:
-            f.write('GOROOT='+str(cache/'go'/VERSIONS['go']/'x64')+'\n')
+        install(args.root)
 
 
 if __name__ == '__main__':

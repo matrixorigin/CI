@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "versions": {"go": "1.27.1", "cmake": "3.17.2"},
+  "archive_sha256": "26cdf8367ce1f4efb7a46b2a6d36843e2a5760423ca4357f2a01e52b4f0ea130",
+  "archive_size": 125902112,
+  "producer": {
+    "repository": "matrixorigin/CI",
+    "id": 44226654955,
+    "sha": "b510abfeec622363079cc38b708332b55b9c992b",
+    "branch": "codex/node-incremental-compile-cache",
+    "event": "push",
+    "attempt": 1,
+    "workflow_path": ".github/workflows/node-cache-canary.yaml",
+    "workflow_id": 421242527,
+    "actor": "Ariznawlll"
+  },
+  "artifact": {
+    "id": 14393416588,
+    "name": "reviewed-toolchain-contract-44226654955",
+    "size": 125268866,
+    "digest": "sha256:f0c1a5c4a86839b82677fbfaa8ebd4c85453994fce8e34c687e7e536c03d57a9"
+  }
+}
