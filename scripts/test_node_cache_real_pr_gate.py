@@ -1,12 +1,39 @@
 import copy
 from pathlib import Path
 import unittest
+from unittest import mock
+import urllib.error
 
 import node_cache_real_pr_gate as gate
 import build_real_pr_node_cache_workflow as workflow
 
 
 class CurrentPR(unittest.TestCase):
+    def test_real_http_redirect_is_denial_not_followed_and_alternate_may_prove_204(self):
+        class Opener:
+            def open(self,request,timeout):
+                raise urllib.error.HTTPError(request.full_url,302,'fixture redirect',{'Location':'https://other.invalid/'},None)
+        gate.OBSERVATION.clear()
+        with mock.patch.object(gate.urllib.request,'build_opener',return_value=Opener()) as build:
+            self.assertEqual(gate.read('orgs/matrixorigin/members/trusted-user',token='fixture-only'),(302,None))
+            self.assertIsNone(build.call_args.args[0].redirect_request(None,None,None,None,None,None))
+        self.assertEqual(gate.OBSERVATION['last_metadata_http_status'],302)
+        self.assertNotIn('fixture-only',str(gate.OBSERVATION));self.assertNotIn('other.invalid',str(gate.OBSERVATION))
+        status,checks=gate.membership('trusted-user','a','b',reader=lambda path,token:((302 if token=='a' else 204),None))
+        self.assertEqual((status,[x['http_status'] for x in checks]),(204,[302,204]))
+        context,pr=self.fixture()
+        status,_=gate.membership('trusted-user','a','b',reader=lambda *args,**kwargs:(302,None))
+        with self.assertRaises(ValueError):gate.authorize(context,pr,status)
+
+    def test_unexpected_http_errors_record_only_safe_code_and_do_not_become_membership(self):
+        class Opener:
+            def open(self,request,timeout):
+                raise urllib.error.HTTPError(request.full_url,500,'fixture internal error',{},None)
+        gate.OBSERVATION.clear()
+        with mock.patch.object(gate.urllib.request,'build_opener',return_value=Opener()):
+            with self.assertRaises(ValueError):gate.read('orgs/matrixorigin/members/trusted-user',token='fixture-only')
+        self.assertEqual(gate.OBSERVATION,{'last_metadata_http_status':500})
+
     def test_membership_uses_existing_checkout_credential_without_relaxing_204_gate(self):
         calls=[]
         def reader(path,token):

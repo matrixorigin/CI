@@ -50,7 +50,13 @@ def read(path,token=None):
             raw=response.read(2*1024**2+1);c.require(len(raw)<=2*1024**2,'PR metadata response too large')
             return response.status,None if response.status==204 else json.loads(raw)
     except urllib.error.HTTPError as error:
-        if error.code in (401,403,404):return error.code,None
+        # GitHub documents 302 for this membership endpoint when the requester
+        # is not an org member. Do NOT follow Location or treat it as authority;
+        # allow the existing alternate credential to ask the original endpoint.
+        code=error.code;error.close()
+        OBSERVATION['last_metadata_http_status']=code
+        if code in (401,403,404) or (code==302 and path.startswith('orgs/matrixorigin/members/')):
+            return code,None
         raise ValueError('PR metadata read unavailable') from None
 
 
@@ -63,12 +69,14 @@ def membership(author,cache_token,checkout_token,reader=read):
     """
     c.require(re.fullmatch('[A-Za-z0-9_-]+',author),'PR author identity invalid')
     checks=[];status=None
+    OBSERVATION['membership_checks']=checks
     for role,token in (('actions_read',cache_token),('existing_source_checkout',checkout_token)):
         if not token or (role=='existing_source_checkout' and token==cache_token):continue
+        check={'credential_role':role,'http_status':None};checks.append(check)
         status,_=reader('orgs/matrixorigin/members/'+author,token=token)
-        checks.append({'credential_role':role,'http_status':status})
+        check['http_status']=status
         if status==204:break
-        c.require(status in (401,403,404),'unexpected org membership response; fail closed')
+        c.require(status in (302,401,403,404),'unexpected org membership response; fail closed')
     return status,checks
 
 
