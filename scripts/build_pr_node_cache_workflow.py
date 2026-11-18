@@ -44,6 +44,12 @@ def build():
         if step.get('with', {}).get('repository') == 'matrixorigin/CI':
             step['with']['repository'] = '${{ job.workflow_repository }}'
             step['with']['ref'] = '${{ job.workflow_sha }}'
+        if step.get('name') == 'Checkout CI coverage helper':
+            # New PR provenance/catalog verification imports the receipt's
+            # complete transitive helper graph and reads its reviewed configs.
+            # A legacy file allowlist silently omitted these runtime inputs.
+            step['with']['sparse-checkout'] = 'scripts\nconfig\n'
+            step['with']['sparse-checkout-cone-mode'] = True
         if step.get('id') == 'node_cache':
             # The trusted project namespace is not the fork provenance. Native
             # input hashes and Go ActionIDs still distinguish changed code.

@@ -170,26 +170,9 @@ jobs:
         ref: ${{ job.workflow_sha }}
         persist-credentials: false
         sparse-checkout: |
-          scripts/prepare_coverage_cgo.sh
-          scripts/run_coverage_ut.py
-          scripts/run_coverage_packages.py
-          scripts/coverage_two_groups.py
-          scripts/test_run_coverage_packages.py
-          scripts/compact_coverage_profile.go
-          scripts/summarize_coverage_ut.py
-          scripts/coverage_timing.py
-          scripts/coverage_skip_manifest.py
-          scripts/summarize_ut_report.py
-          scripts/cs_coverage_cache.py
-          scripts/incremental_cache.py
-          scripts/node_compile_cache.py
-          scripts/node_cache_validation.py
-          scripts/node_cache_candidate.py
-          scripts/publish_node_cache.py
-          config/node-compile-cache-catalog.json
-          config/node-cache-validation-sources.json
-          config/coverage-cache-catalog.json
-        sparse-checkout-cone-mode: false
+          scripts
+          config
+        sparse-checkout-cone-mode: true
         path: .ci-workflow
     - name: Prepare fresh per-job compilation paths
       env:
