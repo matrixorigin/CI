@@ -82,7 +82,10 @@ def quotas(snapshot,claims,pods):
 
 
 def admission(policy,snapshot,node,owned=(),baseline=None,new_claims=0,new_pods=0):
-    proof=base.snapshot_guard(policy,snapshot,node,owned,baseline)
+    # The copy controller's default 64Gi *unallocated drive* requirement is
+    # unrelated to existing Pod-owned workspaces. Keep the 20Gi drive reserve
+    # here, then budget every NEW workspace below. Root still requires 60Gi.
+    proof=base.snapshot_guard(policy,snapshot,node,owned,baseline,physical_reserve_gib=20)
     sc=snapshot['sc']
     c.require(sc['metadata']['name']=='directpv-min-io-ephemeral' and not sc['metadata'].get('deletionTimestamp')
         and sc['reclaimPolicy']=='Delete','private workspace class lifecycle differs')
@@ -244,7 +247,10 @@ def run(policy,catalog,lock,evidence,config,directory,api=base.n.legacy.api):
         'compiler_invocations':0,'external_tool_downloads':0,'started_at':pub.now().isoformat(),
         'created':[],'deleted':[],'targets':{},'automatic_retry':False}
     session=Session(policy,config,state,directory/'state.json')
-    cm=f'cs-{environment}-allnode-work-proof-r1'
+    # MTY r1 completed both first-node readonly proofs but its inherited COPY
+    # free-space check prevented owner-GC. A separate reviewed intent must not
+    # collide with or overwrite the retained r1 ConfigMap/evidence.
+    cm=f'cs-{environment}-allnode-work-proof-'+('r2' if environment=='mty' else 'r1')
     try:
         session.journal();authenticate(catalog,lock,evidence,environment,api)
         state['provenance_verified_before_write']=True

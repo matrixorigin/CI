@@ -45,7 +45,7 @@ class Lifecycle(unittest.TestCase):
                     obj['metadata']['labels']['directpv.min.io/node']=binding['node'];value['nodes']['items'].append(obj)
                     live_work=sum(1 for (kind,name),v in self.live.items() if kind=='pod' and v['spec']['nodeName']==binding['node'])
                     value['drives']['items'].append({'metadata':{'labels':obj['metadata']['labels']},
-                        'status':{'status':'Ready','freeCapacity':(600-live_work*q.WORK_GIB)*q.c.GIB}})
+                        'status':{'status':'Ready','freeCapacity':(184-live_work*q.WORK_GIB)*q.c.GIB}})
                 value['pods']={'items':[copy.deepcopy(v) for (kind,_),v in self.live.items() if kind=='pod']}
                 value['sc']=copy.deepcopy(sc);value['quotas']={'items':[]}
                 for key in ('cpu','memory','fs'):value['stats']['node'][key]['time']=q.pub.now().isoformat()

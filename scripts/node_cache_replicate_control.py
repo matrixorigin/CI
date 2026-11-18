@@ -25,7 +25,8 @@ FILES = ('incremental_cache.py','cs_coverage_cache.py','node_compile_cache.py',
          'node_cache_toolchain.py','node_cache_toolchain_store.py','node_cache_replication.py')
 
 
-def snapshot_guard(policy, snap, node_name, owned=(), baseline=None, allocate=False):
+def snapshot_guard(policy, snap, node_name, owned=(), baseline=None, allocate=False, physical_reserve_gib=64):
+    c.require(physical_reserve_gib>=20 and (not allocate or physical_reserve_gib==64), 'physical reserve policy differs')
     env=policy['environment']
     c.require(env in ('mty','jed','ruh','mnl2') and node_name in policy['node_uids'], 'replication target not approved')
     namespaces={x['metadata']['name']:x['metadata']['uid'] for x in snap['namespaces']['items']}
@@ -47,7 +48,7 @@ def snapshot_guard(policy, snap, node_name, owned=(), baseline=None, allocate=Fa
               and stat['fs']['availableBytes']>=60*c.GIB, 'replication actual reserve')
     c.require(any(d['metadata'].get('labels',{}).get('directpv.min.io/node')==node_name
                   and d['metadata']['labels'].get('directpv.min.io/tier')=='ephemeral'
-                  and d['status'].get('status')=='Ready' and d['status'].get('freeCapacity',0)>=(128 if allocate else 64)*c.GIB
+                  and d['status'].get('status')=='Ready' and d['status'].get('freeCapacity',0)>=(128 if allocate else physical_reserve_gib)*c.GIB
                   for d in snap['drives']['items']), 'replication physical reserve')
     cpu,memory=1.,512*1024**2;workloads={}
     for pod in snap['pods']['items']:
