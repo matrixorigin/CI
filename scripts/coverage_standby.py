@@ -17,6 +17,7 @@ from urllib.parse import urlencode, urlsplit
 REPO = "matrixorigin/matrixone"
 API = "https://api.github.com/repos/" + REPO
 WORKER = "coverage-standby-worker.yaml"
+WORKER_REF = "main"
 ENTRY = ".github/workflows/entrypoint.yaml"
 POOLS = {"cs": "cs-node-cache-7c14g", "idc": "amd64-mo-shanghai-ut-safe"}
 WAIT = 600
@@ -71,7 +72,7 @@ def child_meta(r, t, pool, revision):
     m = run(r)
     check(m["id"] == r and m["repository"]["full_name"] == REPO and m["run_attempt"] == 1
           and m["path"] == ".github/workflows/" + WORKER and m["event"] == "workflow_dispatch"
-          and m["head_branch"] == "main" and m["head_sha"] == revision
+          and m["head_branch"] == WORKER_REF and m["head_sha"] == revision
           and m["display_title"] == title(t, pool), "dedicated worker identity mismatch")
     return m
 
@@ -120,12 +121,13 @@ def dispatch(t, pool, revision):
     parent_meta(t)
     # At most one POST. If the response is lost, fail closed; no blind retries.
     body, _ = api(f"/actions/workflows/{WORKER}/dispatches", {
-        "ref": "main", "inputs": {"ticket": json.dumps(t, separators=(",", ":")),
-                                 "pool": pool}, "return_run_details": True})
+        "ref": WORKER_REF, "inputs": {"ticket": json.dumps(t, separators=(",", ":")),
+                                 "pool": pool}})
     r = body.get("workflow_run_id")
     for _ in range(24):
         if not r:  # also support a legacy 204 response, correlated without guessing
-            page = one(f"/actions/workflows/{WORKER}/runs?event=workflow_dispatch&branch=main&per_page=100")
+            page = one(f"/actions/workflows/{WORKER}/runs?" + urlencode(
+                dict(event="workflow_dispatch", branch=WORKER_REF, per_page=100)))
             ids = [x["id"] for x in page["workflow_runs"] if x["display_title"] == title(t, pool)]
             check(len(ids) <= 1, "duplicate dispatch; refusing to select")
             r = ids[0] if ids else None
@@ -153,7 +155,7 @@ def choose():
           "the PR head does not match the trusted parent")
     # A pull_request_target run reports the PR head; a workflow_dispatch run
     # reports the workflow branch head. These are not the same commit.
-    rev = t["revision"] = one("/git/ref/heads/main")["object"]["sha"]
+    rev = t["revision"] = one("/git/ref/heads/" + WORKER_REF)["object"]["sha"]
     nonce = secrets.token_hex(32)
     t["key"] = digest(nonce)
     pool = "cs"

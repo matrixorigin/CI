@@ -10,13 +10,15 @@ import textwrap
 import unittest
 
 
-WORKFLOW = (Path(__file__).parents[1] / ".github/workflows/coverage-ut.yaml").read_text()
+DIRECTORY = Path(__file__).parents[1] / ".github/workflows"
+ENTRY = (DIRECTORY / "coverage-ut.yaml").read_text()
+WORKFLOW = (DIRECTORY / "coverage-worker-cs.yaml").read_text()
 STACKS = ("mty", "mnl2", "jed", "ruh")
 CONFIGS = tuple(f"CS_S3_{stack.upper()}_CONFIG" for stack in STACKS)
 
 
 def step_script(step):
-    source = WORKFLOW
+    source = ENTRY if step == "check_coverage_secrets" else WORKFLOW
     if step == "eligibility":
         source = (Path(__file__).parents[1] / ".github/workflows/coverage-ut-pre-cutover.yaml").read_text()
     marker = re.search(rf"^( +)- id: {step}$", source, re.M)
@@ -58,13 +60,15 @@ class CSS3CoverageTest(unittest.TestCase):
 
     def test_shared_pool_and_pr_source_without_experiment_inputs(self):
         self.assertIn("    runs-on: cs-node-cache-7c14g\n", WORKFLOW)
-        self.assertIn("repository: ${{ needs.check_coverage_eligibility.outputs.head_repository }}", WORKFLOW)
-        self.assertIn("ref: ${{ needs.check_coverage_eligibility.outputs.head_sha }}", WORKFLOW)
+        self.assertIn("source: ${{ needs.check_coverage_eligibility.outputs.head_repository }}", ENTRY)
+        self.assertIn("repository: ${{ inputs.source }}", WORKFLOW)
+        self.assertIn("head: ${{ needs.check_coverage_eligibility.outputs.head_sha }}", ENTRY)
+        self.assertIn("ref: ${{ inputs.head }}", WORKFLOW)
         self.assertNotRegex(WORKFLOW, r"inputs\.(canary_\w+|runner_label)|weilu-runner-test|pulls/325\d+|minio-source")
-        consumer = WORKFLOW.split("  ut-coverage-linux-x86:\n", 1)[1]
+        consumer = WORKFLOW
         self.assertNotRegex(consumer, r"secrets\.(TEST_S3FS_(ALIYUN|QCLOUD)|S3\w+)")
         self.assertIn("COVERAGE_UT_PACKAGE_PARALLELISM: '7'", WORKFLOW)
-        self.assertIn('COVERAGE_GROUP: ${{ matrix.group }}', WORKFLOW)
+        self.assertIn('COVERAGE_GROUP: ${{ inputs.group }}', WORKFLOW)
 
     def test_runner_selects_only_its_own_storage(self):
         for stack in (*STACKS, "unknown"):

@@ -46,3 +46,13 @@ class Queue(unittest.TestCase):
 
     def test_immediate_assignment(self):
         self.scenario([(self.active,2)],False,1,('cs',111))
+
+    def test_empty_dispatch_response_reconciles_on_same_worker_ref_without_second_post(self):
+        t = dict(parent=1, attempt=1, group=1, head='a'*40, key='b'*64)
+        with patch.object(s, 'WORKER_REF', 'staging'), patch.object(s, 'parent_meta'), \
+             patch.object(s, 'child_meta'), patch.object(s, 'api', return_value=({},0)) as post, \
+             patch.object(s, 'one', return_value={'workflow_runs':[{'id':123,'display_title':s.title(t,'cs')}]}) as get:
+            self.assertEqual(s.dispatch(t,'cs','c'*40),123)
+            self.assertEqual(post.call_count,1)
+            self.assertEqual(post.call_args.args[1]['ref'],'staging')
+            self.assertIn('branch=staging',get.call_args.args[0])
