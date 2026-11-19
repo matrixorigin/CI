@@ -60,12 +60,41 @@ def title(t, pool):
     return "Coverage standby / {parent}/{attempt}/{group}/{head}/".format(**t) + pool + "/" + t["key"]
 
 
+PARENT_POLLS = 13
+PARENT_POLL_SECONDS = 5
+
+
+def parent_identity(t, p):
+    expected = {
+        "id": t["parent"], "run_attempt": t["attempt"], "repository.full_name": REPO,
+        "path": ENTRY, "event": "pull_request_target",
+        "head_repository.full_name": t["source"], "head_sha": t["head"],
+    }
+    for field, value in expected.items():
+        actual = p
+        for key in field.split("."):
+            actual = actual.get(key) if isinstance(actual, dict) else None
+        # Do not dump the API response, credentials, or the admission ticket.
+        check(actual == value, f"parent {t['parent']} identity mismatch: {field}")
+
+
 def parent_meta(t):
-    p = run(t["parent"])
-    check(p["repository"]["full_name"] == REPO and p["run_attempt"] == t["attempt"]
-          and p["path"] == ENTRY and p["event"] == "pull_request_target"
-          and p["status"] == "in_progress", "parent is not the active trusted entrypoint attempt")
-    return p
+    """Retry only a known, nonterminal state of the same parent attempt."""
+    for poll in range(PARENT_POLLS):
+        p = run(t["parent"])
+        parent_identity(t, p)
+        status, conclusion = p.get("status"), p.get("conclusion")
+        check("conclusion" in p and conclusion is None,
+              f"parent {t['parent']} not active: conclusion={conclusion!r}")
+        if status == "in_progress":
+            return p
+        check(status in ("queued", "pending", "requested", "waiting"),
+              f"parent {t['parent']} not active: status={status!r}")
+        if poll == 0:
+            print(f"parent {t['parent']} status={status}; waiting without admitting", flush=True)
+        if poll + 1 < PARENT_POLLS:
+            time.sleep(PARENT_POLL_SECONDS)
+    raise ValueError(f"parent {t['parent']} still not active after {PARENT_POLLS} reads: status={status}")
 
 
 def child_meta(r, t, pool, revision):
@@ -150,9 +179,7 @@ def choose():
     t = dict(parent=int(os.environ["GITHUB_RUN_ID"]), attempt=1, group=int(os.environ["GROUP"]),
              head=os.environ["HEAD"], source=os.environ["SOURCE"], pr=int(os.environ["PR"]))
     check(t["group"] in (0, 1) and re.fullmatch("[a-f0-9]{40}", t["head"]), "invalid input")
-    p = parent_meta(t)
-    check(p["head_sha"] == t["head"] and p["head_repository"]["full_name"] == t["source"],
-          "the PR head does not match the trusted parent")
+    parent_meta(t)
     # A pull_request_target run reports the PR head; a workflow_dispatch run
     # reports the workflow branch head. These are not the same commit.
     rev = t["revision"] = one("/git/ref/heads/" + WORKER_REF)["object"]["sha"]
@@ -231,9 +258,8 @@ def admit():
           and head == t["head"] and source == t["source"] and pool in POOLS and t["attempt"] == 1
           and type(t["parent"]) is int and type(t["pr"]) is int and re.fullmatch("[a-f0-9]{64}", t["key"]),
           "invalid worker ticket")
-    p = parent_meta(t)
-    check(p["head_sha"] == head and p["head_repository"]["full_name"] == source
-          and re.fullmatch("[a-f0-9]{40}", t["revision"]), "parent PR provenance mismatch")
+    parent_meta(t)
+    check(re.fullmatch("[a-f0-9]{40}", t["revision"]), "invalid dispatch revision")
     child_meta(r, t, pool, t["revision"])
     for _ in range(108):
         parent_meta(t)
@@ -255,6 +281,7 @@ def admit():
           and not pr["draft"] and not pr["head"]["repo"]["archived"]
           and pr["base"]["repo"]["full_name"] == REPO and pr["base"]["ref"] == "main"
           and "kind/test-ci" in {v["name"] for v in pr["labels"]}, "PR no longer matches authorization")
+    parent_meta(t)  # Reconfirm after checking the grant and live PR, before returning to checkout.
 
 
 def wait():

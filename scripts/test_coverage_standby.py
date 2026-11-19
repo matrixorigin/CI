@@ -1,6 +1,72 @@
 import unittest
+import json
+import os
 from unittest.mock import patch
 from scripts import coverage_standby as s
+
+
+class ParentAdmission(unittest.TestCase):
+    def setUp(self):
+        self.sha = '3b95c0878f88b3da58bf3e65c369b7ef4d13104e'
+        self.src = 'Ariznawlll/matrixone'
+        self.t = dict(parent=42, attempt=1, group=0, pr=32922, source=self.src, head=self.sha,
+                      key=s.digest('test-nonce'), revision='b'*40)
+        self.p = dict(id=42, run_attempt=1, repository={'full_name':s.REPO}, path=s.ENTRY,
+                      event='pull_request_target', head_repository={'full_name':self.src},
+                      head_sha=self.sha, status='in_progress', conclusion=None)
+
+    def test_only_active_parent_returns(self):
+        with patch.object(s,'run',side_effect=[dict(self.p,status=v) for v in
+                          ('queued','waiting','in_progress')]) as read, patch.object(s.time,'sleep') as sleep:
+            self.assertEqual(s.parent_meta(self.t)['id'],42)
+            self.assertEqual((read.call_count,sleep.call_count),(3,2))
+
+    def test_queued_parent_revalidated_each_time(self):
+        for field,bad in [('id',43),('run_attempt',2),('repository',{'full_name':'fork/other'}),
+                          ('path','wrong-workflow'),('event','workflow_dispatch'),
+                          ('head_repository',None),('head_sha','c'*40)]:
+            with self.subTest(field=field), patch.object(s,'run',side_effect=[
+                    dict(self.p,status='queued'),{**self.p,field:bad}]), patch.object(s.time,'sleep') as sleep:
+                with self.assertRaisesRegex(ValueError,'identity mismatch: '+field):
+                    s.parent_meta(self.t)
+                self.assertEqual(sleep.call_count,1)
+
+    def test_terminal_unknown_and_incomplete_states_fail_closed(self):
+        for p in (dict(self.p,status='completed'),dict(self.p,conclusion='cancelled'),
+                  dict(self.p,status='unexpected'),{k:v for k,v in self.p.items() if k!='conclusion'}):
+            with self.subTest(p=p), patch.object(s,'run',return_value=p), patch.object(s.time,'sleep') as sleep:
+                with self.assertRaisesRegex(ValueError,'not active'):
+                    s.parent_meta(self.t)
+                sleep.assert_not_called()
+
+    def test_queued_is_bounded_and_never_grants(self):
+        with patch.object(s,'run',return_value=dict(self.p,status='queued')) as read, \
+             patch.object(s.time,'sleep') as sleep, patch.object(s,'artifact') as artifact:
+            with self.assertRaisesRegex(ValueError,'still not active'):
+                s.parent_meta(self.t)
+            self.assertEqual((read.call_count,sleep.call_count),(s.PARENT_POLLS,s.PARENT_POLLS-1))
+            artifact.assert_not_called()
+
+    def test_real_grant_path_and_terminal_change_before_checkout(self):
+        grant=dict(child=51,ticket=self.t,pool='cs',nonce='test-nonce')
+        proof=dict(allowed='true',verified_membership_http_status=204,pr_number='32922',
+                   author='dev',head_repository=self.src,head_sha=self.sha)
+        pr=dict(number=32922,user={'login':'dev'},head={'repo':{'full_name':self.src,'archived':False},
+                'sha':self.sha},state='open',draft=False,base={'repo':{'full_name':s.REPO},'ref':'main'},
+                labels=[{'name':'kind/test-ci'}])
+        env=dict(TICKET=json.dumps(self.t),GROUP='0',HEAD=self.sha,SOURCE=self.src,POOL='cs',
+                 GITHUB_RUN_ATTEMPT='1',GITHUB_RUN_ID='51')
+        for cancel in (False,True):
+            reads=[dict(self.p,status='queued'),self.p,self.p,
+                   dict(self.p,status='completed',conclusion='cancelled') if cancel else self.p]
+            with self.subTest(cancel=cancel), patch.dict(os.environ,env), patch.object(s,'run',side_effect=reads), \
+                 patch.object(s,'child_meta'), patch.object(s.time,'sleep'), patch.object(s,'one',return_value=pr), \
+                 patch.object(s,'artifact',side_effect=[grant,proof]):
+                if cancel:
+                    with self.assertRaisesRegex(ValueError,'cancelled'):
+                        s.admit()
+                else:
+                    s.admit()
 
 
 class Queue(unittest.TestCase):
