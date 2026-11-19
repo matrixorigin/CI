@@ -68,8 +68,6 @@ jobs:
       allowed: ${{ steps.entry.outputs.allowed }}
       head_sha: ${{ steps.entry.outputs.head_sha }}
       head_repository: ${{ steps.entry.outputs.head_repository }}
-      environment: ${{ steps.entry.outputs.environment }}
-      node_pair: ${{ steps.entry.outputs.node_pair }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
@@ -89,9 +87,8 @@ jobs:
             config
           persist-credentials: false
       - id: entry
-        name: Authorize the live PR head and select a reviewed reader pair
+        name: Authorize the live PR head for the shared reader queue
         env:
-          ALTERNATE_PAIR_SITES: ${{ vars.CS_COVERAGE_ALTERNATE_PAIR_SITES }}
           CS_PR_METADATA_TOKEN: ${{ secrets.TOKEN_ACTION }}
           CS_CACHE_READ_TOKEN: ${{ secrets.CS_COVERAGE_CACHE_READ_TOKEN || github.token }}
         run: PYTHONPATH="$GITHUB_WORKSPACE/reviewed/scripts" python3 entry/scripts/coverage_pr_entry.py
@@ -167,10 +164,21 @@ jobs:
     - check_coverage_eligibility
     if: ${{ needs.check_coverage_eligibility.outputs.allowed == 'true' }}
     environment: ci
-    runs-on: ${{ format('cs-{0}-nc-n{1}-pr-v1', needs.check_coverage_eligibility.outputs.environment, needs.check_coverage_eligibility.outputs.node_pair == '12' && (matrix.group == 0 && '1'
-      || '2') || matrix.group) }}
+    runs-on: cs-node-cache-7c14g
     timeout-minutes: 320
     steps:
+    - id: reader
+      name: Verify assigned reader before checkout
+      shell: bash
+      env:
+        ACTUAL_RUNNER: ${{ runner.name }}
+      run: |
+        set -euo pipefail
+        [[ "$ACTUAL_RUNNER" =~ ^cs-(mty|jed|ruh|mnl2)-nc-n([012])-pr-v1-[a-z0-9]+-runner-[a-z0-9]+$ ]]
+        site=${BASH_REMATCH[1]} node=${BASH_REMATCH[2]}
+        [[ "$site:$node" != mty:2 && "$site" == "${CS_CACHE_ENV:-}" ]]
+        [[ "mo-standard-$node" == "${CS_CACHE_NODE:-}" && "$CS_CACHE_NODE" == "${CS_CACHE_EXPECTED_NODE:-}" ]]
+        echo "site=$site" >> "$GITHUB_OUTPUT"
     - name: Install CS runner build dependencies
       timeout-minutes: 10
       run: |
@@ -252,7 +260,7 @@ jobs:
         CS_CACHE_SOURCE_REPOSITORY: matrixorigin/matrixone
         ACTUAL_PR_SOURCE_REPOSITORY: ${{ needs.check_coverage_eligibility.outputs.head_repository }}
         ACTUAL_PR_HEAD_SHA: ${{ needs.check_coverage_eligibility.outputs.head_sha }}
-        REQUESTED_READER_ENVIRONMENT: ${{ needs.check_coverage_eligibility.outputs.environment }}
+        REQUESTED_READER_ENVIRONMENT: ${{ steps.reader.outputs.site }}
       run: |
         set -euo pipefail
         test "$CS_CACHE_ENV" = "$REQUESTED_READER_ENVIRONMENT"

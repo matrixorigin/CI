@@ -7,7 +7,6 @@ from pathlib import Path
 
 PROJECT = "matrixorigin/matrixone"
 ENTRY = PROJECT + "/.github/workflows/entrypoint.yaml@refs/heads/main"
-SITES = ("mty", "jed", "mnl2", "ruh")
 
 
 def require(ok, reason):
@@ -15,7 +14,7 @@ def require(ok, reason):
         raise ValueError(reason)
 
 
-def route(ctx, event, live, member_status, alternate_sites=""):
+def route(ctx, event, live, member_status):
     require(ctx == (PROJECT, "pull_request_target", ENTRY), "unexpected caller")
     require(event["action"] in {"opened", "synchronize", "reopened", "ready_for_review"},
             "unexpected event action")
@@ -40,12 +39,7 @@ def route(ctx, event, live, member_status, alternate_sites=""):
     if (base != "main" or live["draft"] or live["head"]["repo"]["archived"] or
             member_status != 204 or "kind/test-ci" not in labels):
         return {"route": "legacy", "allowed": "false"}
-    site = SITES[(number - 1) % len(SITES)]
-    alternate = set(alternate_sites.split(",")) if alternate_sites else set()
-    require(alternate <= {"jed", "mnl2", "ruh"}, "unknown or unregistered node pair")
-    pair = "12" if site in alternate and ((number - 1)//len(SITES)) % 2 else "01"
-    return {"route": "cache", "allowed": "true", "head_sha": sha, "head_repository": source,
-            "environment": site, "node_pair": pair}
+    return {"route": "cache", "allowed": "true", "head_sha": sha, "head_repository": source}
 
 
 def main():
@@ -59,7 +53,7 @@ def main():
     status, pr = approved.read(f"repos/{PROJECT}/pulls/{number}", token)
     require(status == 200, "PR metadata unavailable")
     status, checks = approved.membership(pr["user"]["login"], os.environ["CS_CACHE_READ_TOKEN"], token)
-    result = route(ctx, event, pr, status, os.getenv("ALTERNATE_PAIR_SITES", ""))
+    result = route(ctx, event, pr, status)
     if result["route"] == "cache":
         # Preserve the validation workflow's allowlisted, independently auditable
         # authorization receipt; neither tokens nor the complete API payload are logged.

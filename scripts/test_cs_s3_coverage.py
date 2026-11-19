@@ -57,7 +57,7 @@ class CSS3CoverageTest(unittest.TestCase):
                 self.assertEqual(output.read_text(), f"allowed={str(allowed).lower()}\n")
 
     def test_shared_pool_and_pr_source_without_experiment_inputs(self):
-        self.assertIn("format('cs-{0}-nc-n{1}-pr-v1'", WORKFLOW)
+        self.assertIn("    runs-on: cs-node-cache-7c14g\n", WORKFLOW)
         self.assertIn("repository: ${{ needs.check_coverage_eligibility.outputs.head_repository }}", WORKFLOW)
         self.assertIn("ref: ${{ needs.check_coverage_eligibility.outputs.head_sha }}", WORKFLOW)
         self.assertNotRegex(WORKFLOW, r"inputs\.(canary_\w+|runner_label)|weilu-runner-test|pulls/325\d+|minio-source")

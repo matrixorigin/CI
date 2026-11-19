@@ -3,6 +3,8 @@ import copy
 import hashlib
 import json
 import os
+import subprocess
+import textwrap
 from pathlib import Path
 import sys
 import tempfile
@@ -27,8 +29,8 @@ class EntryTest(unittest.TestCase):
 
     def test_fork_and_source_are_bound_to_the_event(self):
         out = route(CALLER, self.event, self.pr, 204)
-        self.assertEqual((out["head_sha"], out["head_repository"], out["route"], out["node_pair"]),
-                         ("a"*40, "example/matrixone", "cache", "01"))
+        self.assertEqual((out["head_sha"], out["head_repository"], out["route"]),
+                         ("a"*40, "example/matrixone", "cache"))
         for target, key, value in [(self.pr["head"], "sha", "b"*40),
                                    (self.pr["head"]["repo"], "full_name", "other/matrixone"),
                                    (self.pr, "state", "closed"), (self.pr, "number", 1)]:
@@ -50,16 +52,33 @@ class EntryTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 route(ctx, self.event, self.pr, 204)
 
-    def test_registered_pairs_only(self):
-        routes = set()
+    def test_pr_number_does_not_pin_either_group(self):
         for i in range(1, 9):
             self.pr["number"] = self.event["number"] = self.event["pull_request"]["number"] = i
-            out = route(CALLER, self.event, self.pr, 204, "mnl2,jed,ruh")
-            routes.add((out["environment"], out["node_pair"]))
-        self.assertEqual(routes, {(e,p) for e in ("mty","mnl2","jed","ruh") for p in ("01","12")}
-                         - {("mty","12")})
-        with self.assertRaises(ValueError):
-            route(CALLER, self.event, self.pr, 204, "unreviewed")
+            self.assertEqual(route(CALLER, self.event, self.pr, 204), {
+                "route":"cache", "allowed":"true", "head_sha":"a"*40, "head_repository":"example/matrixone"})
+        wf = (ROOT/".github/workflows/coverage-ut.yaml").read_text()
+        self.assertIn("      max-parallel: 2\n      matrix:\n        group:\n        - 0\n        - 1\n    outputs:", wf)
+        self.assertEqual(wf.count("    runs-on: cs-node-cache-7c14g\n"), 1)
+        self.assertNotIn("outputs.node_pair", wf)
+
+    def test_actual_placement_guard(self):
+        wf = (ROOT/".github/workflows/coverage-ut.yaml").read_text()
+        block = wf.split("    - id: reader\n",1)[1].split("    - name: Install CS",1)[0]
+        script = textwrap.dedent(block.split("      run: |\n",1)[1])
+        for site, n, actual, expected, pool, ok in (
+                ("mty",0,0,0,"mty",True), ("ruh",2,2,2,"ruh",True),
+                ("mnl2",1,1,1,"mnl2",True), ("jed",0,0,0,"jed",True),
+                ("mty",2,2,2,"mty",False), ("jed",0,0,0,"ruh",False),
+                ("jed",0,1,1,"jed",False), ("jed",0,0,1,"jed",False),
+                ("other",1,1,1,"other",False)):
+            with self.subTest(site=site, n=n, actual=actual, expected=expected, pool=pool), tempfile.TemporaryDirectory() as tmp:
+                out = Path(tmp)/"output"
+                env = dict(PATH=os.environ["PATH"], ACTUAL_RUNNER=f"cs-{pool}-nc-n{n}-pr-v1-abc-runner-def",
+                           CS_CACHE_ENV=site, CS_CACHE_NODE=f"mo-standard-{actual}",
+                           CS_CACHE_EXPECTED_NODE=f"mo-standard-{expected}", GITHUB_OUTPUT=str(out))
+                self.assertEqual(subprocess.run(["bash","-c",script],env=env).returncode == 0, ok)
+                self.assertEqual(out.read_text() if out.exists() else "", f"site={site}\n" if ok else "")
 
     def test_gate_exports_and_allowlisted_receipt(self):
         checks = [{"credential_role": "actions_read", "http_status": 204}]
@@ -89,8 +108,12 @@ class EntryTest(unittest.TestCase):
         old_checkout = "repository: matrixorigin/CI\n        ref: "+PIN
         self.assertEqual(body.count(old_checkout), 2)
         body = body.replace(old_checkout, "repository: ${{ job.workflow_repository }}\n        ref: ${{ job.workflow_sha }}")
-        body = body.replace("needs.check_coverage_eligibility.outputs.environment", "inputs.environment")
-        body = body.replace("needs.check_coverage_eligibility.outputs.node_pair", "inputs.node_pair")
+        original_route = ("    runs-on: ${{ format('cs-{0}-nc-n{1}-pr-v1', inputs.environment, inputs.node_pair == '12' && (matrix.group == 0 && '1'\n"
+                          "      || '2') || matrix.group) }}")
+        body = body.replace("    runs-on: cs-node-cache-7c14g", original_route)
+        before, rest = body.split("    - id: reader\n", 1)
+        body = before + "    - name: Install CS runner build dependencies\n" + rest.split("    - name: Install CS runner build dependencies\n",1)[1]
+        body = body.replace("steps.reader.outputs.site", "inputs.environment")
         generation = "${{ inputs.bvt_generation || format"
         self.assertEqual(body.count(generation), 1)
         body = body.replace(generation, "${{ '' || format")
