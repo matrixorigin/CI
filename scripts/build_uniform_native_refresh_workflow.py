@@ -13,6 +13,10 @@ def build():
     job=value['jobs']['native-only'];job['strategy']={'fail-fast':False,'matrix':{'node':['mo-standard-0']}}
     job['runs-on']="${{ format('cs-{0}-nc-n0-pr-v1', inputs.environment) }}"
     for step in job['steps']:
+        if step['name']=='One-time native preparation system dependencies (separate cost)':
+            check='test "$CS_CACHE_ENV" = mty'
+            assert step['run'].count(check)==1
+            step['run']=step['run'].replace(check,'test "$CS_CACHE_ENV" = \'${{ inputs.environment }}\'')
         if 'run' in step:step['run']=step['run'].replace('config/node-native-refresh-request.json',
             'config/node-native-uniform-request-${{ inputs.environment }}.json')
         if step['name']=='Require exact observed native key, CPU, tools and readonly node binding':

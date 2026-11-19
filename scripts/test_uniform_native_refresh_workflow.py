@@ -1,6 +1,8 @@
 import copy
 import json
+import os
 from pathlib import Path
+import subprocess
 import unittest
 import build_uniform_native_refresh_workflow as build
 import node_cache_native_refresh as native
@@ -8,6 +10,20 @@ import node_compile_cache as cache
 
 
 class UniformNativeContract(unittest.TestCase):
+    def test_real_bootstrap_binding_guards_execute_for_each_environment_and_reject_wrong_bindings(self):
+        job=build.build()['jobs']['native-only'];step=job['steps'][0]
+        guard=step['run'].split('started=$SECONDS',1)[0]
+        self.assertNotIn('= mty',guard)
+        for target in ('jed','mnl2','ruh'):
+            shell=guard.replace('${{ inputs.environment }}',target).replace('${{ matrix.node }}','mo-standard-0')
+            for fault in (None,'env','node','expected_node'):
+                env={'PATH':os.environ.get('PATH',''),'CS_CACHE_ENV':target,'CS_CACHE_NODE':'mo-standard-0','CS_CACHE_EXPECTED_NODE':'mo-standard-0'}
+                if fault=='env':env['CS_CACHE_ENV']='mty'
+                elif fault=='node':env['CS_CACHE_NODE']='mo-standard-1'
+                elif fault=='expected_node':env['CS_CACHE_EXPECTED_NODE']='mo-standard-1'
+                result=subprocess.run(['/bin/bash','-c',shell],env=env,capture_output=True,text=True)
+                self.assertEqual(result.returncode==0,fault is None,(target,fault))
+
     def test_frozen_one_node_producer_keeps_no_ut_no_go_precompile_and_readonly_restore(self):
         value=build.build();job=value['jobs']['native-only']
         self.assertEqual(job['strategy'],{'fail-fast':False,'matrix':{'node':['mo-standard-0']}})

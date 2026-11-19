@@ -49,7 +49,7 @@ jobs:
       timeout-minutes: 10
       run: |
         set -euo pipefail
-        test "$CS_CACHE_ENV" = mty
+        test "$CS_CACHE_ENV" = '${{ inputs.environment }}'
         test "$CS_CACHE_NODE" = '${{ matrix.node }}'
         test "$CS_CACHE_EXPECTED_NODE" = '${{ matrix.node }}'
         started=$SECONDS
