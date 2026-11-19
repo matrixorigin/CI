@@ -43,6 +43,12 @@ def observe_listener(session,resource,row):
             c.require(len(owned)<=1,'ambiguous reader listener Pod')
             if owned and owned[0]['status'].get('phase')=='Running' and any(
                     x['type']=='Ready' and x['status']=='True' for x in owned[0]['status'].get('conditions',[])):
+                # ARC may publish its scale ID after the first set GET while
+                # the independently fetched Listener/Pod already becomes Ready.
+                # Re-observe the SAME UID/spec; never weaken ID agreement.
+                live=session.call(['get','autoscalingrunnerset',name,'-n','cicd','-o','json'])
+                c.require(live['metadata']['uid']==row['uid'] and live['spec']==resource['spec'],
+                    'reader changed while observing asynchronous listener readiness')
                 return {**fleet.capacity.listener_identity(resource,live,listener,owned[0]),'pr_route_enabled':True}
         c.require(time.monotonic()<deadline,'reader Pending; preserve journal, never recreate')
         time.sleep(2)

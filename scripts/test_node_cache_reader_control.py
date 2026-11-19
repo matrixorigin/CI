@@ -6,9 +6,28 @@ from unittest.mock import patch
 
 import node_cache_reader_control as control
 import test_node_cache_reader_rollout as f
+import test_node_cache_cpu_producer_fleet as cpu_fixture
 
 
 class ReaderController(unittest.TestCase):
+    def test_listener_ready_requires_fresh_same_uid_scale_id_not_stale_initial_get(self):
+        resource,live,listener,pod=cpu_fixture.ProducerFleet().listener()
+        row={'name':resource['metadata']['name'],'uid':live['metadata']['uid']}
+        stale=copy.deepcopy(live);stale['metadata']['annotations']={}
+        class Fake:
+            def __init__(self):self.set_reads=0
+            def call(self,args):
+                if args[1]=='autoscalingrunnerset':
+                    self.set_reads+=1
+                    return copy.deepcopy(stale if self.set_reads==1 else live)
+                if args[1]=='autoscalinglisteners':return {'items':[listener]}
+                if args[1]=='pods':return {'items':[pod]}
+                raise AssertionError(args)
+        session=Fake();result=control.observe_listener(session,resource,row)
+        self.assertEqual(result['scale_set_id'],101);self.assertEqual(session.set_reads,2)
+        live['metadata']['uid']='replaced'
+        with self.assertRaises(ValueError):control.observe_listener(Fake(),resource,row)
+
     def execute(self,fault=None):
         helper=f.ReaderRollout();cat,policy,old,sc,cpus=helper.fixture('jed')
         snaps=helper.snapshots(policy)
