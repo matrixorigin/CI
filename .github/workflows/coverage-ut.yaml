@@ -128,6 +128,13 @@ jobs:
         env:
           CS_CACHE_READ_TOKEN: ${{ secrets.CS_COVERAGE_CACHE_READ_TOKEN || github.token }}
         run: python3 reviewed/scripts/node_cache_native_pvc_catalog.py preflight
+      - name: Retain the authorized PR head receipt
+        if: steps.entry.outputs.route == 'cache'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: real-pr-snapshot-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/real-pr-authorization.json
+          if-no-files-found: error
   # For PRs outside the tested trust/base scope, keep the pre-cutover CI path.
   legacy:
     needs: check_coverage_eligibility

@@ -1,9 +1,15 @@
 """Production routing has its own tests; the measured consumer is immutable."""
 import copy
 import hashlib
+import json
+import os
 from pathlib import Path
+import sys
+import tempfile
+from types import SimpleNamespace
 import unittest
-from scripts.coverage_pr_entry import ENTRY, PROJECT, route
+from unittest import mock
+from scripts.coverage_pr_entry import ENTRY, PROJECT, main, route
 
 ROOT = Path(__file__).resolve().parents[1]
 PIN = "48edf24e44a888c1c4d57318c4eca7cbb310c6e7"
@@ -54,6 +60,25 @@ class EntryTest(unittest.TestCase):
                          - {("mty","12")})
         with self.assertRaises(ValueError):
             route(CALLER, self.event, self.pr, 204, "unreviewed")
+
+    def test_gate_exports_and_allowlisted_receipt(self):
+        checks = [{"credential_role": "actions_read", "http_status": 204}]
+        client = SimpleNamespace(read=lambda path, token: (200, self.pr), membership=lambda *args: (204, checks),
+                                 c=SimpleNamespace(atomic_json=lambda path, obj: path.write_text(json.dumps(obj))))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root/"event").write_text(json.dumps(self.event))
+            env = dict(zip(("GITHUB_REPOSITORY", "GITHUB_EVENT_NAME", "GITHUB_WORKFLOW_REF"), CALLER))
+            env.update(GITHUB_EVENT_PATH=str(root/"event"), GITHUB_OUTPUT=str(root/"outputs"), RUNNER_TEMP=tmp,
+                       CS_PR_METADATA_TOKEN="fixture-only", CS_CACHE_READ_TOKEN="fixture-only")
+            with mock.patch.dict(os.environ, env, clear=True), mock.patch.dict(sys.modules, node_cache_real_pr_gate=client):
+                main()
+            self.assertIn("route=cache\n", (root/"outputs").read_text())
+            raw = (root/"real-pr-authorization.json").read_text()
+            self.assertNotIn("fixture-only", raw)
+            receipt = json.loads(raw)
+            self.assertEqual(receipt["head_sha"], self.pr["head"]["sha"])
+            self.assertEqual(receipt["membership_checks"], checks)
 
     def test_exact_measured_jobs_and_coverage_handoff(self):
         # Hash the complete three-job body from the measured immutable pin,

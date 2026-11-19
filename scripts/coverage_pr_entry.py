@@ -1,4 +1,5 @@
 """Trusted event adapter. No dispatch, cache publication or PR-head execution."""
+import datetime as dt
 import json
 import os
 import re
@@ -57,8 +58,17 @@ def main():
     token = os.environ["CS_PR_METADATA_TOKEN"]
     status, pr = approved.read(f"repos/{PROJECT}/pulls/{number}", token)
     require(status == 200, "PR metadata unavailable")
-    status, _ = approved.membership(pr["user"]["login"], os.environ["CS_CACHE_READ_TOKEN"], token)
+    status, checks = approved.membership(pr["user"]["login"], os.environ["CS_CACHE_READ_TOKEN"], token)
     result = route(ctx, event, pr, status, os.getenv("ALTERNATE_PAIR_SITES", ""))
+    if result["route"] == "cache":
+        # Preserve the validation workflow's allowlisted, independently auditable
+        # authorization receipt; neither tokens nor the complete API payload are logged.
+        receipt = {"schema": 1, "allowed": "true", "head_sha": result["head_sha"],
+                   "head_repository": result["head_repository"], "pr_number": str(number),
+                   "author": pr["user"]["login"], "project_cache_namespace": PROJECT,
+                   "verified_membership_http_status": status, "membership_checks": checks,
+                   "checked_at": dt.datetime.now(dt.timezone.utc).isoformat()}
+        approved.c.atomic_json(Path(os.environ["RUNNER_TEMP"]) / "real-pr-authorization.json", receipt)
     with Path(os.environ["GITHUB_OUTPUT"]).open("a") as f:
         for key, value in result.items():
             print(f"{key}={value}", file=f)
