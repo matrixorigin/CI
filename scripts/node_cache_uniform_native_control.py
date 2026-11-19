@@ -15,8 +15,8 @@ import node_cache_profile_append_control as engine
 import node_cache_profile_receipt as receipt
 import node_cache_publish_job as authorization
 
-PRODUCER_CALLER='50dc9afc6e8a541e59ff3611b582068695769eef'
-PRODUCER_CI='3a8fbd449a3e242f951affd0f1a6843426748ed6'
+PRODUCER_CALLER='e7ccc11b77990099d896cbe75bb34478404e5531'
+PRODUCER_CI='586b3c46ac63a3bcae05902679fad64d64ed8ecb'
 REQUESTS={'jed':'3bbdd1badc8f54acf3dbb8b025beb9220c4215fabc7392796297ccbc0a1da20c',
     'mnl2':'d63345e3ba444e31b4d7eba0723ff34f4bcfd387d901840a0b84f3a7a5889342',
     'ruh':'11e5069c8816d65f2c8311eff59cf7744e78817e16d18193a32923e09e7987d5'}
