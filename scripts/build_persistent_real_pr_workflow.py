@@ -7,6 +7,10 @@ TARGET='.github/workflows/node-cache-persistent-real-pr-validation.yaml'
 
 def build():
     value=previous.build();value['name']='Persistent PVC authority - real PR full two-group validation'
+    gate=value['jobs']['check_coverage_eligibility']
+    gate['steps'].insert(2,{'name':'Require live persistent publication metadata before allocating CS runners',
+        'env':{'CS_CACHE_READ_TOKEN':'${{ secrets.CS_COVERAGE_CACHE_READ_TOKEN || github.token }}'},
+        'run':'python3 .ci-workflow/scripts/node_cache_pvc_authority.py preflight'})
     job=value['jobs']['ut-coverage-linux-x86']
     step=next(s for s in job['steps'] if s.get('id')=='node_cache')
     before='node_cache_pr_native_catalog.py materialize'

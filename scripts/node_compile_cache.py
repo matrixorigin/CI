@@ -134,6 +134,8 @@ def reviewed_entries(catalog,current,api=legacy.api,now=None,*,persistent_status
         c.require(c.HEX.fullmatch(entry['index_sha256']), 'invalid reviewed index')
         selected.append(entry)
     c.require(len(selected)<=16, 'too many reviewed cache generations; compact with trusted publisher')
+    if persistent_status is not None and persistent is not None:
+        persistent_status['publication_metadata_checks']=persistent.publication_metadata_checks
     return selected
 
 

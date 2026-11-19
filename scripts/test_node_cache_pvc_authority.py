@@ -3,6 +3,8 @@ import copy
 import datetime as dt
 import hashlib
 import unittest
+import io
+import urllib.error
 from unittest.mock import patch
 import incremental_cache as c
 import node_compile_cache as cache
@@ -53,11 +55,10 @@ class PersistentAuthority(unittest.TestCase):
         if path.endswith('/'+str(pvc.SCANNER_CONTRACT)):
             return {'id':pvc.SCANNER_CONTRACT,'head_sha':pvc.SCANNER_REVISION,'status':'completed',
                 'conclusion':'success','path':'.github/workflows/pr-node-cache-contract.yaml','run_attempt':1}
-        if path.endswith('/42'):
-            return {'id':42,'head_sha':self.copy['gitops_sha'],'status':'completed','conclusion':'success',
-                'event':'workflow_dispatch','path':'.github/workflows/cloudsigma-up.yaml','run_attempt':1,
-                'actor':{'login':'Ariznawlll'},'triggering_actor':{'login':'Ariznawlll'},
-                'head_branch':'codex/ruh-pvc-readiness','display_title':'up cs-component / mnl2 / node-cache-replicate'}
+        if path.endswith('/'+str(pvc.APPROVAL_ISSUER_CONTRACT)):
+            return {'id':pvc.APPROVAL_ISSUER_CONTRACT,'head_sha':pvc.APPROVAL_ISSUER_REVISION,'status':'completed',
+                'conclusion':'success','path':'.github/workflows/pr-node-cache-contract.yaml','run_attempt':1}
+        self.assertNotIn('cloudsigma-gitops',path,'ordinary consumer must not require private origin access')
         return self.oldapi(path)
 
     def catalog(self):return pvc.compose(self.document['base_catalog'],self.document)
@@ -93,10 +94,10 @@ class PersistentAuthority(unittest.TestCase):
         with self.assertRaises(ValueError):cache.reviewed_entries(bound,self.runtime,self.api)
 
     def test_failed_or_changed_producer_and_scan_contract_are_rejected(self):
-        for fault in ('producer','copy','contract'):
+        for fault in ('producer','issuer','contract'):
             def bad(path):
                 value=self.api(path)
-                if (fault=='producer' and path.endswith('/1')) or (fault=='copy' and path.endswith('/42')) or (fault=='contract' and path.endswith('/'+str(pvc.SCANNER_CONTRACT))):
+                if (fault=='producer' and path.endswith('/1')) or (fault=='issuer' and path.endswith('/'+str(pvc.APPROVAL_ISSUER_CONTRACT))) or (fault=='contract' and path.endswith('/'+str(pvc.SCANNER_CONTRACT))):
                     value['conclusion']='failure'
                 return value
             with self.subTest(fault=fault),self.assertRaises(ValueError):
@@ -128,6 +129,8 @@ class ActualIndependentReview(unittest.TestCase):
         self.assertEqual(entry['expires_at'],'2026-11-18T13:47:20+00:00')
         self.assertEqual([p['verified_files'] for p in doc['review']['targets'].values()],[14296]*3)
         self.assertEqual([p['verified_bytes'] for p in doc['review']['targets'].values()],[9145029638]*3)
+
+
 
 
 if __name__=='__main__':unittest.main()

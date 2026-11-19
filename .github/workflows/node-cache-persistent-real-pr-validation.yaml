@@ -31,6 +31,10 @@ jobs:
         sparse-checkout: |
           scripts
           config
+    - name: Require live persistent publication metadata before allocating CS runners
+      env:
+        CS_CACHE_READ_TOKEN: ${{ secrets.CS_COVERAGE_CACHE_READ_TOKEN || github.token }}
+      run: python3 .ci-workflow/scripts/node_cache_pvc_authority.py preflight
     - name: Authorize exact current open PR and trusted author (read-only)
       id: authorize
       env:

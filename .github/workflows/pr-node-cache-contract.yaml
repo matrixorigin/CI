@@ -33,6 +33,7 @@ jobs:
           python3 -m unittest discover -s scripts -p test_node_cache_toolchain_store.py -v
           python3 -m unittest discover -s scripts -p test_node_cache_replication.py -v
           python3 -m unittest discover -s scripts -p test_node_cache_pvc_scan.py -v
+          python3 -m unittest discover -s scripts -p test_node_cache_pvc_review_control.py -v
           python3 -m unittest discover -s scripts -p test_node_cache_pvc_authority.py -v
           python3 -m unittest discover -s scripts -p test_persistent_real_pr_workflow.py -v
           python3 -m unittest discover -s scripts -p test_node_cache_partial_replication.py -v

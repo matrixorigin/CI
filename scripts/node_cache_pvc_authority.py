@@ -11,12 +11,15 @@ import json
 import os
 from pathlib import Path
 import urllib.request
+import urllib.error
 import incremental_cache as c
 import cs_coverage_cache as legacy
 
 APPROVAL_SHA256='378420acdea75a159fef827b87d460832bf1c4dacb0ac9cfdced6fe2646a03ea'
 SCANNER_REVISION='d4009deaad719fbc39a71dbcaf6a4d9f4a6d3ce1'
 SCANNER_CONTRACT=44433331964
+APPROVAL_ISSUER_REVISION='c0500147f3a7e6e9a8f5c2ca721f66f303d727f8'
+APPROVAL_ISSUER_CONTRACT=44434575229
 REVOCATION_PATH='repos/matrixorigin/CI/contents/config/node-cache-pvc-revocations.json?ref=codex/pr-node-cache-two-group-capacity'
 
 
@@ -36,6 +39,8 @@ def revocation_api():
         raw=response.read(65537)
     c.require(len(raw)<=65536,'persistent revocation response too large')
     return json.loads(raw)
+
+
 
 
 def revocations(read=revocation_api):
@@ -115,11 +120,20 @@ class Authority:
         self.ident=validate(self.document)
         c.require(value['authorization_id']==self.ident,'persistent authorization ID changed')
         self.revoked=revocations(revocation_read or revocation_api);self.api=api
+        self.publication_metadata_checks=[]
         contract=api(f'repos/matrixorigin/CI/actions/runs/{SCANNER_CONTRACT}')
         c.require(contract['id']==SCANNER_CONTRACT and contract['head_sha']==SCANNER_REVISION
             and contract['status']=='completed' and contract['conclusion']=='success'
             and contract['path']=='.github/workflows/pr-node-cache-contract.yaml'
             and contract['run_attempt']==1,'persistent full-scan contract authority changed')
+        issuer=api(f'repos/matrixorigin/CI/actions/runs/{APPROVAL_ISSUER_CONTRACT}')
+        c.require(issuer['id']==APPROVAL_ISSUER_CONTRACT and issuer['head_sha']==APPROVAL_ISSUER_REVISION
+            and issuer['status']=='completed' and issuer['conclusion']=='success' and issuer['run_attempt']==1
+            and issuer['path']=='.github/workflows/pr-node-cache-contract.yaml',
+            'independent public PVC approval issuer changed')
+        self.publication_metadata_checks.append({'issuer_repository':'matrixorigin/CI',
+            'issuer_run':APPROVAL_ISSUER_CONTRACT,'http_status':200,
+            'protected_origin_verified_at_independent_approval':True})
 
     def covers(self,entry):
         return entry in self.document['base_catalog']['entries'] and entry['runtime']['environment']==self.document['environment']
@@ -139,15 +153,11 @@ class Authority:
         # The reviewed artifact descriptor remains provenance, NOT a live
         # transport dependency. This synthetic descriptor contains no expiry.
         legacy.validate_provenance(entry,run,{**entry['artifact'],'workflow_run':{'id':p['id'],'head_sha':p['head_sha']}})
-        copy=document['review']['copy_authority']
-        publication=self.api(f'repos/matrixorigin/cloudsigma-gitops/actions/runs/{copy["run_id"]}')
-        c.require(publication['id']==copy['run_id'] and publication['head_sha']==copy['gitops_sha'] and publication['status']=='completed'
-            and publication['conclusion']=='success' and publication['run_attempt']==1
-            and publication['event']=='workflow_dispatch' and publication['path']=='.github/workflows/cloudsigma-up.yaml'
-            and publication['head_branch']=='codex/ruh-pvc-readiness'
-            and publication['display_title']==f'up cs-component / {env} / node-cache-replicate'
-            and publication['actor']['login']==publication['triggering_actor']['login']=='Ariznawlll',
-            'persistent protected publication source changed')
+        # The private protected origin was authenticated when this independent
+        # full-byte approval was issued. Its exact receipt/hash is immutable in
+        # the approved CI document. Ordinary PR credentials only need its public
+        # independently-tested issuer and the live explicit revocation registry.
+        # Do not couple PVC use to private control-plane or transport liveness.
         return True
 
 
@@ -165,7 +175,30 @@ def materialize(root,temp):
         'old_entries_and_bindings_unchanged':True,'shared_cache_writes':0,'original_native_composition':proof}
 
 
+def preflight(root):
+    import node_cache_pr_native_catalog as native
+    root=Path(root);source,_=native.load(root);document=c.read_json(root/'node-cache-pvc-authorization.json')
+    catalog=compose(source,document);checks=[]
+    for binding in document['base_catalog']['nodes']:
+        import node_compile_cache as cache
+        local=cache.catalog_for_node(catalog,binding);authority=Authority(local,legacy.api)
+        try:
+            for entry in local['entries']:
+                if authority.covers(entry):c.require(authority.permits(entry,entry['runtime']) is True,'persistent authority revoked')
+        finally:checks.extend(authority.publication_metadata_checks)
+    return {'metadata_preflight_passed':True,'authorization_id':APPROVAL_SHA256,
+        'publication_metadata_checks':checks,'cluster_access':False,'compiler_invocations':0}
+
+
 if __name__=='__main__':
     import os,sys
-    c.require(sys.argv[1:]==['materialize'],'unknown persistent authority operation')
-    print(c.canonical(materialize(Path(__file__).resolve().parents[1]/'config',Path(os.environ['RUNNER_TEMP']))).decode())
+    c.require(sys.argv[1:] in (['materialize'],['preflight']),'unknown persistent authority operation')
+    root=Path(__file__).resolve().parents[1]/'config'
+    try:
+        value=preflight(root) if sys.argv[1]=='preflight' else materialize(root,Path(os.environ['RUNNER_TEMP']))
+        print(c.canonical(value).decode())
+    except (urllib.error.URLError,TimeoutError,PermissionError) as error:
+        print(c.canonical({'metadata_preflight_passed':False,'error_type':type(error).__name__,
+            'publication_metadata_checks':[],
+            'cluster_access':False,'compiler_invocations':0}).decode())
+        raise SystemExit(1)

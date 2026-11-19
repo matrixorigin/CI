@@ -1,13 +1,26 @@
 import copy
+import yaml
 import unittest
 import build_persistent_real_pr_workflow as persistent
 import build_all_env_real_pr_workflow as original
 
 
 class PersistentWorkflow(unittest.TestCase):
+    def test_metadata_only_uses_no_cluster_credentials_runners_or_side_effects(self):
+        path=original.accepted.consumer.ROOT/'.github/workflows/node-cache-pvc-metadata-preflight.yaml'
+        value=yaml.safe_load(path.read_text());self.assertEqual(set(value['jobs']),{'metadata-only'})
+        job=value['jobs']['metadata-only'];self.assertEqual(job['runs-on'],'ubuntu-latest')
+        self.assertEqual(set(value[True]['workflow_call']['secrets']),{'TOKEN_ACTION','CS_COVERAGE_CACHE_READ_TOKEN'})
+        self.assertNotIn('CLOUDSIGMA_KUBECONFIG',path.read_text())
+        self.assertNotIn('kubectl',path.read_text());self.assertNotIn('go test',path.read_text())
+        self.assertTrue(any('preflight' in s.get('run','') for s in job['steps']))
     def test_only_authority_materialization_and_additional_raw_receipts_change(self):
         expected=original.build();actual=persistent.build();normalized=copy.deepcopy(actual)
         normalized['name']=expected['name']
+        gate=normalized['jobs']['check_coverage_eligibility'];metadata=gate['steps'].pop(2)
+        self.assertIn('before allocating CS runners',metadata['name'])
+        self.assertEqual(metadata['run'],'python3 .ci-workflow/scripts/node_cache_pvc_authority.py preflight')
+        self.assertEqual(set(metadata['env']),{'CS_CACHE_READ_TOKEN'})
         job=normalized['jobs']['ut-coverage-linux-x86'];step=next(s for s in job['steps'] if s.get('id')=='node_cache')
         step['run']=step['run'].replace('node_cache_pvc_authority.py materialize','node_cache_pr_native_catalog.py materialize').replace(
             '--catalog "$RUNNER_TEMP/cs-reviewed-persistent-catalog.json"','--catalog "$RUNNER_TEMP/cs-reviewed-native-catalog.json"')

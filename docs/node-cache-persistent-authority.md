@@ -22,8 +22,11 @@ payload file/byte counts, unchanged workloads/resources, and UID-scoped helper
 retirement. The Linux-tested scanner and its immutable revision are recorded.
 
 Consumers require that exact reviewed document, binding and full runtime
-fingerprint, successful primary producer/publication runs, and a live revocation
-check. They no longer ask whether the **temporary transport** still exists or
+fingerprint, successful primary producer runs, the public independent approval
+issuer, and a live revocation check. The protected private origin is authenticated
+at grant issuance; its exact receipt and full-byte proof are pinned in the public
+CI approval. Ordinary PRs need no new permission to read a private control repo.
+They no longer ask whether the **temporary transport** still exists or
 has expired. Index and every copied object are still SHA-checked by the original
 cache protocol. Go ActionIDs still account for source/dependency changes.
 Missing data is not repaired or silently re-authorized by an ordinary PR.
@@ -36,7 +39,7 @@ authorization SHA, index SHA, or whole-environment revocation, via an ordinary
 reviewed fast-forward change. Consumers verify GitHub's exact file path and Git
 blob SHA before parsing. An unavailable check causes a cold miss, never a bypass;
 a corrupt/invalid check or false provenance fails validation. A changed volume
-UID, changed runtime/toolchain, corrupt index/object, failed source publication,
+UID, changed runtime/toolchain, corrupt index/object, failed source/approval issuer,
 or explicit revocation cannot inherit the old authority.
 
 There is no arbitrary periodic compile or time-only invalidation of an unchanged
