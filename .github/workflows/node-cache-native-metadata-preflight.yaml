@@ -1,0 +1,39 @@
+name: Native PVC supplement metadata permission preflight (no CS runner)
+on:
+  workflow_call:
+    secrets:
+      CS_COVERAGE_CACHE_READ_TOKEN:
+        required: false
+      TOKEN_ACTION:
+        required: false
+permissions:
+  contents: read
+  actions: read
+jobs:
+  metadata-only:
+    if: github.repository == 'matrixorigin/matrixone' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/weilu-runner-test' && github.actor == 'Ariznawlll' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          token: ${{ secrets.TOKEN_ACTION || github.token }}
+          path: .ci-workflow
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+            config
+      - name: Require primary publication metadata with existing readonly credential roles
+        env:
+          CS_CACHE_READ_TOKEN: ${{ secrets.CS_COVERAGE_CACHE_READ_TOKEN || github.token }}
+        run: python3 .ci-workflow/scripts/node_cache_native_pvc_catalog.py preflight > "$RUNNER_TEMP/pvc-metadata-preflight.json"
+      - name: Retain metadata-only scope and HTTP role evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pvc-metadata-preflight-${{ github.run_id }}
+          path: ${{ runner.temp }}/pvc-metadata-preflight.json
+          if-no-files-found: error
+          retention-days: 7

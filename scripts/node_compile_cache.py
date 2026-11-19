@@ -96,7 +96,11 @@ def reviewed_entries(catalog,current,api=legacy.api,now=None,*,persistent_status
     if 'persistent_pvc_authority' in catalog:
         import node_cache_pvc_authority as pvc
         try:
-            persistent=pvc.Authority(catalog,api)
+            if catalog['persistent_pvc_authority']['document']['schema']==3:
+                import node_cache_native_pvc_authority as extension
+                persistent=extension.Authority(catalog,api)
+            else:
+                persistent=pvc.Authority(catalog,api)
             if persistent_status is not None:persistent_status.update(authorization_id=persistent.ident,
                 revocations_sha256=pvc.digest(persistent.revoked),authorized_indexes=[],
                 source_transport_retention_independent=True)

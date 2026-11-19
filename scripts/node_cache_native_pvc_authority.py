@@ -8,7 +8,7 @@ CANDIDATES={
  'mnl2':'95eb7f15a789cee0a5883df6fd731501b04ed7cda7d56a36df87c6c67773ce09',
  'jed':'553451101bb5684be220af6db6a7eb23688b43c59ee4c0534b5d5cae95f711bc',
  'ruh':'a30e15839dd4db62ec8aa7e9496d9ae73dc787066002f6285c29364a3abc57ac'}
-ISSUER=None  # candidate contract cannot authorize itself
+ISSUER=('25fb9e0f41590702826987216462de9be5a74410',44458564923)
 
 def document(config,env):
     cfg=Path(config)
