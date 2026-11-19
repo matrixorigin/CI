@@ -239,7 +239,6 @@ jobs:
         echo 'GOMAXPROCS=7' >> "$GITHUB_ENV"
     - id: node_cache
       name: Configure reviewed node cache with private incremental writes
-      if: ${{ true }}
       timeout-minutes: 5
       env:
         CS_CACHE_READ_TOKEN: ${{ secrets.CS_COVERAGE_CACHE_READ_TOKEN || github.token }}
