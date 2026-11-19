@@ -1,0 +1,290 @@
+{
+  "entry": {
+    "artifact": {
+      "digest": "sha256:5d889a5eb25e9173a8f536b4201529c123e33d86fe4f8106c827db44f5bc1087",
+      "id": 14495816969,
+      "name": "native-only-candidate-jed-mo-standard-0-44450511437",
+      "size_in_bytes": 29219412
+    },
+    "bindings": [
+      {
+        "node_uid": "22f40d19-bccd-468e-a34a-872b7f11a28a",
+        "pv_uid": "d599b06c-7a58-465a-838d-55aa0e4ac501",
+        "pvc_uid": "452d96a5-bc05-4e7d-a1e4-ea1fb39f542a"
+      },
+      {
+        "node_uid": "e244184e-8d5b-4560-818a-c97f610c2b19",
+        "pv_uid": "85d21765-54de-4f38-a0f1-1033ea389b61",
+        "pvc_uid": "647e4340-a08e-4efa-9600-965ce9c25a06"
+      },
+      {
+        "node_uid": "60d316fd-91d4-4b53-bab7-00a41eea4df1",
+        "pv_uid": "c9da142d-8022-4730-b071-1422da393d8a",
+        "pvc_uid": "f0551a2d-e68c-4847-8c08-470330b3d433"
+      }
+    ],
+    "compile_only": true,
+    "expires_at": "2026-11-26T03:18:30Z",
+    "index_sha256": "32f5092da2e2043486866cb3df41acf1d5c05cd87359d023e3636b03075eed8b",
+    "manifest_sha256": "62195b36f54c03e9d4e8c13cc5a25dc53782d3c3c7d2180af5407ca6ba6a35c7",
+    "native_manifests": {
+      "3eba204b117dabb598224b577a9e50a6b36b91172b9e34628cc73d468b560113": "22d6d8bf3ce0657d58a39adbcdc9594549b77265a2ada9a0e39eec7f78fec8bc"
+    },
+    "native_only": true,
+    "producer": {
+      "actor": "Ariznawlll",
+      "event": "workflow_dispatch",
+      "head_branch": "weilu-runner-test",
+      "head_sha": "e7ccc11b77990099d896cbe75bb34478404e5531",
+      "id": 44450511437,
+      "path": ".github/workflows/race-seed-canary.yaml",
+      "referenced_workflows": [
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@1a50169ef45ba2a79f4709109343d568fb85aba7",
+          "sha": "1a50169ef45ba2a79f4709109343d568fb85aba7"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-mty-two-group.yaml@72a69160f7ad36ad17e73b1ca7e1b26c791a3a40",
+          "sha": "72a69160f7ad36ad17e73b1ca7e1b26c791a3a40"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/node-cache-full-acceptance.yaml@37298579134ab5ce90a4a4df5a40d6e6ed393ebf",
+          "sha": "37298579134ab5ce90a4a4df5a40d6e6ed393ebf"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/race-seed-canary.yaml@c76c48c66de9e4684696a02510835a21d4a0aad9",
+          "sha": "c76c48c66de9e4684696a02510835a21d4a0aad9"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@1d1a5cfd77cfa2c94b9a9feea69bb6c8adedff01",
+          "sha": "1d1a5cfd77cfa2c94b9a9feea69bb6c8adedff01"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-reviewed-cache-canary.yaml@d33186b2b84a3c62f1c4e2b2da9f0f27bb7d7118",
+          "sha": "d33186b2b84a3c62f1c4e2b2da9f0f27bb7d7118"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-ut.yaml@dc685dca32188c2b9e854f9a127b302173ea8f41",
+          "sha": "dc685dca32188c2b9e854f9a127b302173ea8f41"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@f14ad785cfb94a38ba1fd8720a02af57ebaed5e8",
+          "sha": "f14ad785cfb94a38ba1fd8720a02af57ebaed5e8"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@6095f2ef33030d89c9490e2b23226cfc3c371f91",
+          "sha": "6095f2ef33030d89c9490e2b23226cfc3c371f91"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-uncached-baseline.yaml@a6edd6be4691db5a5d4ee577249ad032ffa8e817",
+          "sha": "a6edd6be4691db5a5d4ee577249ad032ffa8e817"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/compile-cache-probe.yaml@2c63b2eabd03257e0ab30690b8a1e9e21901af6c",
+          "sha": "2c63b2eabd03257e0ab30690b8a1e9e21901af6c"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/node-cache-migrate-isolated.yaml@30decabda9ba316c64b1db3458d1fd877bd71b03",
+          "sha": "30decabda9ba316c64b1db3458d1fd877bd71b03"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-jed-pvc-consumer.yaml@d0e8ba536918caacecc04e57529398185ad8293b",
+          "sha": "d0e8ba536918caacecc04e57529398185ad8293b"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-mty-pvc-consumer.yaml@0f0da115c8de9f9f32049cc74252e5ed0f5f8cd6",
+          "sha": "0f0da115c8de9f9f32049cc74252e5ed0f5f8cd6"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@84716f194304c29030d83c8ba0ce1d102769b9ac",
+          "sha": "84716f194304c29030d83c8ba0ce1d102769b9ac"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/node-cache-native-refresh.yaml@53e8f5d10e6f1389101afb86c67b0ecdea131bd3",
+          "sha": "53e8f5d10e6f1389101afb86c67b0ecdea131bd3"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@bd00e87a8545845a771634dfb7caa2a39591b919",
+          "sha": "bd00e87a8545845a771634dfb7caa2a39591b919"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/node-cache-tool-probe.yaml@214048bff40f4aa676ea4c0e0ca8dd0951e0241b",
+          "sha": "214048bff40f4aa676ea4c0e0ca8dd0951e0241b"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/cs-cache-probe.yaml@82b4e6364263779a925595da4ad9f137b831310a",
+          "sha": "82b4e6364263779a925595da4ad9f137b831310a"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/node-cache-canary.yaml@2572c852ca08f847ece3a7d8b7246485232ed756",
+          "sha": "2572c852ca08f847ece3a7d8b7246485232ed756"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-gomod-compare.yaml@53b3f60bad788aa5d89337b18eeb5489650c7b55",
+          "sha": "53b3f60bad788aa5d89337b18eeb5489650c7b55"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-env-pvc-control.yaml@49370ab6dee601d4a39ed1fe5b9e116e87d7d7d5",
+          "sha": "49370ab6dee601d4a39ed1fe5b9e116e87d7d7d5"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@90b78e12e49093b07c651a723a2b71a091d1fe81",
+          "sha": "90b78e12e49093b07c651a723a2b71a091d1fe81"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-pvc-cache-canary.yaml@6998404b6dff95f871491318309f8769620cecea",
+          "sha": "6998404b6dff95f871491318309f8769620cecea"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/node-cache-persistent-real-pr-validation.yaml@deeccbcf13c8f72713d6274422401f0d97a47d63",
+          "sha": "deeccbcf13c8f72713d6274422401f0d97a47d63"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/node-cache-real-pr-validation.yaml@811877ceac7222300c6a6bee1d32b30e17629124",
+          "sha": "811877ceac7222300c6a6bee1d32b30e17629124"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/node-cache-pvc-metadata-preflight.yaml@deeccbcf13c8f72713d6274422401f0d97a47d63",
+          "sha": "deeccbcf13c8f72713d6274422401f0d97a47d63"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-mty-two-group-pvc-consumer.yaml@7572552dba0b403d7762387624554f83ee42fbb7",
+          "sha": "7572552dba0b403d7762387624554f83ee42fbb7"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/race-seed-sample.yaml@c76c48c66de9e4684696a02510835a21d4a0aad9",
+          "sha": "c76c48c66de9e4684696a02510835a21d4a0aad9"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@ccc3d605ee85af41a13c5c8920036528c594185d",
+          "sha": "ccc3d605ee85af41a13c5c8920036528c594185d"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@8a4434328262ae6ed3710ff29522f1e9efddbe35",
+          "sha": "8a4434328262ae6ed3710ff29522f1e9efddbe35"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-pair.yaml@72dd14e8b6ca6b50dedadb6be576a100e3144ba4",
+          "sha": "72dd14e8b6ca6b50dedadb6be576a100e3144ba4"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/node-cache-cpu-profile-producer.yaml@b1487cb82b7741794653e978f34dfec9886af76e",
+          "sha": "b1487cb82b7741794653e978f34dfec9886af76e"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/node-cache-all-env-real-pr-validation.yaml@7c86dc3ddd30d05943eb113ee350915fbb43dd59",
+          "sha": "7c86dc3ddd30d05943eb113ee350915fbb43dd59"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@ecd5a7f7080a8a511d476404c75aff6be5c66a33",
+          "sha": "ecd5a7f7080a8a511d476404c75aff6be5c66a33"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-env-pvc-control.yaml@643ebf71e663e8bc5730fe055dad7a1b0275e04c",
+          "sha": "643ebf71e663e8bc5730fe055dad7a1b0275e04c"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@8135561745eb9c553229bbfe13237881ed7bcf05",
+          "sha": "8135561745eb9c553229bbfe13237881ed7bcf05"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/node-cache-diagnose.yaml@77ea629591c48dab72b15ca0f66247f98a945fad",
+          "sha": "77ea629591c48dab72b15ca0f66247f98a945fad"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-ut.yaml@b05be37d7d102fbf040ae45b72ff2c27ee48b720",
+          "sha": "b05be37d7d102fbf040ae45b72ff2c27ee48b720"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-ruh-pvc-consumer.yaml@d0e8ba536918caacecc04e57529398185ad8293b",
+          "sha": "d0e8ba536918caacecc04e57529398185ad8293b"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/node-cache-local-tools-acceptance.yaml@1377b8bffb62fd6e895f57f2838f11d25723acc8",
+          "sha": "1377b8bffb62fd6e895f57f2838f11d25723acc8"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@d9e3905b2cf866966175de58ea86620161a12c53",
+          "sha": "d9e3905b2cf866966175de58ea86620161a12c53"
+        },
+        {
+          "path": "matrixorigin/CI/.github/workflows/node-cache-uniform-native-refresh.yaml@586b3c46ac63a3bcae05902679fad64d64ed8ecb",
+          "sha": "586b3c46ac63a3bcae05902679fad64d64ed8ecb"
+        }
+      ],
+      "repository": "matrixorigin/matrixone",
+      "run_attempt": 1,
+      "workflow_id": 362431071
+    },
+    "runtime": {
+      "cpu": {
+        "cpu family": "6",
+        "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon pebs bts rep_good nopl xtopology cpuid tsc_known_freq pni pclmulqdq dtes64 ssse3 fma cx16 pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault ssbd ibrs ibpb stibp ibrs_enhanced fsgsbase tsc_adjust sgx bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves avx_vnni avx512_bf16 wbnoinvd arat avx512vbmi umip pku ospke waitpkg avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq la57 rdpid bus_lock_detect cldemote movdiri movdir64b sgx_lc fsrm md_clear serialize tsxldtrk amx_bf16 avx512_fp16 amx_tile amx_int8 flush_l1d arch_capabilities",
+        "model": "143",
+        "model name": "Intel(R) Xeon(R) Gold 6448H",
+        "stepping": "8",
+        "vendor_id": "GenuineIntel"
+      },
+      "environment": "jed",
+      "go_env": {
+        "CGO_ENABLED": "1",
+        "GOAMD64": "v1",
+        "GOARCH": "amd64",
+        "GOEXPERIMENT": "",
+        "GOOS": "linux"
+      },
+      "gomodcache": "/home/runner/_work/_temp/cs-buildcache-gomod",
+      "os": "87458b3b1f1ca0e5c693ade771de7007c3783bdc692fa6b39eb6414bf2af2763",
+      "platform": "Linux x86_64",
+      "repository": "matrixorigin/matrixone",
+      "schema": 2,
+      "system_packages_sha256": "820a0990ac3356a161cb23160e94656efe483ca13465c76e79fa57a86403eccd",
+      "tool_binaries": {
+        "ar": "6452af2eea333b8c65e1adb92964fc8f97863ab003fa13f9d12bff5345cd7dbe",
+        "c++": "1353e9bdd29a7295c7226bf6c63abccce056d8cac31f112e5cdbecc3f28c2769",
+        "cc": "1b99826121ae6682a634e5efe09bd3e3df58ce58e0b28f849114ab5b89139c26",
+        "cmake": "13f6483ca121c4558df37d8166ea91986777e5c2c86cebfb32ec94683d98ef6e",
+        "go": "30969f97169d7f43fe6a085873d75613adc21e30818a8c61d95bd27275df4624",
+        "ld": "e9ceb054c12207970f2726dfc07e9a66b411602748628baf27399f02a9bbb31b",
+        "make": "d78b8f1d099fbcfb6f2f49ab87223b9b68fb3956642f92d6ec6de812e8afa965"
+      },
+      "tools": {
+        "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "cmake": "cmake version 3.17.2",
+        "cxx": "c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "go": "go version go1.27.1 linux/amd64"
+      },
+      "workspace": "/home/runner/_work/matrixone/matrixone"
+    },
+    "source": "87c44445f83e308ef12dd7ca0e570cec1e6690d9"
+  },
+  "environment": "jed",
+  "parent_sha256": "53b0ebf81cc99228514b4d76e6454f80d1f5795518f1d7359c369bdff32c8d1c",
+  "receipts": [
+    {
+      "base_transmitted": 0,
+      "existing_bytes": 89678389,
+      "new_bytes": 405687,
+      "node": "mo-standard-0",
+      "objects": 45,
+      "raw_sha256": "5cec342e8760441ea48bcdcd84245aaa351011c317af238d53c4755561535915"
+    },
+    {
+      "base_transmitted": 0,
+      "existing_bytes": 89678389,
+      "new_bytes": 405687,
+      "node": "mo-standard-1",
+      "objects": 45,
+      "raw_sha256": "5762a898d2905ee1876f1a67703c02314c26c004328b3b032eb7b86d84ae46b7"
+    },
+    {
+      "base_transmitted": 0,
+      "existing_bytes": 89678389,
+      "new_bytes": 405687,
+      "node": "mo-standard-2",
+      "objects": 45,
+      "raw_sha256": "d2dc8d8696da4937afc507dcec28907b57466dd50c375d6f15aef979041fd031"
+    }
+  ],
+  "review_sha256": "fc8ccd17cb598425090658822ea398479256147e6bac2d43d38c52373a19605a"
+}

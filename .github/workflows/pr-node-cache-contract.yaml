@@ -24,6 +24,8 @@ jobs:
           GOMAXPROCS: '2'
         run: |
           set -euo pipefail
+          python3 -m unittest discover -s scripts -p test_native_supplement.py -v
+          python3 -m unittest discover -s scripts -p test_go_rebuild_metrics.py -v
           python3 -m unittest discover -s scripts -p test_pr_node_cache_workflow.py -v
           python3 -m unittest discover -s scripts -p test_all_env_real_pr_workflow.py -v
           python3 -m unittest discover -s scripts -p test_coverage_two_groups.py -v
