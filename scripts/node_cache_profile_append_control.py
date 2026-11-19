@@ -160,10 +160,13 @@ def run(policy,catalog,lock,evidence,entry,base,config,directory,api=q.base.n.le
     c.require(operation is None or recovery is None,'native recovery requires a separately reviewed design')
     binding,name=(scope(policy,catalog,entry,base) if operation is None else operation.scope(policy,catalog,entry,base))
     node=binding['node'];profiles=PROFILES if operation is None else operation.profiles
-    directory.mkdir();state={'environment':'mty','node':node,'name':name,'complete':False,
+    environment=getattr(operation,'environment','mty')
+    fresh_metadata=getattr(operation,'fresh',fresh)
+    check_cpu=getattr(operation,'cpu_authority',cpu_authority)
+    directory.mkdir();state={'environment':environment,'node':node,'name':name,'complete':False,
         'created':[],'deleted':[],'automatic_retry':False,'started_at':initial.now().isoformat(),
         'compiler_invocations':0,'existing_cache_pvc_preserved':True,'catalog_activated':False,
-        'cpu_profile_sha256':profiles[node],'cpu_inventory_run':CPU_RUN,'targets':{}}
+        'cpu_profile_sha256':profiles[node],'cpu_inventory_run':getattr(operation,'cpu_inventory_run',CPU_RUN),'targets':{}}
     if operation is not None:state.update(native_only=True,native_key=next(iter(entry['native_manifests'])),source=entry['source'])
     session=q.Session(policy,config,state,directory/'state.json')
     try:
@@ -176,9 +179,9 @@ def run(policy,catalog,lock,evidence,entry,base,config,directory,api=q.base.n.le
         session.journal()
         if operation is None:q.authenticate(catalog,lock,evidence,'mty',api)
         else:operation.authenticate(catalog,lock,evidence,api)
-        cpu_authority(api);fresh(entry,base,api)
+        check_cpu(api);fresh_metadata(entry,base,api)
         state['provenance_verified_before_write']=True
-        original=session.call(['get','autoscalingrunnerset','cs-mty-large-7c14g','-n','cicd','-o','json'])
+        original=session.call(['get','autoscalingrunnerset',f'cs-{environment}-large-7c14g','-n','cicd','-o','json'])
         original_identity={'uid':original['metadata']['uid'],'spec_sha256':core.cache.hash_value(original['spec'])}
         state['original_pool']=original_identity
         snapshots={n:session.snapshot(n) for n in q.planner.NODES}
@@ -225,7 +228,7 @@ def run(policy,catalog,lock,evidence,entry,base,config,directory,api=q.base.n.le
             pv=session.call(['get','pv',workspace['pv_name'],'-o','json'])
             actual=q.private_volume(pod,pvc,pv,node,binding)
             c.require(all(actual[k]==workspace[k] for k in actual),'CPU private stage identity changed')
-            request=fresh(entry,base,api)
+            request=fresh_metadata(entry,base,api)
             if phase=='stage':request['url']=transport.signed_archive_url(entry)
             state['active_phase']=phase;session.journal();started=time.monotonic()
             result=session.call(['exec','-i',workspace['pod_name'],'-n','cicd','--','python3','/probe/'+script,phase],request,3700)
@@ -235,7 +238,7 @@ def run(policy,catalog,lock,evidence,entry,base,config,directory,api=q.base.n.le
             and state['verify']['binding']==base['binding'] and state['verify']['marker_sha256']==base['marker_sha256'],
             'CPU independent verification differs')
         session.collect_workspace(workspace,node);session.cache_volume(binding)
-        after=session.call(['get','autoscalingrunnerset','cs-mty-large-7c14g','-n','cicd','-o','json'])
+        after=session.call(['get','autoscalingrunnerset',f'cs-{environment}-large-7c14g','-n','cicd','-o','json'])
         c.require(after['metadata']['uid']==original_identity['uid']
             and core.cache.hash_value(after['spec'])==original_identity['spec_sha256'],'original pool changed')
         state['postflight']={n:session.guard(n) for n in q.planner.NODES}

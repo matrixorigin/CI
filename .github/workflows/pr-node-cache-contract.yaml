@@ -50,6 +50,7 @@ jobs:
           python3 -m unittest discover -s scripts -p test_node_cache_pr_source_lifecycle.py -v
           python3 -m unittest discover -s scripts -p 'test_node_cache_native_refresh*.py' -v
           python3 -m unittest discover -s scripts -p test_uniform_native_refresh_workflow.py -v
+          python3 -m unittest discover -s scripts -p test_node_cache_uniform_native_control.py -v
           python3 -m unittest discover -s scripts -p test_node_cache_native_append_control.py -v
           python3 -m unittest discover -s scripts -p test_node_cache_native_transport.py -v
           python3 -m unittest discover -s scripts -p test_node_cache_transport.py -v
