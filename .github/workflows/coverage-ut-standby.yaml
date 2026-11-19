@@ -1,0 +1,254 @@
+name: MatrixOne UT Coverage with Shanghai standby
+
+on:
+  workflow_call:
+    inputs:
+      cache_seed:
+        description: "Compatibility input; cache-pool PRs consume verified read-only caches"
+        required: false
+        type: boolean
+        default: false
+      bvt_generation:
+        description: "Shared CI generation used to select this run's coverage artifacts"
+        required: false
+        type: string
+        default: ""
+    outputs:
+      coverage_ready:
+        description: "Whether the UT coverage profile was eligible to run"
+        value: ${{ jobs.check_coverage_eligibility.outputs.route == 'legacy' && jobs.legacy.outputs.coverage_ready || jobs.check_coverage_eligibility.outputs.allowed }}
+      coverage_status:
+        description: "Terminal UT coverage producer status"
+        value: ${{ jobs['coverage-final-status'].outputs.status || jobs.legacy.outputs.coverage_status }}
+    secrets:
+      CS_COVERAGE_CACHE_READ_TOKEN:
+        required: false
+      TEST_S3FS_ALIYUN:
+        description: "Object storage configuration for UT coverage"
+        required: false
+      TEST_S3FS_QCLOUD:
+        description: "Object storage configuration for UT coverage"
+        required: false
+      S3ENDPOINT:
+        description: "S3ENDPOINT For Test"
+        required: false
+      S3REGION:
+        description: "S3REGION For Test"
+        required: false
+      S3APIKEY:
+        description: "S3APIKEY For Test"
+        required: false
+      S3APISECRET:
+        description: "S3APISECRET For Test"
+        required: false
+      S3BUCKET:
+        description: "S3BUCKET For Test"
+        required: false
+      CS_S3_MTY_CONFIG:
+        required: false
+      CS_S3_MNL2_CONFIG:
+        required: false
+      CS_S3_JED_CONFIG:
+        required: false
+      CS_S3_RUH_CONFIG:
+        required: false
+      TOKEN_ACTION:
+        description: "Token for checkout (e.g. pull from fork/private)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  check_coverage_eligibility:
+    runs-on: ubuntu-latest
+    environment: ci
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      route: ${{ steps.entry.outputs.route }}
+      allowed: ${{ steps.entry.outputs.allowed }}
+      head_sha: ${{ steps.entry.outputs.head_sha }}
+      head_repository: ${{ steps.entry.outputs.head_repository }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          repository: matrixorigin/CI
+          ref: ${{ job.workflow_sha }}
+          path: entry
+          sparse-checkout: scripts/coverage_pr_entry.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          repository: matrixorigin/CI
+          ref: 48edf24e44a888c1c4d57318c4eca7cbb310c6e7
+          path: reviewed
+          sparse-checkout: |
+            scripts
+            config
+          persist-credentials: false
+      - id: entry
+        name: Authorize the live PR head for the shared reader queue
+        env:
+          CS_PR_METADATA_TOKEN: ${{ secrets.TOKEN_ACTION }}
+          CS_CACHE_READ_TOKEN: ${{ secrets.CS_COVERAGE_CACHE_READ_TOKEN || github.token }}
+        run: PYTHONPATH="$GITHUB_WORKSPACE/reviewed/scripts" python3 entry/scripts/coverage_pr_entry.py
+      - id: check_coverage_secrets
+        if: steps.entry.outputs.route == 'cache'
+        name: Check coverage secrets
+        env:
+          CS_S3_MTY_CONFIG: ${{ secrets.CS_S3_MTY_CONFIG }}
+          CS_S3_MNL2_CONFIG: ${{ secrets.CS_S3_MNL2_CONFIG }}
+          CS_S3_JED_CONFIG: ${{ secrets.CS_S3_JED_CONFIG }}
+          CS_S3_RUH_CONFIG: ${{ secrets.CS_S3_RUH_CONFIG }}
+          IN_ORG: "1"
+          SAFE_LABEL: "0"
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in CS_S3_MTY_CONFIG CS_S3_MNL2_CONFIG CS_S3_JED_CONFIG CS_S3_RUH_CONFIG; do
+            if [ -z "${!name:-}" ]; then
+              missing+=("${name}")
+            fi
+          done
+          if [ "${#missing[@]}" -eq 0 ]; then
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+            if [ "${IN_ORG}" = '1' ] || [ "${SAFE_LABEL}" = '1' ]; then
+              echo "::error::CS runner S3 configurations must be set before enabling Coverage: ${missing[*]}"
+              exit 1
+            fi
+            echo "::notice::UT coverage skipped because required secrets are unavailable: ${missing[*]}"
+          fi
+      - name: Check durable cache grants before runner allocation
+        if: steps.entry.outputs.route == 'cache'
+        env:
+          CS_CACHE_READ_TOKEN: ${{ secrets.CS_COVERAGE_CACHE_READ_TOKEN || github.token }}
+        run: python3 reviewed/scripts/node_cache_native_pvc_catalog.py preflight
+      - name: Retain the authorized PR head receipt
+        if: steps.entry.outputs.route == 'cache'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: real-pr-snapshot-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/real-pr-authorization.json
+          if-no-files-found: error
+  # For PRs outside the tested trust/base scope, keep the pre-cutover CI path.
+  legacy:
+    needs: check_coverage_eligibility
+    if: needs.check_coverage_eligibility.outputs.route == 'legacy'
+    uses: ./.github/workflows/coverage-ut-pre-cutover.yaml
+    with:
+      cache_seed: ${{ inputs.cache_seed }}
+      bvt_generation: ${{ inputs.bvt_generation }}
+    secrets:
+      TOKEN_ACTION: ${{ secrets.TOKEN_ACTION }}
+      TEST_S3FS_ALIYUN: ${{ secrets.TEST_S3FS_ALIYUN }}
+      TEST_S3FS_QCLOUD: ${{ secrets.TEST_S3FS_QCLOUD }}
+      S3ENDPOINT: ${{ secrets.S3ENDPOINT }}
+      S3REGION: ${{ secrets.S3REGION }}
+      S3APIKEY: ${{ secrets.S3APIKEY }}
+      S3APISECRET: ${{ secrets.S3APISECRET }}
+      S3BUCKET: ${{ secrets.S3BUCKET }}
+  ut-coverage-linux-x86:
+    name: Route Coverage group ${{ matrix.group }}
+    needs: check_coverage_eligibility
+    if: needs.check_coverage_eligibility.outputs.allowed == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [0, 1]
+    permissions:
+      actions: write
+      contents: read
+    uses: ./.github/workflows/coverage-queue-handoff.yaml
+    with:
+      group: ${{ matrix.group }}
+      source: ${{ needs.check_coverage_eligibility.outputs.head_repository }}
+      head: ${{ needs.check_coverage_eligibility.outputs.head_sha }}
+  merge-coverage-groups:
+    needs:
+    - check_coverage_eligibility
+    - ut-coverage-linux-x86
+    if: ${{ needs.ut-coverage-linux-x86.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      with:
+        repository: matrixorigin/CI
+        ref: c48984d3f9a6aff6179b28aa3e3d5466141a56b7
+        token: ${{ secrets.TOKEN_ACTION }}
+        persist-credentials: false
+        sparse-checkout: |
+          scripts/coverage_group_collect.py
+          scripts/coverage_two_groups_merge.py
+          scripts/compact_coverage_profile.go
+        sparse-checkout-cone-mode: false
+    - uses: actions/setup-go@v5
+      with:
+        go-version: '1.23'
+        cache: false
+    - uses: actions/download-artifact@v4
+      with:
+        pattern: ut-coverage-skips-group-*-${{ github.run_id }}-*
+        path: raw/groups
+    - uses: actions/download-artifact@v4
+      with:
+        pattern: ut-coverage-group-*-generation-${{ github.run_id }}-*
+        path: raw/profiles
+    - name: Validate complete package evidence and merge profiles
+      env:
+        EXPECTED_HEAD_SHA: ${{ needs.check_coverage_eligibility.outputs.head_sha }}
+        GROUP_COUNT: ${{ 2 }}
+      run: |
+        set -euo pipefail
+        test -n "$EXPECTED_HEAD_SHA"
+        python3 scripts/coverage_group_collect.py --groups raw/groups --profiles raw/profiles --output selected --run-id "$GITHUB_RUN_ID" --group-count "$GROUP_COUNT"
+        python3 scripts/coverage_two_groups_merge.py selected/groups combined-skip-manifest.json --expected-sha "$EXPECTED_HEAD_SHA" --group-count "$GROUP_COUNT"
+        for ((group=0;group<GROUP_COUNT;group++)); do
+          test "$(head -n 1 "selected/profiles/$group/ut-coverage.out")" = 'mode: set'
+          if [ "$group" = 0 ]; then
+            cat "selected/profiles/$group/ut-coverage.out" > "$RUNNER_TEMP/ut-coverage.out"
+          else
+            tail -n +2 "selected/profiles/$group/ut-coverage.out" >> "$RUNNER_TEMP/ut-coverage.out"
+          fi
+        done
+        go run scripts/compact_coverage_profile.go "$RUNNER_TEMP/ut-coverage.out"
+    - name: Upload combined UT coverage for existing consumer
+      uses: matrixorigin/CI/actions/upload-artifact-with-retry@main
+      with:
+        name: ut-coverage-generation-${{ inputs.bvt_generation || format('{0}-{1}', github.run_id, github.run_attempt) }}-attempt-${{ github.run_attempt
+          }}
+        path: ${{ runner.temp }}/ut-coverage.out
+        if-no-files-found: error
+        retention-days: 7
+    - name: Upload combined skip evidence
+      uses: actions/upload-artifact@v7
+      with:
+        name: ut-coverage-combined-skips-${{ github.run_id }}-${{ github.run_attempt }}
+        path: combined-skip-manifest.json
+        if-no-files-found: error
+        retention-days: 7
+  coverage-final-status:
+    needs:
+    - check_coverage_eligibility
+    - ut-coverage-linux-x86
+    - merge-coverage-groups
+    if: ${{ always() && !cancelled() && needs.check_coverage_eligibility.outputs.allowed == 'true' }}
+    runs-on: ubuntu-latest
+    outputs:
+      status: ${{ steps.result.outputs.status }}
+    steps:
+    - id: result
+      env:
+        GROUP_RESULT: ${{ needs.ut-coverage-linux-x86.result }}
+        MERGE_RESULT: ${{ needs.merge-coverage-groups.result }}
+      run: |
+        if [ "$GROUP_RESULT" = success ] && [ "$MERGE_RESULT" = success ]; then
+          echo 'status=passed' >> "$GITHUB_OUTPUT"
+        else
+          echo 'status=failed' >> "$GITHUB_OUTPUT"
+        fi

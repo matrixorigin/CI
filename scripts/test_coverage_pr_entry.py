@@ -58,12 +58,13 @@ class EntryTest(unittest.TestCase):
             self.assertEqual(route(CALLER, self.event, self.pr, 204), {
                 "route":"cache", "allowed":"true", "head_sha":"a"*40, "head_repository":"example/matrixone"})
         wf = (ROOT/".github/workflows/coverage-ut.yaml").read_text()
-        self.assertIn("      max-parallel: 2\n      matrix:\n        group:\n        - 0\n        - 1\n    outputs:", wf)
-        self.assertEqual(wf.count("    runs-on: cs-node-cache-7c14g\n"), 1)
+        self.assertIn("      max-parallel: 2\n      matrix:\n        group:\n        - 0\n        - 1\n", wf)
+        self.assertIn("uses: ./.github/workflows/coverage-worker-cs.yaml", wf)
+        self.assertIn("runs-on: cs-node-cache-7c14g", (ROOT/".github/workflows/coverage-worker-cs.yaml").read_text())
         self.assertNotIn("outputs.node_pair", wf)
 
     def test_actual_placement_guard(self):
-        wf = (ROOT/".github/workflows/coverage-ut.yaml").read_text()
+        wf = (ROOT/".github/workflows/coverage-worker-cs.yaml").read_text()
         block = wf.split("    - id: reader\n",1)[1].split("    - name: Install CS",1)[0]
         script = textwrap.dedent(block.split("      run: |\n",1)[1])
         for site, n, actual, expected, pool, ok in (
@@ -104,7 +105,13 @@ class EntryTest(unittest.TestCase):
         # after undoing ONLY the production entry wiring. No test/cache body edits.
         path = ROOT/".github/workflows/coverage-ut.yaml"
         src = path.read_text()
-        body = src[src.index("  ut-coverage-linux-x86:"):].rstrip()
+        # Reconstruct the old job wrapper only to preserve the pre-existing measured-body digest.
+        worker = (ROOT/".github/workflows/coverage-worker-cs.yaml").read_text()
+        steps = "    - id: reader\n" + worker.split("    - id: reader\n", 1)[1]
+        steps = (steps.replace("inputs.group", "matrix.group")
+                      .replace("inputs.source", "needs.check_coverage_eligibility.outputs.head_repository")
+                      .replace("inputs.head", "needs.check_coverage_eligibility.outputs.head_sha"))
+        body = ("  ut-coverage-linux-x86:\n    name: UT Coverage group ${{ matrix.group }} on Ubuntu/x86\n    strategy:\n      fail-fast: false\n      max-parallel: 2\n      matrix:\n        group:\n        - 0\n        - 1\n    outputs:\n      status: ${{ steps.coverage_status.outputs.status }}\n    needs:\n    - check_coverage_eligibility\n    if: ${{ needs.check_coverage_eligibility.outputs.allowed == 'true' }}\n    environment: ci\n    runs-on: cs-node-cache-7c14g\n    timeout-minutes: 320\n    steps:\n" + steps + src[src.index("  merge-coverage-groups:"):]).rstrip()
         old_checkout = "repository: matrixorigin/CI\n        ref: "+PIN
         self.assertEqual(body.count(old_checkout), 2)
         body = body.replace(old_checkout, "repository: ${{ job.workflow_repository }}\n        ref: ${{ job.workflow_sha }}")
