@@ -1,0 +1,950 @@
+{
+  "schema": 1,
+  "environment": "ruh",
+  "lifecycle": "exact-volume-runtime-content-until-revoked",
+  "source_catalog_sha256": "bf56c605419fb707707c722552115d5efe27660b6735da87e72ba53bed7a2d4a",
+  "base_catalog": {
+    "schema": 2,
+    "nodes": [
+      {
+        "environment": "ruh",
+        "marker_sha256": "b2bd348699c99fc63822b7790d82c9c5371e203df3e127b153c3ec229d3cee83",
+        "node": "mo-standard-0",
+        "node_uid": "d45bcc63-fe79-4fd2-84c5-72c921267fc2",
+        "pv_uid": "d9186f6d-7e1b-43c0-8264-1e241a589eb5",
+        "pvc_uid": "320c6da9-c7ee-46c3-948d-f0de5395c493"
+      },
+      {
+        "environment": "ruh",
+        "node": "mo-standard-1",
+        "node_uid": "73ed3039-bec9-4289-bae5-e71b89d0249b",
+        "pv_uid": "e5e32937-3aa1-46c9-b39f-8fcf676e35de",
+        "pvc_uid": "e6c0901b-0aaf-4f74-89fa-74b049c68dfa",
+        "marker_sha256": "0622ba830a3b48bbca7e99142bbc5acef8ef3dae318487e52cf2bc3b06883aab"
+      },
+      {
+        "environment": "ruh",
+        "node": "mo-standard-2",
+        "node_uid": "b66e90e6-0dce-4b10-ac33-b1283c54b604",
+        "pv_uid": "a1d9ad6d-e9fd-49bd-a5a1-6482f3d483cf",
+        "pvc_uid": "97aead78-e501-4015-a955-90c8eae2e5a4",
+        "marker_sha256": "833c6c49b9d5b0a330d8dc9a68b50127b40747bf135cca5da8fdc85365987090"
+      }
+    ],
+    "entries": [
+      {
+        "compile_only": true,
+        "runtime": {
+          "cpu": {
+            "cpu family": "6",
+            "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl xtopology cpuid tsc_known_freq pni pclmulqdq ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault pti ssbd ibrs ibpb fsgsbase tsc_adjust bmi1 hle avx2 smep bmi2 erms invpcid rtm rdseed adx smap xsaveopt arat md_clear",
+            "model": "79",
+            "model name": "Intel(R) Xeon(R) CPU E5-2697 v4 @ 2.30GHz",
+            "stepping": "1",
+            "vendor_id": "GenuineIntel"
+          },
+          "environment": "ruh",
+          "go_env": {
+            "CGO_ENABLED": "1",
+            "GOAMD64": "v1",
+            "GOARCH": "amd64",
+            "GOEXPERIMENT": "",
+            "GOOS": "linux"
+          },
+          "gomodcache": "/home/runner/_work/_temp/cs-buildcache-gomod",
+          "os": "87458b3b1f1ca0e5c693ade771de7007c3783bdc692fa6b39eb6414bf2af2763",
+          "platform": "Linux x86_64",
+          "repository": "matrixorigin/matrixone",
+          "schema": 2,
+          "system_packages_sha256": "820a0990ac3356a161cb23160e94656efe483ca13465c76e79fa57a86403eccd",
+          "tool_binaries": {
+            "ar": "6452af2eea333b8c65e1adb92964fc8f97863ab003fa13f9d12bff5345cd7dbe",
+            "c++": "1353e9bdd29a7295c7226bf6c63abccce056d8cac31f112e5cdbecc3f28c2769",
+            "cc": "1b99826121ae6682a634e5efe09bd3e3df58ce58e0b28f849114ab5b89139c26",
+            "cmake": "13f6483ca121c4558df37d8166ea91986777e5c2c86cebfb32ec94683d98ef6e",
+            "go": "30969f97169d7f43fe6a085873d75613adc21e30818a8c61d95bd27275df4624",
+            "ld": "e9ceb054c12207970f2726dfc07e9a66b411602748628baf27399f02a9bbb31b",
+            "make": "d78b8f1d099fbcfb6f2f49ab87223b9b68fb3956642f92d6ec6de812e8afa965"
+          },
+          "tools": {
+            "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+            "cmake": "cmake version 3.17.2",
+            "cxx": "c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+            "go": "go version go1.27.1 linux/amd64"
+          },
+          "workspace": "/home/runner/_work/matrixone/matrixone"
+        },
+        "source": "dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca",
+        "producer": {
+          "id": 44091657975,
+          "head_sha": "3e62e91e0bdd7cdde8e3cd3f94a677fbf9fc55e5",
+          "head_branch": "weilu-runner-test",
+          "event": "workflow_dispatch",
+          "path": ".github/workflows/race-seed-canary.yaml",
+          "workflow_id": 362431071,
+          "run_attempt": 1,
+          "referenced_workflows": [
+            {
+              "path": "matrixorigin/CI/.github/workflows/node-cache-canary.yaml@2572c852ca08f847ece3a7d8b7246485232ed756",
+              "sha": "2572c852ca08f847ece3a7d8b7246485232ed756"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/cs-cache-probe.yaml@82b4e6364263779a925595da4ad9f137b831310a",
+              "sha": "82b4e6364263779a925595da4ad9f137b831310a"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/race-seed-sample.yaml@c76c48c66de9e4684696a02510835a21d4a0aad9",
+              "sha": "c76c48c66de9e4684696a02510835a21d4a0aad9"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-ruh-pvc-consumer.yaml@d0e8ba536918caacecc04e57529398185ad8293b",
+              "sha": "d0e8ba536918caacecc04e57529398185ad8293b"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-env-pvc-control.yaml@49370ab6dee601d4a39ed1fe5b9e116e87d7d7d5",
+              "sha": "49370ab6dee601d4a39ed1fe5b9e116e87d7d7d5"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/node-cache-migrate-isolated.yaml@30decabda9ba316c64b1db3458d1fd877bd71b03",
+              "sha": "30decabda9ba316c64b1db3458d1fd877bd71b03"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-mty-two-group.yaml@72a69160f7ad36ad17e73b1ca7e1b26c791a3a40",
+              "sha": "72a69160f7ad36ad17e73b1ca7e1b26c791a3a40"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-uncached-baseline.yaml@a6edd6be4691db5a5d4ee577249ad032ffa8e817",
+              "sha": "a6edd6be4691db5a5d4ee577249ad032ffa8e817"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-ut.yaml@b05be37d7d102fbf040ae45b72ff2c27ee48b720",
+              "sha": "b05be37d7d102fbf040ae45b72ff2c27ee48b720"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@f14ad785cfb94a38ba1fd8720a02af57ebaed5e8",
+              "sha": "f14ad785cfb94a38ba1fd8720a02af57ebaed5e8"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-mty-pvc-consumer.yaml@0f0da115c8de9f9f32049cc74252e5ed0f5f8cd6",
+              "sha": "0f0da115c8de9f9f32049cc74252e5ed0f5f8cd6"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@6095f2ef33030d89c9490e2b23226cfc3c371f91",
+              "sha": "6095f2ef33030d89c9490e2b23226cfc3c371f91"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@1d1a5cfd77cfa2c94b9a9feea69bb6c8adedff01",
+              "sha": "1d1a5cfd77cfa2c94b9a9feea69bb6c8adedff01"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@1a50169ef45ba2a79f4709109343d568fb85aba7",
+              "sha": "1a50169ef45ba2a79f4709109343d568fb85aba7"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-mty-two-group-pvc-consumer.yaml@7572552dba0b403d7762387624554f83ee42fbb7",
+              "sha": "7572552dba0b403d7762387624554f83ee42fbb7"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@90b78e12e49093b07c651a723a2b71a091d1fe81",
+              "sha": "90b78e12e49093b07c651a723a2b71a091d1fe81"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@ecd5a7f7080a8a511d476404c75aff6be5c66a33",
+              "sha": "ecd5a7f7080a8a511d476404c75aff6be5c66a33"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/compile-cache-probe.yaml@2c63b2eabd03257e0ab30690b8a1e9e21901af6c",
+              "sha": "2c63b2eabd03257e0ab30690b8a1e9e21901af6c"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@8a4434328262ae6ed3710ff29522f1e9efddbe35",
+              "sha": "8a4434328262ae6ed3710ff29522f1e9efddbe35"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@ccc3d605ee85af41a13c5c8920036528c594185d",
+              "sha": "ccc3d605ee85af41a13c5c8920036528c594185d"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-pvc-cache-canary.yaml@6998404b6dff95f871491318309f8769620cecea",
+              "sha": "6998404b6dff95f871491318309f8769620cecea"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-env-pvc-control.yaml@643ebf71e663e8bc5730fe055dad7a1b0275e04c",
+              "sha": "643ebf71e663e8bc5730fe055dad7a1b0275e04c"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-ut.yaml@dc685dca32188c2b9e854f9a127b302173ea8f41",
+              "sha": "dc685dca32188c2b9e854f9a127b302173ea8f41"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/race-seed-canary.yaml@c76c48c66de9e4684696a02510835a21d4a0aad9",
+              "sha": "c76c48c66de9e4684696a02510835a21d4a0aad9"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@d9e3905b2cf866966175de58ea86620161a12c53",
+              "sha": "d9e3905b2cf866966175de58ea86620161a12c53"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-gomod-compare.yaml@53b3f60bad788aa5d89337b18eeb5489650c7b55",
+              "sha": "53b3f60bad788aa5d89337b18eeb5489650c7b55"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@8135561745eb9c553229bbfe13237881ed7bcf05",
+              "sha": "8135561745eb9c553229bbfe13237881ed7bcf05"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@84716f194304c29030d83c8ba0ce1d102769b9ac",
+              "sha": "84716f194304c29030d83c8ba0ce1d102769b9ac"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-pair.yaml@72dd14e8b6ca6b50dedadb6be576a100e3144ba4",
+              "sha": "72dd14e8b6ca6b50dedadb6be576a100e3144ba4"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@bd00e87a8545845a771634dfb7caa2a39591b919",
+              "sha": "bd00e87a8545845a771634dfb7caa2a39591b919"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-reviewed-cache-canary.yaml@d33186b2b84a3c62f1c4e2b2da9f0f27bb7d7118",
+              "sha": "d33186b2b84a3c62f1c4e2b2da9f0f27bb7d7118"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-jed-pvc-consumer.yaml@d0e8ba536918caacecc04e57529398185ad8293b",
+              "sha": "d0e8ba536918caacecc04e57529398185ad8293b"
+            }
+          ],
+          "repository": "matrixorigin/matrixone",
+          "actor": "Ariznawlll"
+        },
+        "artifact": {
+          "id": 14331938897,
+          "name": "node-cache-migration-ruh-44091657975",
+          "size_in_bytes": 1349181238,
+          "digest": "sha256:8c41162856d8e5d121a77b8e09091475d54e08a28acaf4a2bac43e04829d3fc0"
+        },
+        "manifest_sha256": "8b030354457db0db75bb4877a1295571795638efa9959d6e2a98ea206c47bdcb",
+        "index_sha256": "c357cc227c142855d25f0d40d09bafc698ecbfea2a0fae2c2cf5d9e8ab2349e6",
+        "native_manifests": {},
+        "expires_at": "2026-11-19T08:29:45+00:00",
+        "bindings": [
+          {
+            "node_uid": "d45bcc63-fe79-4fd2-84c5-72c921267fc2",
+            "pvc_uid": "320c6da9-c7ee-46c3-948d-f0de5395c493",
+            "pv_uid": "d9186f6d-7e1b-43c0-8264-1e241a589eb5"
+          },
+          {
+            "node_uid": "73ed3039-bec9-4289-bae5-e71b89d0249b",
+            "pvc_uid": "e6c0901b-0aaf-4f74-89fa-74b049c68dfa",
+            "pv_uid": "e5e32937-3aa1-46c9-b39f-8fcf676e35de"
+          },
+          {
+            "node_uid": "b66e90e6-0dce-4b10-ac33-b1283c54b604",
+            "pvc_uid": "97aead78-e501-4015-a955-90c8eae2e5a4",
+            "pv_uid": "a1d9ad6d-e9fd-49bd-a5a1-6482f3d483cf"
+          }
+        ]
+      },
+      {
+        "compile_only": true,
+        "runtime": {
+          "cpu": {
+            "cpu family": "6",
+            "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl xtopology cpuid tsc_known_freq pni pclmulqdq ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault pti ssbd ibrs ibpb fsgsbase tsc_adjust bmi1 hle avx2 smep bmi2 erms invpcid rtm rdseed adx smap xsaveopt arat md_clear",
+            "model": "79",
+            "model name": "Intel(R) Xeon(R) CPU E5-2697 v4 @ 2.30GHz",
+            "stepping": "1",
+            "vendor_id": "GenuineIntel"
+          },
+          "environment": "ruh",
+          "go_env": {
+            "CGO_ENABLED": "1",
+            "GOAMD64": "v1",
+            "GOARCH": "amd64",
+            "GOEXPERIMENT": "",
+            "GOOS": "linux"
+          },
+          "gomodcache": "/home/runner/_work/_temp/cs-buildcache-gomod",
+          "os": "87458b3b1f1ca0e5c693ade771de7007c3783bdc692fa6b39eb6414bf2af2763",
+          "platform": "Linux x86_64",
+          "repository": "matrixorigin/matrixone",
+          "schema": 2,
+          "system_packages_sha256": "820a0990ac3356a161cb23160e94656efe483ca13465c76e79fa57a86403eccd",
+          "tool_binaries": {
+            "ar": "6452af2eea333b8c65e1adb92964fc8f97863ab003fa13f9d12bff5345cd7dbe",
+            "c++": "1353e9bdd29a7295c7226bf6c63abccce056d8cac31f112e5cdbecc3f28c2769",
+            "cc": "1b99826121ae6682a634e5efe09bd3e3df58ce58e0b28f849114ab5b89139c26",
+            "cmake": "13f6483ca121c4558df37d8166ea91986777e5c2c86cebfb32ec94683d98ef6e",
+            "go": "30969f97169d7f43fe6a085873d75613adc21e30818a8c61d95bd27275df4624",
+            "ld": "e9ceb054c12207970f2726dfc07e9a66b411602748628baf27399f02a9bbb31b",
+            "make": "d78b8f1d099fbcfb6f2f49ab87223b9b68fb3956642f92d6ec6de812e8afa965"
+          },
+          "tools": {
+            "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+            "cmake": "cmake version 3.17.2",
+            "cxx": "c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+            "go": "go version go1.27.1 linux/amd64"
+          },
+          "workspace": "/home/runner/_work/matrixone/matrixone"
+        },
+        "source": "dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca",
+        "producer": {
+          "id": 44210497665,
+          "head_sha": "657810bb61bd5d0019183e10f477dda240d2a232",
+          "head_branch": "weilu-runner-test",
+          "event": "workflow_dispatch",
+          "path": ".github/workflows/race-seed-canary.yaml",
+          "workflow_id": 362431071,
+          "run_attempt": 1,
+          "referenced_workflows": [
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@1d1a5cfd77cfa2c94b9a9feea69bb6c8adedff01",
+              "sha": "1d1a5cfd77cfa2c94b9a9feea69bb6c8adedff01"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/race-seed-canary.yaml@c76c48c66de9e4684696a02510835a21d4a0aad9",
+              "sha": "c76c48c66de9e4684696a02510835a21d4a0aad9"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-ut.yaml@dc685dca32188c2b9e854f9a127b302173ea8f41",
+              "sha": "dc685dca32188c2b9e854f9a127b302173ea8f41"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@8a4434328262ae6ed3710ff29522f1e9efddbe35",
+              "sha": "8a4434328262ae6ed3710ff29522f1e9efddbe35"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-env-pvc-control.yaml@49370ab6dee601d4a39ed1fe5b9e116e87d7d7d5",
+              "sha": "49370ab6dee601d4a39ed1fe5b9e116e87d7d7d5"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/node-cache-canary.yaml@2572c852ca08f847ece3a7d8b7246485232ed756",
+              "sha": "2572c852ca08f847ece3a7d8b7246485232ed756"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-mty-pvc-consumer.yaml@0f0da115c8de9f9f32049cc74252e5ed0f5f8cd6",
+              "sha": "0f0da115c8de9f9f32049cc74252e5ed0f5f8cd6"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@f14ad785cfb94a38ba1fd8720a02af57ebaed5e8",
+              "sha": "f14ad785cfb94a38ba1fd8720a02af57ebaed5e8"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/node-cache-migrate-isolated.yaml@30decabda9ba316c64b1db3458d1fd877bd71b03",
+              "sha": "30decabda9ba316c64b1db3458d1fd877bd71b03"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-ut.yaml@b05be37d7d102fbf040ae45b72ff2c27ee48b720",
+              "sha": "b05be37d7d102fbf040ae45b72ff2c27ee48b720"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@8135561745eb9c553229bbfe13237881ed7bcf05",
+              "sha": "8135561745eb9c553229bbfe13237881ed7bcf05"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-uncached-baseline.yaml@a6edd6be4691db5a5d4ee577249ad032ffa8e817",
+              "sha": "a6edd6be4691db5a5d4ee577249ad032ffa8e817"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/node-cache-full-acceptance.yaml@da6881b7e257fac97e1d35ace059a3b35778e0f6",
+              "sha": "da6881b7e257fac97e1d35ace059a3b35778e0f6"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-gomod-compare.yaml@53b3f60bad788aa5d89337b18eeb5489650c7b55",
+              "sha": "53b3f60bad788aa5d89337b18eeb5489650c7b55"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@6095f2ef33030d89c9490e2b23226cfc3c371f91",
+              "sha": "6095f2ef33030d89c9490e2b23226cfc3c371f91"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@90b78e12e49093b07c651a723a2b71a091d1fe81",
+              "sha": "90b78e12e49093b07c651a723a2b71a091d1fe81"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-reviewed-cache-canary.yaml@d33186b2b84a3c62f1c4e2b2da9f0f27bb7d7118",
+              "sha": "d33186b2b84a3c62f1c4e2b2da9f0f27bb7d7118"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/compile-cache-probe.yaml@2c63b2eabd03257e0ab30690b8a1e9e21901af6c",
+              "sha": "2c63b2eabd03257e0ab30690b8a1e9e21901af6c"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/cs-cache-probe.yaml@82b4e6364263779a925595da4ad9f137b831310a",
+              "sha": "82b4e6364263779a925595da4ad9f137b831310a"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/race-seed-sample.yaml@c76c48c66de9e4684696a02510835a21d4a0aad9",
+              "sha": "c76c48c66de9e4684696a02510835a21d4a0aad9"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@bd00e87a8545845a771634dfb7caa2a39591b919",
+              "sha": "bd00e87a8545845a771634dfb7caa2a39591b919"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/node-cache-diagnose.yaml@77ea629591c48dab72b15ca0f66247f98a945fad",
+              "sha": "77ea629591c48dab72b15ca0f66247f98a945fad"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-pvc-cache-canary.yaml@6998404b6dff95f871491318309f8769620cecea",
+              "sha": "6998404b6dff95f871491318309f8769620cecea"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@ecd5a7f7080a8a511d476404c75aff6be5c66a33",
+              "sha": "ecd5a7f7080a8a511d476404c75aff6be5c66a33"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-env-pvc-control.yaml@643ebf71e663e8bc5730fe055dad7a1b0275e04c",
+              "sha": "643ebf71e663e8bc5730fe055dad7a1b0275e04c"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-jed-pvc-consumer.yaml@d0e8ba536918caacecc04e57529398185ad8293b",
+              "sha": "d0e8ba536918caacecc04e57529398185ad8293b"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-mty-two-group-pvc-consumer.yaml@7572552dba0b403d7762387624554f83ee42fbb7",
+              "sha": "7572552dba0b403d7762387624554f83ee42fbb7"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@1a50169ef45ba2a79f4709109343d568fb85aba7",
+              "sha": "1a50169ef45ba2a79f4709109343d568fb85aba7"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@84716f194304c29030d83c8ba0ce1d102769b9ac",
+              "sha": "84716f194304c29030d83c8ba0ce1d102769b9ac"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@ccc3d605ee85af41a13c5c8920036528c594185d",
+              "sha": "ccc3d605ee85af41a13c5c8920036528c594185d"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-mty-two-group.yaml@72a69160f7ad36ad17e73b1ca7e1b26c791a3a40",
+              "sha": "72a69160f7ad36ad17e73b1ca7e1b26c791a3a40"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-pair.yaml@72dd14e8b6ca6b50dedadb6be576a100e3144ba4",
+              "sha": "72dd14e8b6ca6b50dedadb6be576a100e3144ba4"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-ruh-pvc-consumer.yaml@d0e8ba536918caacecc04e57529398185ad8293b",
+              "sha": "d0e8ba536918caacecc04e57529398185ad8293b"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@d9e3905b2cf866966175de58ea86620161a12c53",
+              "sha": "d9e3905b2cf866966175de58ea86620161a12c53"
+            }
+          ],
+          "repository": "matrixorigin/matrixone",
+          "actor": "Ariznawlll"
+        },
+        "artifact": {
+          "id": 14389221200,
+          "name": "node-cache-delta-44210497665-1-0",
+          "size_in_bytes": 509967579,
+          "digest": "sha256:88cb4937be39d885effce4564fcaf1405c17ffd8a41d2562f08c0ced52753118"
+        },
+        "manifest_sha256": "85a12cad2066a6045824a7554ce56ffcdc0cfb0e2be06f0662b93aafe1951849",
+        "index_sha256": "a5e1ba2addc74cf6efeee6659f72ba85a2b3cb56246dff720a69681e390ec5f9",
+        "native_manifests": {
+          "ef5f062af02781630b04f3173f6c31aa44b81753be31fb01de94f60b686d319d": "49141f300e1407d89d014d9ab750af9aab187ddc9f1dc3430ef6d28010baeeb1"
+        },
+        "expires_at": "2026-11-25T00:46:01Z",
+        "bindings": [
+          {
+            "node_uid": "d45bcc63-fe79-4fd2-84c5-72c921267fc2",
+            "pvc_uid": "320c6da9-c7ee-46c3-948d-f0de5395c493",
+            "pv_uid": "d9186f6d-7e1b-43c0-8264-1e241a589eb5"
+          },
+          {
+            "node_uid": "73ed3039-bec9-4289-bae5-e71b89d0249b",
+            "pvc_uid": "e6c0901b-0aaf-4f74-89fa-74b049c68dfa",
+            "pv_uid": "e5e32937-3aa1-46c9-b39f-8fcf676e35de"
+          },
+          {
+            "node_uid": "b66e90e6-0dce-4b10-ac33-b1283c54b604",
+            "pvc_uid": "97aead78-e501-4015-a955-90c8eae2e5a4",
+            "pv_uid": "a1d9ad6d-e9fd-49bd-a5a1-6482f3d483cf"
+          }
+        ]
+      },
+      {
+        "compile_only": true,
+        "runtime": {
+          "cpu": {
+            "cpu family": "6",
+            "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl xtopology cpuid tsc_known_freq pni pclmulqdq ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault pti ssbd ibrs ibpb fsgsbase tsc_adjust bmi1 hle avx2 smep bmi2 erms invpcid rtm rdseed adx smap xsaveopt arat md_clear",
+            "model": "79",
+            "model name": "Intel(R) Xeon(R) CPU E5-2697 v4 @ 2.30GHz",
+            "stepping": "1",
+            "vendor_id": "GenuineIntel"
+          },
+          "environment": "ruh",
+          "go_env": {
+            "CGO_ENABLED": "1",
+            "GOAMD64": "v1",
+            "GOARCH": "amd64",
+            "GOEXPERIMENT": "",
+            "GOOS": "linux"
+          },
+          "gomodcache": "/home/runner/_work/_temp/cs-buildcache-gomod",
+          "os": "87458b3b1f1ca0e5c693ade771de7007c3783bdc692fa6b39eb6414bf2af2763",
+          "platform": "Linux x86_64",
+          "repository": "matrixorigin/matrixone",
+          "schema": 2,
+          "system_packages_sha256": "820a0990ac3356a161cb23160e94656efe483ca13465c76e79fa57a86403eccd",
+          "tool_binaries": {
+            "ar": "6452af2eea333b8c65e1adb92964fc8f97863ab003fa13f9d12bff5345cd7dbe",
+            "c++": "1353e9bdd29a7295c7226bf6c63abccce056d8cac31f112e5cdbecc3f28c2769",
+            "cc": "1b99826121ae6682a634e5efe09bd3e3df58ce58e0b28f849114ab5b89139c26",
+            "cmake": "13f6483ca121c4558df37d8166ea91986777e5c2c86cebfb32ec94683d98ef6e",
+            "go": "30969f97169d7f43fe6a085873d75613adc21e30818a8c61d95bd27275df4624",
+            "ld": "e9ceb054c12207970f2726dfc07e9a66b411602748628baf27399f02a9bbb31b",
+            "make": "d78b8f1d099fbcfb6f2f49ab87223b9b68fb3956642f92d6ec6de812e8afa965"
+          },
+          "tools": {
+            "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+            "cmake": "cmake version 3.17.2",
+            "cxx": "c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+            "go": "go version go1.27.1 linux/amd64"
+          },
+          "workspace": "/home/runner/_work/matrixone/matrixone"
+        },
+        "source": "dbc7ca14ca8b01cfe6d9e9a151619ea4b5ba14ca",
+        "producer": {
+          "id": 44210497665,
+          "head_sha": "657810bb61bd5d0019183e10f477dda240d2a232",
+          "head_branch": "weilu-runner-test",
+          "event": "workflow_dispatch",
+          "path": ".github/workflows/race-seed-canary.yaml",
+          "workflow_id": 362431071,
+          "run_attempt": 1,
+          "referenced_workflows": [
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@1d1a5cfd77cfa2c94b9a9feea69bb6c8adedff01",
+              "sha": "1d1a5cfd77cfa2c94b9a9feea69bb6c8adedff01"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/race-seed-canary.yaml@c76c48c66de9e4684696a02510835a21d4a0aad9",
+              "sha": "c76c48c66de9e4684696a02510835a21d4a0aad9"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-ut.yaml@dc685dca32188c2b9e854f9a127b302173ea8f41",
+              "sha": "dc685dca32188c2b9e854f9a127b302173ea8f41"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@8a4434328262ae6ed3710ff29522f1e9efddbe35",
+              "sha": "8a4434328262ae6ed3710ff29522f1e9efddbe35"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-env-pvc-control.yaml@49370ab6dee601d4a39ed1fe5b9e116e87d7d7d5",
+              "sha": "49370ab6dee601d4a39ed1fe5b9e116e87d7d7d5"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/node-cache-canary.yaml@2572c852ca08f847ece3a7d8b7246485232ed756",
+              "sha": "2572c852ca08f847ece3a7d8b7246485232ed756"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-mty-pvc-consumer.yaml@0f0da115c8de9f9f32049cc74252e5ed0f5f8cd6",
+              "sha": "0f0da115c8de9f9f32049cc74252e5ed0f5f8cd6"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@f14ad785cfb94a38ba1fd8720a02af57ebaed5e8",
+              "sha": "f14ad785cfb94a38ba1fd8720a02af57ebaed5e8"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/node-cache-migrate-isolated.yaml@30decabda9ba316c64b1db3458d1fd877bd71b03",
+              "sha": "30decabda9ba316c64b1db3458d1fd877bd71b03"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-ut.yaml@b05be37d7d102fbf040ae45b72ff2c27ee48b720",
+              "sha": "b05be37d7d102fbf040ae45b72ff2c27ee48b720"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@8135561745eb9c553229bbfe13237881ed7bcf05",
+              "sha": "8135561745eb9c553229bbfe13237881ed7bcf05"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-uncached-baseline.yaml@a6edd6be4691db5a5d4ee577249ad032ffa8e817",
+              "sha": "a6edd6be4691db5a5d4ee577249ad032ffa8e817"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/node-cache-full-acceptance.yaml@da6881b7e257fac97e1d35ace059a3b35778e0f6",
+              "sha": "da6881b7e257fac97e1d35ace059a3b35778e0f6"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-gomod-compare.yaml@53b3f60bad788aa5d89337b18eeb5489650c7b55",
+              "sha": "53b3f60bad788aa5d89337b18eeb5489650c7b55"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@6095f2ef33030d89c9490e2b23226cfc3c371f91",
+              "sha": "6095f2ef33030d89c9490e2b23226cfc3c371f91"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@90b78e12e49093b07c651a723a2b71a091d1fe81",
+              "sha": "90b78e12e49093b07c651a723a2b71a091d1fe81"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-reviewed-cache-canary.yaml@d33186b2b84a3c62f1c4e2b2da9f0f27bb7d7118",
+              "sha": "d33186b2b84a3c62f1c4e2b2da9f0f27bb7d7118"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/compile-cache-probe.yaml@2c63b2eabd03257e0ab30690b8a1e9e21901af6c",
+              "sha": "2c63b2eabd03257e0ab30690b8a1e9e21901af6c"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/cs-cache-probe.yaml@82b4e6364263779a925595da4ad9f137b831310a",
+              "sha": "82b4e6364263779a925595da4ad9f137b831310a"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/race-seed-sample.yaml@c76c48c66de9e4684696a02510835a21d4a0aad9",
+              "sha": "c76c48c66de9e4684696a02510835a21d4a0aad9"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@bd00e87a8545845a771634dfb7caa2a39591b919",
+              "sha": "bd00e87a8545845a771634dfb7caa2a39591b919"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/node-cache-diagnose.yaml@77ea629591c48dab72b15ca0f66247f98a945fad",
+              "sha": "77ea629591c48dab72b15ca0f66247f98a945fad"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-pvc-cache-canary.yaml@6998404b6dff95f871491318309f8769620cecea",
+              "sha": "6998404b6dff95f871491318309f8769620cecea"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@ecd5a7f7080a8a511d476404c75aff6be5c66a33",
+              "sha": "ecd5a7f7080a8a511d476404c75aff6be5c66a33"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-env-pvc-control.yaml@643ebf71e663e8bc5730fe055dad7a1b0275e04c",
+              "sha": "643ebf71e663e8bc5730fe055dad7a1b0275e04c"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-jed-pvc-consumer.yaml@d0e8ba536918caacecc04e57529398185ad8293b",
+              "sha": "d0e8ba536918caacecc04e57529398185ad8293b"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-mty-two-group-pvc-consumer.yaml@7572552dba0b403d7762387624554f83ee42fbb7",
+              "sha": "7572552dba0b403d7762387624554f83ee42fbb7"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@1a50169ef45ba2a79f4709109343d568fb85aba7",
+              "sha": "1a50169ef45ba2a79f4709109343d568fb85aba7"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@84716f194304c29030d83c8ba0ce1d102769b9ac",
+              "sha": "84716f194304c29030d83c8ba0ce1d102769b9ac"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-cs-repair.yaml@ccc3d605ee85af41a13c5c8920036528c594185d",
+              "sha": "ccc3d605ee85af41a13c5c8920036528c594185d"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-mty-two-group.yaml@72a69160f7ad36ad17e73b1ca7e1b26c791a3a40",
+              "sha": "72a69160f7ad36ad17e73b1ca7e1b26c791a3a40"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-pair.yaml@72dd14e8b6ca6b50dedadb6be576a100e3144ba4",
+              "sha": "72dd14e8b6ca6b50dedadb6be576a100e3144ba4"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-ruh-pvc-consumer.yaml@d0e8ba536918caacecc04e57529398185ad8293b",
+              "sha": "d0e8ba536918caacecc04e57529398185ad8293b"
+            },
+            {
+              "path": "matrixorigin/CI/.github/workflows/coverage-buildcache-arm.yaml@d9e3905b2cf866966175de58ea86620161a12c53",
+              "sha": "d9e3905b2cf866966175de58ea86620161a12c53"
+            }
+          ],
+          "repository": "matrixorigin/matrixone",
+          "actor": "Ariznawlll"
+        },
+        "artifact": {
+          "id": 14387389782,
+          "name": "node-cache-delta-44210497665-1-1",
+          "size_in_bytes": 430398488,
+          "digest": "sha256:2acfe3a09520ca718278b7e9033d6c7ebcc83a861285579526c445cb3934a28d"
+        },
+        "manifest_sha256": "6686007c65444dd8dfff0375062c7f7df82c2ba9462b3543b08f5de742310d30",
+        "index_sha256": "f71c4848fbbaadbb54a50062d2a5020626b94eee7cecf9f0eca26d6ea64475cf",
+        "native_manifests": {
+          "ef5f062af02781630b04f3173f6c31aa44b81753be31fb01de94f60b686d319d": "bb665f3ef19348b299d641a79b21def4d6c0606d272b1aebc76b162fe1a84e31"
+        },
+        "expires_at": "2026-11-25T00:46:01Z",
+        "bindings": [
+          {
+            "node_uid": "d45bcc63-fe79-4fd2-84c5-72c921267fc2",
+            "pvc_uid": "320c6da9-c7ee-46c3-948d-f0de5395c493",
+            "pv_uid": "d9186f6d-7e1b-43c0-8264-1e241a589eb5"
+          },
+          {
+            "node_uid": "73ed3039-bec9-4289-bae5-e71b89d0249b",
+            "pvc_uid": "e6c0901b-0aaf-4f74-89fa-74b049c68dfa",
+            "pv_uid": "e5e32937-3aa1-46c9-b39f-8fcf676e35de"
+          },
+          {
+            "node_uid": "b66e90e6-0dce-4b10-ac33-b1283c54b604",
+            "pvc_uid": "97aead78-e501-4015-a955-90c8eae2e5a4",
+            "pv_uid": "a1d9ad6d-e9fd-49bd-a5a1-6482f3d483cf"
+          }
+        ]
+      }
+    ]
+  },
+  "review": {
+    "schema": 1,
+    "environment": "ruh",
+    "complete": true,
+    "created": [
+      {
+        "kind": "ConfigMap",
+        "name": "cs-ruh-pvc-independent-review-r1",
+        "uid": "50b6d1a6-5301-4d39-9cc5-09990b7920a7"
+      },
+      {
+        "kind": "Pod",
+        "name": "cs-ruh-pvc-independent-review-r1-n0",
+        "uid": "75941926-3058-40e9-8c11-6d7b0da1a76f"
+      },
+      {
+        "kind": "Pod",
+        "name": "cs-ruh-pvc-independent-review-r1-n1",
+        "uid": "ca8244b6-840c-4b7c-8fc6-0ea0b1a14c69"
+      },
+      {
+        "kind": "Pod",
+        "name": "cs-ruh-pvc-independent-review-r1-n2",
+        "uid": "f3e07ccf-0804-40bf-8765-4f6c1ba9febe"
+      }
+    ],
+    "deleted": [
+      {
+        "kind": "Pod",
+        "name": "cs-ruh-pvc-independent-review-r1-n0",
+        "uid": "75941926-3058-40e9-8c11-6d7b0da1a76f"
+      },
+      {
+        "kind": "Pod",
+        "name": "cs-ruh-pvc-independent-review-r1-n1",
+        "uid": "ca8244b6-840c-4b7c-8fc6-0ea0b1a14c69"
+      },
+      {
+        "kind": "Pod",
+        "name": "cs-ruh-pvc-independent-review-r1-n2",
+        "uid": "f3e07ccf-0804-40bf-8765-4f6c1ba9febe"
+      }
+    ],
+    "cluster_cache_writes": 0,
+    "compiler_invocations": 0,
+    "external_downloads": 0,
+    "cache_recreated": false,
+    "automatic_retry": false,
+    "revision": "d4009deaad719fbc39a71dbcaf6a4d9f4a6d3ce1",
+    "contract_run": 44433331964,
+    "copy_authority": {
+      "artifact_digest": "sha256:fbb7392539ac06bf7b265059cfdcac0ac7bfded100b871dad16ed8060947e53f",
+      "artifact_id": 14423178616,
+      "environment": "ruh",
+      "gitops_sha": "86feae79d44134a295c7c2ba11d2563e0ae2672f",
+      "receipt_canonical_sha256": "354310eb579a77b160599b2d7448a6aac83d76a756673a7dc2925fea107e5024",
+      "run_id": 44291764527,
+      "run_url": "https://github.com/matrixorigin/cloudsigma-gitops/actions/runs/44291764527",
+      "targets": {
+        "mo-standard-1": {
+          "binding": {
+            "environment": "ruh",
+            "marker_sha256": "0622ba830a3b48bbca7e99142bbc5acef8ef3dae318487e52cf2bc3b06883aab",
+            "node": "mo-standard-1",
+            "node_uid": "73ed3039-bec9-4289-bae5-e71b89d0249b",
+            "pv_uid": "e5e32937-3aa1-46c9-b39f-8fcf676e35de",
+            "pvc_uid": "e6c0901b-0aaf-4f74-89fa-74b049c68dfa"
+          },
+          "bytes": 9145028865,
+          "files": 14296,
+          "indexes": [
+            "a5e1ba2addc74cf6efeee6659f72ba85a2b3cb56246dff720a69681e390ec5f9",
+            "c357cc227c142855d25f0d40d09bafc698ecbfea2a0fae2c2cf5d9e8ab2349e6",
+            "f71c4848fbbaadbb54a50062d2a5020626b94eee7cecf9f0eca26d6ea64475cf"
+          ]
+        },
+        "mo-standard-2": {
+          "binding": {
+            "environment": "ruh",
+            "marker_sha256": "833c6c49b9d5b0a330d8dc9a68b50127b40747bf135cca5da8fdc85365987090",
+            "node": "mo-standard-2",
+            "node_uid": "b66e90e6-0dce-4b10-ac33-b1283c54b604",
+            "pv_uid": "a1d9ad6d-e9fd-49bd-a5a1-6482f3d483cf",
+            "pvc_uid": "97aead78-e501-4015-a955-90c8eae2e5a4"
+          },
+          "bytes": 9145028865,
+          "files": 14296,
+          "indexes": [
+            "a5e1ba2addc74cf6efeee6659f72ba85a2b3cb56246dff720a69681e390ec5f9",
+            "c357cc227c142855d25f0d40d09bafc698ecbfea2a0fae2c2cf5d9e8ab2349e6",
+            "f71c4848fbbaadbb54a50062d2a5020626b94eee7cecf9f0eca26d6ea64475cf"
+          ]
+        }
+      }
+    },
+    "catalog_sha256": "bf56c605419fb707707c722552115d5efe27660b6735da87e72ba53bed7a2d4a",
+    "targets": {
+      "mo-standard-0": {
+        "binding": {
+          "environment": "ruh",
+          "marker_sha256": "b2bd348699c99fc63822b7790d82c9c5371e203df3e127b153c3ec229d3cee83",
+          "node": "mo-standard-0",
+          "node_uid": "d45bcc63-fe79-4fd2-84c5-72c921267fc2",
+          "pv_uid": "d9186f6d-7e1b-43c0-8264-1e241a589eb5",
+          "pvc_uid": "320c6da9-c7ee-46c3-948d-f0de5395c493"
+        },
+        "catalog_sha256": "bf56c605419fb707707c722552115d5efe27660b6735da87e72ba53bed7a2d4a",
+        "compiler_invocations": 0,
+        "external_downloads": 0,
+        "filesystem_writes": 0,
+        "indexes": [
+          {
+            "action_count": 21680,
+            "entry_sha256": "5cbb6032d43d55a6bafe27e56fb1299593d15ff0c94d9beb67b1447a01c66ba2",
+            "index_sha256": "c357cc227c142855d25f0d40d09bafc698ecbfea2a0fae2c2cf5d9e8ab2349e6",
+            "native_manifests": {},
+            "runtime_sha256": "82bc478f7e016f1794df59586e02ff6019f9894c2a537a87e7fe45deea4072be"
+          },
+          {
+            "action_count": 6209,
+            "entry_sha256": "c24b4ada2ea0713a7ab4d957b3b1bbbfbec7dfcb8131e6697f58e96fdb8517ce",
+            "index_sha256": "a5e1ba2addc74cf6efeee6659f72ba85a2b3cb56246dff720a69681e390ec5f9",
+            "native_manifests": {
+              "ef5f062af02781630b04f3173f6c31aa44b81753be31fb01de94f60b686d319d": "49141f300e1407d89d014d9ab750af9aab187ddc9f1dc3430ef6d28010baeeb1"
+            },
+            "runtime_sha256": "82bc478f7e016f1794df59586e02ff6019f9894c2a537a87e7fe45deea4072be"
+          },
+          {
+            "action_count": 8425,
+            "entry_sha256": "b1464b6493c8102ec77651855ac762f2a516846e4375c1273c0b4750eb6b7ebd",
+            "index_sha256": "f71c4848fbbaadbb54a50062d2a5020626b94eee7cecf9f0eca26d6ea64475cf",
+            "native_manifests": {
+              "ef5f062af02781630b04f3173f6c31aa44b81753be31fb01de94f60b686d319d": "bb665f3ef19348b299d641a79b21def4d6c0606d272b1aebc76b162fe1a84e31"
+            },
+            "runtime_sha256": "82bc478f7e016f1794df59586e02ff6019f9894c2a537a87e7fe45deea4072be"
+          }
+        ],
+        "payload_inventory_sha256": "8a9ea4f4fa89b1747e74e4d0e063e8a701c8123c6d0bcc8bd1f149194ca82742",
+        "readonly": true,
+        "schema": 1,
+        "seconds": 41.55368,
+        "success": true,
+        "tool_archive_sha256": "26cdf8367ce1f4efb7a46b2a6d36843e2a5760423ca4357f2a01e52b4f0ea130",
+        "tool_lock_sha256": "b9e9c8760f73de6573d58a531a163ecdb3c3e0372900b4ca745a4897acd3865c",
+        "verified_bytes": 9145028865,
+        "verified_files": 14296
+      },
+      "mo-standard-1": {
+        "binding": {
+          "environment": "ruh",
+          "marker_sha256": "0622ba830a3b48bbca7e99142bbc5acef8ef3dae318487e52cf2bc3b06883aab",
+          "node": "mo-standard-1",
+          "node_uid": "73ed3039-bec9-4289-bae5-e71b89d0249b",
+          "pv_uid": "e5e32937-3aa1-46c9-b39f-8fcf676e35de",
+          "pvc_uid": "e6c0901b-0aaf-4f74-89fa-74b049c68dfa"
+        },
+        "catalog_sha256": "bf56c605419fb707707c722552115d5efe27660b6735da87e72ba53bed7a2d4a",
+        "compiler_invocations": 0,
+        "external_downloads": 0,
+        "filesystem_writes": 0,
+        "indexes": [
+          {
+            "action_count": 21680,
+            "entry_sha256": "5cbb6032d43d55a6bafe27e56fb1299593d15ff0c94d9beb67b1447a01c66ba2",
+            "index_sha256": "c357cc227c142855d25f0d40d09bafc698ecbfea2a0fae2c2cf5d9e8ab2349e6",
+            "native_manifests": {},
+            "runtime_sha256": "82bc478f7e016f1794df59586e02ff6019f9894c2a537a87e7fe45deea4072be"
+          },
+          {
+            "action_count": 6209,
+            "entry_sha256": "c24b4ada2ea0713a7ab4d957b3b1bbbfbec7dfcb8131e6697f58e96fdb8517ce",
+            "index_sha256": "a5e1ba2addc74cf6efeee6659f72ba85a2b3cb56246dff720a69681e390ec5f9",
+            "native_manifests": {
+              "ef5f062af02781630b04f3173f6c31aa44b81753be31fb01de94f60b686d319d": "49141f300e1407d89d014d9ab750af9aab187ddc9f1dc3430ef6d28010baeeb1"
+            },
+            "runtime_sha256": "82bc478f7e016f1794df59586e02ff6019f9894c2a537a87e7fe45deea4072be"
+          },
+          {
+            "action_count": 8425,
+            "entry_sha256": "b1464b6493c8102ec77651855ac762f2a516846e4375c1273c0b4750eb6b7ebd",
+            "index_sha256": "f71c4848fbbaadbb54a50062d2a5020626b94eee7cecf9f0eca26d6ea64475cf",
+            "native_manifests": {
+              "ef5f062af02781630b04f3173f6c31aa44b81753be31fb01de94f60b686d319d": "bb665f3ef19348b299d641a79b21def4d6c0606d272b1aebc76b162fe1a84e31"
+            },
+            "runtime_sha256": "82bc478f7e016f1794df59586e02ff6019f9894c2a537a87e7fe45deea4072be"
+          }
+        ],
+        "payload_inventory_sha256": "8a9ea4f4fa89b1747e74e4d0e063e8a701c8123c6d0bcc8bd1f149194ca82742",
+        "readonly": true,
+        "schema": 1,
+        "seconds": 59.103434,
+        "success": true,
+        "tool_archive_sha256": "26cdf8367ce1f4efb7a46b2a6d36843e2a5760423ca4357f2a01e52b4f0ea130",
+        "tool_lock_sha256": "b9e9c8760f73de6573d58a531a163ecdb3c3e0372900b4ca745a4897acd3865c",
+        "verified_bytes": 9145028865,
+        "verified_files": 14296
+      },
+      "mo-standard-2": {
+        "binding": {
+          "environment": "ruh",
+          "marker_sha256": "833c6c49b9d5b0a330d8dc9a68b50127b40747bf135cca5da8fdc85365987090",
+          "node": "mo-standard-2",
+          "node_uid": "b66e90e6-0dce-4b10-ac33-b1283c54b604",
+          "pv_uid": "a1d9ad6d-e9fd-49bd-a5a1-6482f3d483cf",
+          "pvc_uid": "97aead78-e501-4015-a955-90c8eae2e5a4"
+        },
+        "catalog_sha256": "bf56c605419fb707707c722552115d5efe27660b6735da87e72ba53bed7a2d4a",
+        "compiler_invocations": 0,
+        "external_downloads": 0,
+        "filesystem_writes": 0,
+        "indexes": [
+          {
+            "action_count": 21680,
+            "entry_sha256": "5cbb6032d43d55a6bafe27e56fb1299593d15ff0c94d9beb67b1447a01c66ba2",
+            "index_sha256": "c357cc227c142855d25f0d40d09bafc698ecbfea2a0fae2c2cf5d9e8ab2349e6",
+            "native_manifests": {},
+            "runtime_sha256": "82bc478f7e016f1794df59586e02ff6019f9894c2a537a87e7fe45deea4072be"
+          },
+          {
+            "action_count": 6209,
+            "entry_sha256": "c24b4ada2ea0713a7ab4d957b3b1bbbfbec7dfcb8131e6697f58e96fdb8517ce",
+            "index_sha256": "a5e1ba2addc74cf6efeee6659f72ba85a2b3cb56246dff720a69681e390ec5f9",
+            "native_manifests": {
+              "ef5f062af02781630b04f3173f6c31aa44b81753be31fb01de94f60b686d319d": "49141f300e1407d89d014d9ab750af9aab187ddc9f1dc3430ef6d28010baeeb1"
+            },
+            "runtime_sha256": "82bc478f7e016f1794df59586e02ff6019f9894c2a537a87e7fe45deea4072be"
+          },
+          {
+            "action_count": 8425,
+            "entry_sha256": "b1464b6493c8102ec77651855ac762f2a516846e4375c1273c0b4750eb6b7ebd",
+            "index_sha256": "f71c4848fbbaadbb54a50062d2a5020626b94eee7cecf9f0eca26d6ea64475cf",
+            "native_manifests": {
+              "ef5f062af02781630b04f3173f6c31aa44b81753be31fb01de94f60b686d319d": "bb665f3ef19348b299d641a79b21def4d6c0606d272b1aebc76b162fe1a84e31"
+            },
+            "runtime_sha256": "82bc478f7e016f1794df59586e02ff6019f9894c2a537a87e7fe45deea4072be"
+          }
+        ],
+        "payload_inventory_sha256": "8a9ea4f4fa89b1747e74e4d0e063e8a701c8123c6d0bcc8bd1f149194ca82742",
+        "readonly": true,
+        "schema": 1,
+        "seconds": 62.699323,
+        "success": true,
+        "tool_archive_sha256": "26cdf8367ce1f4efb7a46b2a6d36843e2a5760423ca4357f2a01e52b4f0ea130",
+        "tool_lock_sha256": "b9e9c8760f73de6573d58a531a163ecdb3c3e0372900b4ca745a4897acd3865c",
+        "verified_bytes": 9145028865,
+        "verified_files": 14296
+      }
+    },
+    "helper_pods_absent": true,
+    "started_at": "2026-11-19T01:57:53.936449+00:00",
+    "completed_at": "2026-11-19T02:02:35.976468+00:00",
+    "original_pool": {
+      "spec_sha256": "dddce173b38f2949803b669ec57aa13ffce8e5f71b9d1eb6293527b9e2e93ba7",
+      "uid": "90156c74-4b52-46a2-bf5d-60b58bf87206"
+    },
+    "full_operator_receipt_sha256": "87d44380d2ed1bbdb00156d6e1b6467c7bb4e206d5e588f3feef8534194ab08e"
+  }
+}

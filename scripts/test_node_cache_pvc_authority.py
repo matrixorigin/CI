@@ -130,6 +130,33 @@ class ActualIndependentReview(unittest.TestCase):
         self.assertEqual([p['verified_files'] for p in doc['review']['targets'].values()],[14296]*3)
         self.assertEqual([p['verified_bytes'] for p in doc['review']['targets'].values()],[9145029638]*3)
 
+    def test_four_environment_candidates_preserve_every_bound_generation_and_are_not_self_activating(self):
+        import node_cache_pr_native_catalog as native
+        root=Path(__file__).resolve().parents[1]/'config'
+        original,_=native.load(root)
+        hashes={'mty':'2b9d0e701ce12b42bac6088734ff0ffcb152966c4ae95a99f7795e5ddafb1cb0',
+            'jed':'53b0ebf81cc99228514b4d76e6454f80d1f5795518f1d7359c369bdff32c8d1c',
+            'ruh':'d5536565bdbe3ad5535c43fc4bb27a1e2538e9a54ce3e7fb33597234efff23ce'}
+        for env,expected in hashes.items():
+            doc=c.read_json(root/f'node-cache-pvc-authorization-{env}.json')
+            self.assertEqual(pvc.validate_review(doc),expected)
+            self.assertEqual(doc['base_catalog']['nodes'],[n for n in original['nodes'] if n['environment']==env])
+            self.assertEqual(doc['base_catalog']['entries'],[e for e in original['entries'] if e['runtime']['environment']==env])
+            with self.assertRaises(ValueError):pvc.compose(original,doc)
+            self.assertEqual(len(doc['review']['targets']),3)
+
+    def test_mty_composite_cannot_omit_cpu_producer_or_base_payload_or_change_tools(self):
+        root=Path(__file__).resolve().parents[1]/'config'
+        doc=c.read_json(root/'node-cache-pvc-authorization-mty.json')
+        for fault in ('cpu_producer','base','tool','inventory','binding'):
+            value=copy.deepcopy(doc)
+            if fault=='cpu_producer':value['all_source_producers'].pop()
+            elif fault=='base':value['original_base_authorization']['review']['complete']=False
+            elif fault=='tool':value['review']['targets']['mo-standard-1']['tool_archive_sha256']='a'*64
+            elif fault=='inventory':value['review']['targets']['mo-standard-1']['indexes'].pop()
+            elif fault=='binding':value['review']['targets']['mo-standard-1']['binding']['pvc_uid']='other'
+            with self.subTest(fault=fault),self.assertRaises(ValueError):pvc.validate_review(value)
+
 
 
 

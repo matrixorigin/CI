@@ -64,7 +64,12 @@ def revocations(read=revocation_api):
 
 def validate(document):
     c.require(digest(document)==APPROVAL_SHA256,'persistent approval differs from independent review')
-    c.require(document['schema']==1 and document['lifecycle']=='exact-volume-runtime-content-until-revoked',
+    return validate_review(document)
+
+
+def validate_review(document):
+    """Audit an unactivated candidate; this alone never grants consumer trust."""
+    c.require(document['schema'] in (1,2) and document['lifecycle']=='exact-volume-runtime-content-until-revoked',
         'persistent lifetime policy differs')
     report=document['review'];base=document['base_catalog']
     c.require(report['complete'] is True and report['environment']==document['environment']
@@ -81,6 +86,28 @@ def validate(document):
     c.require(len(base['nodes'])==3 and all(v['environment']==document['environment'] for v in base['nodes'])
         and all(e['runtime']['environment']==document['environment'] for e in base['entries']),
         'persistent reviewed environment scope differs')
+    parent=None
+    if document['schema']==2:
+        parent=document['original_base_authorization'];validate_review(parent)
+        c.require(parent['schema']==1 and parent['environment']==document['environment']=='mty'
+            and base['nodes']==parent['base_catalog']['nodes']
+            and all(e in base['entries'] for e in parent['base_catalog']['entries'])
+            and report['copy_authority']==parent['review']['copy_authority'],
+            'composite review changed independently copied base')
+        c.require(report['catalog_kind']=='reviewed-native-composite'
+            and report['approved_native_composition']['catalog_canonical_sha256']==document['source_catalog_sha256']
+            and report['approved_native_composition']['old_entries_and_markers_preserved'] is True
+            and report['approved_native_composition']['ordinary_pr_precompile'] is False
+            and report['approved_native_composition']['shared_cache_writes']==0,
+            'composite independent publication composition differs')
+        rows=document['all_source_producers']
+        c.require({r['index_sha256'] for r in rows}=={e['index_sha256'] for e in base['entries']}
+            and len(rows)==len(base['entries']) and all(r['primary_provenance_rechecked'] is True for r in rows),
+            'composite source producer review omitted a generation')
+        for e in base['entries']:
+            row=next(r for r in rows if r['index_sha256']==e['index_sha256'])
+            c.require(row['entry_sha256']==digest(e) and row['producer']==e['producer'],
+                'composite source producer identity differs')
     for node,proof in targets.items():
         bound=next(v for v in base['nodes'] if (v['environment'],v['node'])==(document['environment'],node))
         c.require(proof['binding']==bound and proof['success'] is True and proof['readonly'] is True
@@ -88,6 +115,9 @@ def validate(document):
             and proof['catalog_sha256']==document['source_catalog_sha256'],'PVC full hash review binding/scope differs')
         identity={k:bound[k] for k in ('node_uid','pvc_uid','pv_uid')}
         entries=[e for e in base['entries'] if identity in e.get('bindings',[])]
+        c.require(len(proof['indexes'])==len(entries)
+            and {p['index_sha256'] for p in proof['indexes']}=={e['index_sha256'] for e in entries},
+            'PVC review omitted or duplicated a generation')
         c.require(sorted(proof['indexes'],key=lambda v:v['index_sha256'])==sorted([{
             'index_sha256':e['index_sha256'],'entry_sha256':digest(e),'runtime_sha256':digest(e['runtime']),
             'action_count':next(p['action_count'] for p in proof['indexes'] if p['index_sha256']==e['index_sha256']),
@@ -95,12 +125,21 @@ def validate(document):
             'PVC source/index/runtime manifest review differs')
         c.require(proof['verified_files']>0 and proof['verified_bytes']>0 and c.HEX.fullmatch(proof['payload_inventory_sha256']),
             'full payload not verified')
-        for prior in report['copy_authority']['targets'].values():
-            c.require(proof['verified_files']==prior['files'] and proof['verified_bytes']==prior['bytes']
-                and sorted(v['index_sha256'] for v in proof['indexes'])==sorted(prior['indexes']),
-                'revalidation no longer matches independently copied original payload')
-    c.require(len({(p['verified_files'],p['verified_bytes'],p['payload_inventory_sha256'],p['tool_lock_sha256'],p['tool_archive_sha256'])
-        for p in targets.values()})==1,'independently verified per-node inventories differ')
+        if parent is None:
+            for prior in report['copy_authority']['targets'].values():
+                c.require(proof['verified_files']==prior['files'] and proof['verified_bytes']==prior['bytes']
+                    and sorted(v['index_sha256'] for v in proof['indexes'])==sorted(prior['indexes']),
+                    'revalidation no longer matches independently copied original payload')
+        else:
+            prior=parent['review']['targets'][node]
+            c.require(proof['verified_files']>=prior['verified_files'] and proof['verified_bytes']>=prior['verified_bytes']
+                and all(row in proof['indexes'] for row in prior['indexes'])
+                and proof['tool_lock_sha256']==prior['tool_lock_sha256']
+                and proof['tool_archive_sha256']==prior['tool_archive_sha256'],
+                'composite lost original reviewed payload or tools')
+    if parent is None:
+        c.require(len({(p['verified_files'],p['verified_bytes'],p['payload_inventory_sha256'],p['tool_lock_sha256'],p['tool_archive_sha256'])
+            for p in targets.values()})==1,'independently verified per-node inventories differ')
     return digest(document)
 
 
