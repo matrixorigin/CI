@@ -266,7 +266,7 @@ def render(args: argparse.Namespace) -> str:
             "",
             "## Raw evidence",
             "",
-            "Per-test skip evidence is uploaded on success and failure. The full JSON stream and runner diagnostics are uploaded only on failure.",
+            "The full JSON stream and runner diagnostics remain available in the uploaded artifact.",
         ]
     )
     return cap_markdown("\n".join(lines) + "\n")
