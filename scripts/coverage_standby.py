@@ -148,7 +148,12 @@ def choose():
     t = dict(parent=int(os.environ["GITHUB_RUN_ID"]), attempt=1, group=int(os.environ["GROUP"]),
              head=os.environ["HEAD"], source=os.environ["SOURCE"], pr=int(os.environ["PR"]))
     check(t["group"] in (0, 1) and re.fullmatch("[a-f0-9]{40}", t["head"]), "invalid input")
-    rev = parent_meta(t)["head_sha"]
+    p = parent_meta(t)
+    check(p["head_sha"] == t["head"] and p["head_repository"]["full_name"] == t["source"],
+          "the PR head does not match the trusted parent")
+    # A pull_request_target run reports the PR head; a workflow_dispatch run
+    # reports the workflow branch head. These are not the same commit.
+    rev = t["revision"] = one("/git/ref/heads/main")["object"]["sha"]
     nonce = secrets.token_hex(32)
     t["key"] = digest(nonce)
     pool = "cs"
@@ -225,7 +230,9 @@ def admit():
           and type(t["parent"]) is int and type(t["pr"]) is int and re.fullmatch("[a-f0-9]{64}", t["key"]),
           "invalid worker ticket")
     p = parent_meta(t)
-    child_meta(r, t, pool, p["head_sha"])
+    check(p["head_sha"] == head and p["head_repository"]["full_name"] == source
+          and re.fullmatch("[a-f0-9]{40}", t["revision"]), "parent PR provenance mismatch")
+    child_meta(r, t, pool, t["revision"])
     for _ in range(108):
         parent_meta(t)
         g = artifact(t["parent"], f"coverage-admit-{r}", "grant.json")

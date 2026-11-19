@@ -23,7 +23,8 @@ class Queue(unittest.TestCase):
         import tempfile, os, json
         from pathlib import Path
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {**self.env, 'RUNNER_TEMP': tmp}), \
-             patch.object(s,'parent_meta',return_value={'head_sha':'b'*40}), \
+             patch.object(s,'parent_meta',return_value={'head_sha':'a'*40,'head_repository':{'full_name':'fork/matrixone'}}), \
+             patch.object(s,'one',return_value={'object':{'sha':'b'*40}}), \
              patch.object(s,'dispatch',side_effect=[111,222]) as launch, \
              patch.object(s,'observe',side_effect=observations), \
              patch.object(s,'child_meta',return_value={'status':'completed','conclusion':'cancelled'}), \
