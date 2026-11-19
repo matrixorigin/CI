@@ -9,9 +9,15 @@ unreviewed candidate to approve itself.
 
 `node-cache-pvc-authorization.json` is a separately reviewed, immutable CI input.
 Its exact canonical SHA is fixed in `node_cache_pvc_authority.py`. The current
-approval is restricted to the three independently revalidated MNL2 volumes.
-It preserves original entries, dates, producer descriptors, volume markers and
-all other environments. A native input/CPU that has not been published remains
+approval covers the three independently revalidated MNL2 volumes. Additional
+independently reviewed documents cover MTY/JED/RUH, selected by exact environment
+and node/PVC/PV identity (all twelve standard nodes). MTY includes the later
+node1 CPU generation and node0/node1 native additions, each independently
+full-hashed, with the original base authorization retained beneath it. The
+three new documents were first committed and tested by a separate immutable
+public Linux issuer before consumer activation. They cannot approve themselves.
+The family preserves original entries, dates, producer descriptors and volume
+markers. A native input/CPU that has not been published remains
 a real cold miss; this change is not native-generation acceptance.
 
 Before approval, the independent reader verifies every index, native manifest,

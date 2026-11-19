@@ -130,7 +130,7 @@ class ActualIndependentReview(unittest.TestCase):
         self.assertEqual([p['verified_files'] for p in doc['review']['targets'].values()],[14296]*3)
         self.assertEqual([p['verified_bytes'] for p in doc['review']['targets'].values()],[9145029638]*3)
 
-    def test_four_environment_candidates_preserve_every_bound_generation_and_are_not_self_activating(self):
+    def test_four_environment_reviews_preserve_every_bound_generation_and_require_pinned_issuer(self):
         import node_cache_pr_native_catalog as native
         root=Path(__file__).resolve().parents[1]/'config'
         original,_=native.load(root)
@@ -142,7 +142,7 @@ class ActualIndependentReview(unittest.TestCase):
             self.assertEqual(pvc.validate_review(doc),expected)
             self.assertEqual(doc['base_catalog']['nodes'],[n for n in original['nodes'] if n['environment']==env])
             self.assertEqual(doc['base_catalog']['entries'],[e for e in original['entries'] if e['runtime']['environment']==env])
-            with self.assertRaises(ValueError):pvc.compose(original,doc)
+            self.assertEqual(pvc.validate(doc),expected)
             self.assertEqual(len(doc['review']['targets']),3)
 
     def test_mty_composite_cannot_omit_cpu_producer_or_base_payload_or_change_tools(self):
@@ -156,6 +156,33 @@ class ActualIndependentReview(unittest.TestCase):
             elif fault=='inventory':value['review']['targets']['mo-standard-1']['indexes'].pop()
             elif fault=='binding':value['review']['targets']['mo-standard-1']['binding']['pvc_uid']='other'
             with self.subTest(fault=fault),self.assertRaises(ValueError):pvc.validate_review(value)
+
+    def test_family_selects_only_own_environment_and_exact_volume_and_rejects_unknown_grant(self):
+        import node_cache_pr_native_catalog as native
+        root=Path(__file__).resolve().parents[1]/'config';catalog,_=native.load(root)
+        active=pvc.load_family(root,catalog)
+        self.assertEqual(active['entries'],catalog['entries']);self.assertEqual(active['nodes'],catalog['nodes'])
+        for binding in active['nodes']:
+            local=cache.catalog_for_node(active,binding);doc=local['persistent_pvc_authority']['document']
+            self.assertEqual(doc['environment'],binding['environment'])
+            self.assertTrue(all(e in doc['base_catalog']['entries'] for e in local['entries']))
+            def api(path):
+                ident=int(path.rsplit('/',1)[1]);sha={pvc.SCANNER_CONTRACT:pvc.SCANNER_REVISION,
+                    pvc.APPROVAL_ISSUER_CONTRACT:pvc.APPROVAL_ISSUER_REVISION,
+                    pvc.FAMILY_ISSUER_CONTRACT:pvc.FAMILY_ISSUER_REVISION}[ident]
+                return {'id':ident,'head_sha':sha,'status':'completed','conclusion':'success',
+                    'path':'.github/workflows/pr-node-cache-contract.yaml','run_attempt':1}
+            clear=git_file({'schema':1,'authorization_ids':[],'indexes':[],'environments':[]})
+            authority=pvc.Authority(local,api,lambda:clear)
+            self.assertTrue(all(authority.covers(e) for e in local['entries']))
+            foreign=next(e for e in active['entries'] if e['runtime']['environment']!=binding['environment'])
+            self.assertFalse(authority.covers(foreign))
+        bad=copy.deepcopy(active['nodes'][0]);bad['pvc_uid']='replacement'
+        with self.assertRaises(ValueError):cache.catalog_for_node(active,bad)
+        doc=copy.deepcopy(active['persistent_pvc_authorities'][0]['document']);doc['review']['started_at']='unreviewed'
+        with self.assertRaises(ValueError):pvc.compose(catalog,doc)
+        rows=[v['document'] for v in active['persistent_pvc_authorities']]
+        with self.assertRaises(ValueError):pvc.compose_family(catalog,rows[:-1])
 
 
 

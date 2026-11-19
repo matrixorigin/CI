@@ -159,6 +159,13 @@ def catalog_for_node(catalog, binding):
     result={'entries': entries}
     if 'persistent_pvc_authority' in catalog:
         result.update(binding=binding,persistent_pvc_authority=catalog['persistent_pvc_authority'])
+    if 'persistent_pvc_authorities' in catalog:
+        c.require('persistent_pvc_authority' not in catalog,'ambiguous persistent authority family')
+        rows=[v for v in catalog['persistent_pvc_authorities'] if
+            v['document']['environment']==binding['environment']]
+        c.require(len(rows)==1 and binding in rows[0]['document']['base_catalog']['nodes'],
+            'persistent family missing exact environment/volume binding')
+        result.update(binding=binding,persistent_pvc_authority=rows[0])
     return result
 
 

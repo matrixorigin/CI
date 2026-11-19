@@ -20,6 +20,12 @@ SCANNER_REVISION='d4009deaad719fbc39a71dbcaf6a4d9f4a6d3ce1'
 SCANNER_CONTRACT=44433331964
 APPROVAL_ISSUER_REVISION='c0500147f3a7e6e9a8f5c2ca721f66f303d727f8'
 APPROVAL_ISSUER_CONTRACT=44434575229
+FAMILY_ISSUER_REVISION='a79c4b041fc6b314b37a34692c0452c2f9213a50'
+FAMILY_ISSUER_CONTRACT=44442722617
+FAMILY_APPROVALS={
+    'mty':'2b9d0e701ce12b42bac6088734ff0ffcb152966c4ae95a99f7795e5ddafb1cb0',
+    'jed':'53b0ebf81cc99228514b4d76e6454f80d1f5795518f1d7359c369bdff32c8d1c',
+    'ruh':'d5536565bdbe3ad5535c43fc4bb27a1e2538e9a54ce3e7fb33597234efff23ce'}
 REVOCATION_PATH='repos/matrixorigin/CI/contents/config/node-cache-pvc-revocations.json?ref=codex/pr-node-cache-two-group-capacity'
 
 
@@ -63,7 +69,8 @@ def revocations(read=revocation_api):
 
 
 def validate(document):
-    c.require(digest(document)==APPROVAL_SHA256,'persistent approval differs from independent review')
+    c.require(digest(document) in (APPROVAL_SHA256,FAMILY_APPROVALS.get(document['environment'])),
+        'persistent approval differs from independent review')
     return validate_review(document)
 
 
@@ -153,6 +160,26 @@ def compose(catalog,document):
     return result
 
 
+def compose_family(catalog,documents):
+    c.require(len(documents)==4 and {d['environment'] for d in documents}=={'mty','mnl2','jed','ruh'},
+        'persistent family omitted or duplicated an environment')
+    c.require('persistent_pvc_authority' not in catalog and 'persistent_pvc_authorities' not in catalog,
+        'persistent family already materialized')
+    result=copy.deepcopy(catalog);authorities=[]
+    for doc in documents:
+        value=compose(catalog,doc)['persistent_pvc_authority']
+        authorities.append(value)
+    result['persistent_pvc_authorities']=authorities
+    return result
+
+
+def load_family(root,catalog):
+    root=Path(root)
+    docs=[c.read_json(root/('node-cache-pvc-authorization.json' if env=='mnl2' else
+        f'node-cache-pvc-authorization-{env}.json')) for env in ('mty','mnl2','jed','ruh')]
+    return compose_family(catalog,docs)
+
+
 class Authority:
     def __init__(self,catalog,api,revocation_read=None):
         self.binding=catalog['binding'];value=catalog['persistent_pvc_authority'];self.document=value['document']
@@ -165,13 +192,15 @@ class Authority:
             and contract['status']=='completed' and contract['conclusion']=='success'
             and contract['path']=='.github/workflows/pr-node-cache-contract.yaml'
             and contract['run_attempt']==1,'persistent full-scan contract authority changed')
-        issuer=api(f'repos/matrixorigin/CI/actions/runs/{APPROVAL_ISSUER_CONTRACT}')
-        c.require(issuer['id']==APPROVAL_ISSUER_CONTRACT and issuer['head_sha']==APPROVAL_ISSUER_REVISION
+        issuer_id,issuer_sha=((APPROVAL_ISSUER_CONTRACT,APPROVAL_ISSUER_REVISION) if self.ident==APPROVAL_SHA256 else
+            (FAMILY_ISSUER_CONTRACT,FAMILY_ISSUER_REVISION))
+        issuer=api(f'repos/matrixorigin/CI/actions/runs/{issuer_id}')
+        c.require(issuer['id']==issuer_id and issuer['head_sha']==issuer_sha
             and issuer['status']=='completed' and issuer['conclusion']=='success' and issuer['run_attempt']==1
             and issuer['path']=='.github/workflows/pr-node-cache-contract.yaml',
             'independent public PVC approval issuer changed')
         self.publication_metadata_checks.append({'issuer_repository':'matrixorigin/CI',
-            'issuer_run':APPROVAL_ISSUER_CONTRACT,'http_status':200,
+            'issuer_run':issuer_id,'http_status':200,
             'protected_origin_verified_at_independent_approval':True})
 
     def covers(self,entry):
@@ -205,20 +234,20 @@ def materialize(root,temp):
     root=Path(root);temp=c.safe_path(temp)
     native_path,proof=native.materialize(root,temp)
     source=c.read_json(native_path)
-    result=compose(source,c.read_json(root/'node-cache-pvc-authorization.json'))
+    result=load_family(root,source)
     target=temp/'cs-reviewed-persistent-catalog.json'
     c.require(not target.exists() and not (temp/'cs-node-cache').exists(),'persistent private materialization not fresh')
     c.atomic_json(target,result)
-    return {'authorization_id':result['persistent_pvc_authority']['authorization_id'],
+    return {'authorization_ids':{v['document']['environment']:v['authorization_id'] for v in result['persistent_pvc_authorities']},
         'old_catalog_canonical_sha256':digest(source),'catalog_canonical_sha256':digest(result),
         'old_entries_and_bindings_unchanged':True,'shared_cache_writes':0,'original_native_composition':proof}
 
 
 def preflight(root):
     import node_cache_pr_native_catalog as native
-    root=Path(root);source,_=native.load(root);document=c.read_json(root/'node-cache-pvc-authorization.json')
-    catalog=compose(source,document);checks=[]
-    for binding in document['base_catalog']['nodes']:
+    root=Path(root);source,_=native.load(root)
+    catalog=load_family(root,source);checks=[]
+    for binding in catalog['nodes']:
         import node_compile_cache as cache
         local=cache.catalog_for_node(catalog,binding);authority=Authority(local,legacy.api)
         try:
@@ -226,6 +255,7 @@ def preflight(root):
                 if authority.covers(entry):c.require(authority.permits(entry,entry['runtime']) is True,'persistent authority revoked')
         finally:checks.extend(authority.publication_metadata_checks)
     return {'metadata_preflight_passed':True,'authorization_id':APPROVAL_SHA256,
+        'authorization_ids':{v['document']['environment']:v['authorization_id'] for v in catalog['persistent_pvc_authorities']},
         'publication_metadata_checks':checks,'cluster_access':False,'compiler_invocations':0}
 
 
