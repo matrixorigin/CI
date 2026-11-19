@@ -22,6 +22,8 @@ on:
       - 'scripts/coverage_skip_manifest.py'
       - 'scripts/test_coverage_skip_manifest.py'
       - 'scripts/test_cs_s3_coverage.py'
+      - 'scripts/coverage_pr_entry.py'
+      - 'scripts/test_coverage_pr_entry.py'
       - 'scripts/coverage_two_groups.py'
       - 'scripts/coverage_two_groups_merge.py'
       - 'scripts/coverage_group_collect.py'
@@ -118,7 +120,9 @@ jobs:
       - name: Test CS S3 routing and skip comparison contracts
         timeout-minutes: 3
         run: python3 -m unittest scripts.test_cs_s3_coverage scripts.test_coverage_skip_manifest scripts.test_summarize_coverage_ut scripts.test_run_coverage_ut -v
-      - name: Test three-group scheduling and artifact selection
+      - name: Test trusted PR entry and two-group handoff
+        run: python3 -m unittest scripts.test_coverage_pr_entry -v
+      - name: Test coverage group scheduling and artifact selection
         timeout-minutes: 3
         run: PYTHONPATH=scripts python3 -m unittest scripts.test_coverage_two_groups scripts.test_coverage_two_groups_merge scripts.test_coverage_group_collect scripts.test_run_coverage_packages -v
       - name: Test TKE merge subject identity contract

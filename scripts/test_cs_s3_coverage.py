@@ -16,9 +16,12 @@ CONFIGS = tuple(f"CS_S3_{stack.upper()}_CONFIG" for stack in STACKS)
 
 
 def step_script(step):
-    block = re.split(r"\n(?:      - |  [\w-]+:)",
-                     WORKFLOW.split(f"      - id: {step}\n", 1)[1], maxsplit=1)[0]
-    return textwrap.dedent(block.split("        run: |\n", 1)[1])
+    source = WORKFLOW
+    if step == "eligibility":
+        source = (Path(__file__).parents[1] / ".github/workflows/coverage-ut-pre-cutover.yaml").read_text()
+    marker = re.search(rf"^( +)- id: {step}$", source, re.M)
+    block = re.split(rf"\n(?:{marker[1]}- |  [\w-]+:)", source[marker.end():], maxsplit=1)[0]
+    return textwrap.dedent(re.split(r"\n +run: \|\n", block, maxsplit=1)[1])
 
 
 class CSS3CoverageTest(unittest.TestCase):
@@ -54,13 +57,13 @@ class CSS3CoverageTest(unittest.TestCase):
                 self.assertEqual(output.read_text(), f"allowed={str(allowed).lower()}\n")
 
     def test_shared_pool_and_pr_source_without_experiment_inputs(self):
-        self.assertIn("runs-on: cs-large-7c14g", WORKFLOW)
-        for field, value in (("PR_AUTHOR", "user.login"), ("PR_URL", "url"),
-                             ("repository", "head.repo.full_name"), ("ref", "head.sha")):
-            self.assertIn(field + ": ${{ github.event.pull_request." + value + " }}", WORKFLOW)
+        self.assertIn("format('cs-{0}-nc-n{1}-pr-v1'", WORKFLOW)
+        self.assertIn("repository: ${{ needs.check_coverage_eligibility.outputs.head_repository }}", WORKFLOW)
+        self.assertIn("ref: ${{ needs.check_coverage_eligibility.outputs.head_sha }}", WORKFLOW)
         self.assertNotRegex(WORKFLOW, r"inputs\.(canary_\w+|runner_label)|weilu-runner-test|pulls/325\d+|minio-source")
-        self.assertNotRegex(WORKFLOW, r"secrets\.(TEST_S3FS_(ALIYUN|QCLOUD)|S3\w+)")
-        self.assertIn('COVERAGE_UT_PACKAGE_PARALLELISM: "7"', WORKFLOW)
+        consumer = WORKFLOW.split("  ut-coverage-linux-x86:\n", 1)[1]
+        self.assertNotRegex(consumer, r"secrets\.(TEST_S3FS_(ALIYUN|QCLOUD)|S3\w+)")
+        self.assertIn("COVERAGE_UT_PACKAGE_PARALLELISM: '7'", WORKFLOW)
         self.assertIn('COVERAGE_GROUP: ${{ matrix.group }}', WORKFLOW)
 
     def test_runner_selects_only_its_own_storage(self):
@@ -68,8 +71,8 @@ class CSS3CoverageTest(unittest.TestCase):
             for missing in (False, True):
                 for field in ("CS_S3_ENV", "TEST_S3FS_CS"):
                     with self.subTest(stack=stack, missing=missing, field=field):
-                        expression = next(line.split("${{", 1)[1].split("}}", 1)[0]
-                                          for line in WORKFLOW.splitlines() if f"{field}: ${{{{" in line)
+                        expression = re.search(rf"{field}: \$\{{\{{(.*?)\}}\}}", WORKFLOW, re.S)[1]
+                        expression = " ".join(expression.split())
                         expression = re.sub(r"startsWith\(runner.name, '([^']+)'\)",
                                             lambda m: str(f"cs-{stack}-large-7c14g-runner".startswith(m[1])), expression)
                         for env in STACKS:
@@ -86,7 +89,7 @@ class CSS3CoverageTest(unittest.TestCase):
                 with self.subTest(stack=stack, config=bool(config), attempt=attempt), tempfile.TemporaryDirectory() as directory:
                     summary = Path(directory) / "summary"
                     env = dict(PATH=os.environ["PATH"], GITHUB_WORKSPACE=directory, GITHUB_STEP_SUMMARY=str(summary),
-                               GITHUB_RUN_ID="123", GITHUB_RUN_ATTEMPT=attempt, CS_S3_ENV=stack, TEST_S3FS_CS=config,
+                               GITHUB_RUN_ID="123", GITHUB_RUN_ATTEMPT=attempt, CS_CACHE_ENV=stack, CS_S3_ENV=stack, TEST_S3FS_CS=config,
                                COVERAGE_GROUP="0", GOMAXPROCS="7", COVERAGE_UT_PACKAGE_PARALLELISM="7",
                                endpoint="legacy", TEST_S3FS_ALIYUN="legacy", TEST_S3FS_QCLOUD="legacy")
                     result = subprocess.run(["bash", "-c", script + '\ntest -z "${endpoint+x}${TEST_S3FS_ALIYUN+x}${TEST_S3FS_QCLOUD+x}"'],
@@ -111,7 +114,7 @@ class CSS3CoverageTest(unittest.TestCase):
                 self.assertEqual(result.returncode == 0, action == "pass")
 
     def test_skip_manifest_uploaded_for_success_and_failure(self):
-        block = WORKFLOW.split("      - id: skip_manifest\n", 1)[1].split("      - id: upload_coverage_report\n", 1)[0]
+        block = WORKFLOW.split("- id: skip_manifest\n", 1)[1].split("- id: upload_coverage_report\n", 1)[0]
         self.assertIn("always() && !cancelled()", block)
         self.assertNotIn("outcome == 'failure'", block)
         self.assertIn("coverage_skip_manifest.py", block)
