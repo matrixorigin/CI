@@ -94,15 +94,34 @@ class UniformNativePolicy:
 
     def instructions(self,entry,base):
         data=engine.instructions(entry,base)
-        for name in (self.script,'node_cache_persistent_native_append.py','node_cache_native_transport.py','node_cache_pvc_authority.py'):
+        for name in (self.script,'node_cache_persistent_native_append.py','node_cache_native_missing_plan.py','node_cache_native_selective.py','node_cache_pvc_authority.py'):
             data[name]=(Path(__file__).parent/name).read_text()
         data['persistent-catalog.json']=c.canonical(self.catalog).decode()
         c.require(sum(len(k.encode())+len(v.encode()) for k,v in data.items())<900000,'uniform native instructions exceed budget')
         return data
 
+    def selective_stage(self,entry,base,api,invoke):
+        import urllib.request
+        import node_cache_native_selective as selective
+        self.fresh(entry,base,api)
+        url=authorization.validate_url(engine.transport.signed_archive_url(entry))
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self,*args,**kwargs):return None
+        size=entry['artifact']['size_in_bytes']
+        c.require(0<size<=selective.LIMIT,'source ZIP budget exceeded')
+        with urllib.request.build_opener(NoRedirect).open(url,timeout=90) as stream:
+            c.require(stream.status==200 and int(stream.headers['Content-Length'])==size,'source ZIP length changed')
+            raw=stream.read(size+1)
+        return selective.transfer(entry,raw,invoke,lambda:self.fresh(entry,base,api))
+
     def verify_receipt(self,report,entry,base,policy,catalog):
         self.scope(policy,catalog,entry,base)
         c.require(report['native_only'] is True and report['source']==entry['source']
             and report['native_key']==next(iter(entry['native_manifests'])),'uniform native receipt differs')
+        stage=report['stage']
+        c.require(stage['missing_object_bytes']==stage['acknowledged_payload_bytes']==report['append']['new_bytes']
+            and stage['node_reused_bytes']==report['append']['existing_bytes']
+            and stage['base_objects_transmitted']==0 and stage['source_candidate_zip_bytes']==entry['artifact']['size_in_bytes'],
+            'target transfer and physical append counters disagree')
         return receipt.verify(report,entry,base,profiles=self.profiles,environment=self.environment,
             cpu_inventory_run=self.cpu_inventory_run)

@@ -1,28 +1,27 @@
 """Separately approved writer phases; no compiler, credentials or source execution."""
 import json
 import sys
-import urllib.request
 import incremental_cache as c
 import node_cache_append_job as base_reader
 import node_cache_publish_job as approval
 import node_cache_profile_append_job as paths
 import node_cache_profile_append as verify
 import node_cache_persistent_native_append as core
-import node_cache_native_transport as transport
+import node_cache_native_selective as selective
 
 
 def execute(phase,catalog,entry,base,request):
-    c.require(phase in ('stage','append','verify') and entry['native_only'] is True,'invalid native-only phase')
+    c.require(phase in ('inventory','chunk','stage','append','verify') and entry['native_only'] is True and 'url' not in request,'invalid native-only phase')
+    if phase=='chunk':
+        # Only immutable private chunk paths named by the authenticated inventory;
+        # no cache writes and no credentials or signed URL on this path.
+        return selective.put(paths.STAGE,request['object'],request['part'],request['wire'])
     api=core.authorized(catalog,base,entry,request)
-    if phase=='stage':
+    if phase=='inventory':
         verify.verify_base(paths.SHARED,base,entry)
-        url=approval.validate_url(request['url'])
-        class NoRedirect(urllib.request.HTTPRedirectHandler):
-            def redirect_request(self,*args,**kwargs):return None
-        opener=urllib.request.build_opener(NoRedirect)
-        index=transport.receive(entry,paths.STAGE/'received',paths.STAGE/'candidate',api,
-            url_factory=lambda _:url,open_url=opener.open)
-        result={'phase':phase,'success':True,'index_sha256':c.digest(index),'shared_cache_modified':False,'compiler_invocations':0}
+        return selective.begin(paths.SHARED,paths.STAGE,entry,request['index'],request['native'],request['parts'])
+    if phase=='stage':
+        result=selective.finish(paths.SHARED,paths.STAGE,entry)
         c.atomic_json(paths.STAGE/'stage-receipt.json',result);return result
     staged=c.read_json(paths.STAGE/'stage-receipt.json')
     c.require(staged['success'] is True and staged['index_sha256']==entry['index_sha256'],'native stage receipt differs')

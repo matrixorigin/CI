@@ -229,9 +229,14 @@ def run(policy,catalog,lock,evidence,entry,base,config,directory,api=q.base.n.le
             actual=q.private_volume(pod,pvc,pv,node,binding)
             c.require(all(actual[k]==workspace[k] for k in actual),'CPU private stage identity changed')
             request=fresh_metadata(entry,base,api)
-            if phase=='stage':request['url']=transport.signed_archive_url(entry)
             state['active_phase']=phase;session.journal();started=time.monotonic()
-            result=session.call(['exec','-i',workspace['pod_name'],'-n','cicd','--','python3','/probe/'+script,phase],request,3700)
+            def invoke(action,inputs):
+                return session.call(['exec','-i',workspace['pod_name'],'-n','cicd','--','python3','/probe/'+script,action],inputs,3700)
+            if phase=='stage' and hasattr(operation,'selective_stage'):
+                result=operation.selective_stage(entry,base,api,invoke)
+            else:
+                if phase=='stage':request['url']=transport.signed_archive_url(entry)
+                result=invoke(phase,request)
             c.require(result['success'] is True and result['phase']==phase and result['compiler_invocations']==0,'CPU publisher phase failed')
             state[phase]={**result,'controller_seconds':round(time.monotonic()-started,3)};session.journal()
         c.require(state['verify']['independently_verified'] and state['verify']['compatibility_aliases'] is False
