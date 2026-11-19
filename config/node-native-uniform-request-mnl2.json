@@ -1,0 +1,70 @@
+{
+  "schema": 2,
+  "environment": "mnl2",
+  "source_repository": "matrixorigin/matrixone",
+  "source_sha": "87c44445f83e308ef12dd7ca0e570cec1e6690d9",
+  "current_pr": 32871,
+  "current_pr_head_sha": "fe458bd2595923d616a6e43f33557f82ae860c8f",
+  "native_inputs_equal_current_pr": true,
+  "native_input_count": 196,
+  "profiles": {
+    "mo-standard-0": {
+      "runtime": {
+        "cpu": {
+          "cpu family": "6",
+          "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl xtopology cpuid tsc_known_freq pni pclmulqdq ssse3 fma cx16 pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault pti ssbd ibrs ibpb stibp fsgsbase tsc_adjust bmi1 hle avx2 smep bmi2 erms invpcid rtm mpx avx512f avx512dq rdseed adx smap clflushopt clwb avx512cd avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves arat umip pku ospke md_clear flush_l1d arch_capabilities",
+          "model": "85",
+          "model name": "Intel(R) Xeon(R) Gold 6148 CPU @ 2.40GHz",
+          "stepping": "4",
+          "vendor_id": "GenuineIntel"
+        },
+        "environment": "mnl2",
+        "go_env": {
+          "CGO_ENABLED": "1",
+          "GOAMD64": "v1",
+          "GOARCH": "amd64",
+          "GOEXPERIMENT": "",
+          "GOOS": "linux"
+        },
+        "gomodcache": "/home/runner/_work/_temp/cs-buildcache-gomod",
+        "os": "87458b3b1f1ca0e5c693ade771de7007c3783bdc692fa6b39eb6414bf2af2763",
+        "platform": "Linux x86_64",
+        "repository": "matrixorigin/matrixone",
+        "schema": 2,
+        "system_packages_sha256": "820a0990ac3356a161cb23160e94656efe483ca13465c76e79fa57a86403eccd",
+        "tool_binaries": {
+          "ar": "6452af2eea333b8c65e1adb92964fc8f97863ab003fa13f9d12bff5345cd7dbe",
+          "c++": "1353e9bdd29a7295c7226bf6c63abccce056d8cac31f112e5cdbecc3f28c2769",
+          "cc": "1b99826121ae6682a634e5efe09bd3e3df58ce58e0b28f849114ab5b89139c26",
+          "cmake": "13f6483ca121c4558df37d8166ea91986777e5c2c86cebfb32ec94683d98ef6e",
+          "go": "30969f97169d7f43fe6a085873d75613adc21e30818a8c61d95bd27275df4624",
+          "ld": "e9ceb054c12207970f2726dfc07e9a66b411602748628baf27399f02a9bbb31b",
+          "make": "d78b8f1d099fbcfb6f2f49ab87223b9b68fb3956642f92d6ec6de812e8afa965"
+        },
+        "tools": {
+          "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+          "cmake": "cmake version 3.17.2",
+          "cxx": "c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+          "go": "go version go1.27.1 linux/amd64"
+        },
+        "workspace": "/home/runner/_work/matrixone/matrixone"
+      },
+      "native_key": "cbceb53c6ca341cf6f9fa12ad6490a79f61444df653632b41c0f84469bb9e0c4"
+    }
+  },
+  "target_nodes": [
+    "mo-standard-0",
+    "mo-standard-1",
+    "mo-standard-2"
+  ],
+  "one_producer_per_uniform_environment_cpu": true,
+  "target_cpu_sha256": {
+    "mo-standard-0": "0a17c779c9a8df631955c9e595e9dd2784a7ae8d042996b02da9d6f9929900b1",
+    "mo-standard-1": "0a17c779c9a8df631955c9e595e9dd2784a7ae8d042996b02da9d6f9929900b1",
+    "mo-standard-2": "0a17c779c9a8df631955c9e595e9dd2784a7ae8d042996b02da9d6f9929900b1"
+  },
+  "tool_archive_sha256": "26cdf8367ce1f4efb7a46b2a6d36843e2a5760423ca4357f2a01e52b4f0ea130",
+  "tool_archive_bytes": 125902112,
+  "native_inputs_sha256": "fcfe35a2b4939f3c0df08297f910ffc956c559a3c25994d038b2de32b08d0194",
+  "independent_native_source_proof_sha256": "323f484c5332ea506d55b29bd5908896316543f3a87665a2803e2d252ebaa382"
+}

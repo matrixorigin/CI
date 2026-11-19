@@ -16,27 +16,46 @@ import node_compile_cache as n
 import publish_node_cache as p
 
 
+def profile_scope(request,node):
+    if request['schema']==1:
+        c.require(request['environment']=='mty' and set(request['profiles'])=={'mo-standard-0','mo-standard-1'}
+            and node in request['profiles'],'native refresh node scope differs')
+    else:
+        c.require(request['schema']==2 and request['environment'] in ('jed','mnl2','ruh')
+            and node=='mo-standard-0' and set(request['profiles'])=={'mo-standard-0'}
+            and request['target_nodes']==['mo-standard-0','mo-standard-1','mo-standard-2']
+            and request['one_producer_per_uniform_environment_cpu'] is True
+            and request['source_sha']=='87c44445f83e308ef12dd7ca0e570cec1e6690d9'
+            and request['current_pr_head_sha']=='fe458bd2595923d616a6e43f33557f82ae860c8f'
+            and request['native_input_count']==196,'unreviewed uniform environment native scope')
+        expected=n.hash_value(request['profiles'][node]['runtime']['cpu'])
+        c.require(request['target_cpu_sha256']=={v:expected for v in request['target_nodes']},
+            'native producer does not cover the exact reviewed target CPUs')
+    return request['environment']
+
+
 def preflight(state,request,tools,catalog,source_sha,node):
-    c.require(request['schema']==1 and request['environment']=='mty'
-        and request['source_repository']=='matrixorigin/matrixone'
+    environment=profile_scope(request,node)
+    c.require(request['source_repository']=='matrixorigin/matrixone'
         and request['source_sha']==source_sha and re.fullmatch('[0-9a-f]{40}',source_sha)
         and request['native_inputs_equal_current_pr'] is True
         and request['current_pr']==32871 and re.fullmatch('[0-9a-f]{40}',request['current_pr_head_sha'])
         and len(state['native_inputs'])==request['native_input_count'],
         'native refresh trusted source authority differs')
-    c.require(set(request['profiles'])=={'mo-standard-0','mo-standard-1'}
-        and node in request['profiles'],'native refresh node scope differs')
     expected=request['profiles'][node]
+    if request['schema']==2:
+        c.require(n.hash_value(state['native_inputs'])==request['native_inputs_sha256'],
+            'uniform native source content differs from independent review')
     c.require(state['config']['runtime']==expected['runtime']
         and state['native_key']==expected['native_key']
         and c.HEX.fullmatch(state['native_key'])
         and state['entries'] and state['config']['indexes'],
         'native refresh differs from exact observed consumer key/runtime')
-    c.require(state['config']['runtime']['environment']=='mty'
+    c.require(state['config']['runtime']['environment']==environment
         and state['config']['runtime']['repository']=='matrixorigin/matrixone'
         and os.environ['CS_CACHE_NODE']==os.environ['CS_CACHE_EXPECTED_NODE']==node,
         'native refresh actual node/project differs')
-    binding=n.verify_binding(catalog,Path(state['config']['shared']),'mty',node,
+    binding=n.verify_binding(catalog,Path(state['config']['shared']),environment,node,
         {k:os.environ['CS_CACHE_'+k.upper()] for k in ('node_uid','pvc_uid','pv_uid')})
     c.require(tools['binding']==binding and tools['persistent_tools'] is True
         and tools['external_tool_downloads']==0
@@ -53,9 +72,10 @@ def freeze(state_path,request,destination):
     local=c.safe_path(cfg['local']);destination=c.safe_path(destination)
     c.require(not destination.exists() and local not in destination.parents
         and destination not in local.parents,'native candidate must be fresh and disjoint')
-    node=os.environ['CS_CACHE_NODE'];revision=n.command(['git','rev-parse','HEAD'],source)
+    node=os.environ['CS_CACHE_NODE'];environment=profile_scope(request,node)
+    revision=n.command(['git','rev-parse','HEAD'],source)
     c.require(revision==request['source_sha'] and cfg['runtime']==request['profiles'][node]['runtime']
-        and n.runtime(source,'mty','matrixorigin/matrixone')==cfg['runtime'],
+        and n.runtime(source,environment,'matrixorigin/matrixone')==cfg['runtime'],
         'native refresh runtime/source moved')
     key,inputs=n.native_key(source,cfg['runtime'])
     c.require(key==state['native_key']==request['profiles'][node]['native_key']
