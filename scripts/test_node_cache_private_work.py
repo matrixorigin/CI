@@ -20,7 +20,7 @@ class PrivateWork(unittest.TestCase):
         spec,sc=self.fixture();old=copy.deepcopy(spec);new=w.apply(spec,sc)
         self.assertEqual(spec,old);self.assertEqual(new['volumes'][1],old['volumes'][1])
         claim=new['volumes'][0]['ephemeral']['volumeClaimTemplate']
-        self.assertEqual(claim['spec']['resources']['requests']['storage'],'128Gi')
+        self.assertEqual(claim['spec']['resources']['requests']['storage'],'80Gi')
         self.assertNotIn('ownerReferences',claim['metadata'])
         self.assertNotIn('maxRunners',new)
         self.assertEqual(new['containers'][0]['resources'],old['containers'][0]['resources'])

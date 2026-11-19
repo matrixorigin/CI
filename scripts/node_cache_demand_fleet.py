@@ -14,7 +14,7 @@ import node_cache_private_work as private_work
 COMMON_ROUTE='cs-node-cache-7c14g'
 
 
-def pool(policy,binding,original,storage_class,work_size_gib=128):
+def pool(policy,binding,original,storage_class,work_size_gib=private_work.WORKSPACE_GIB):
     env=policy['environment'];node=policy['node']
     c.require(env in ('mty','jed','ruh','mnl2') and node in ('mo-standard-0','mo-standard-1','mo-standard-2'),
               'unapproved demand-driven node')

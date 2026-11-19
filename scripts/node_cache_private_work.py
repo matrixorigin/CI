@@ -10,9 +10,10 @@ import copy
 import incremental_cache as c
 
 STORAGE_CLASS='directpv-min-io-ephemeral'
+WORKSPACE_GIB=80
 
 
-def apply(pod_spec,storage_class,size_gib=128):
+def apply(pod_spec,storage_class,size_gib=WORKSPACE_GIB):
     c.require(storage_class['metadata']['name']==STORAGE_CLASS
         and not storage_class['metadata'].get('deletionTimestamp')
         and storage_class['provisioner']=='directpv-min-io'

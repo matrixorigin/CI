@@ -1,7 +1,7 @@
 """All-node reader registration and initial-job admission, without count caps.
 
 Registration budgets listeners only. A separate initial-job gate budgets real
-128Gi work claims and 7c/14Gi jobs; unfit nodes wait without being deleted or
+private work claims and 7c/14Gi jobs; unfit nodes wait without being deleted or
 silently removed from the target fleet. No cluster writes in this module.
 """
 import copy
@@ -10,6 +10,7 @@ import datetime as dt
 import incremental_cache as c
 import node_compile_cache as cache
 import node_cache_demand_plan as plan
+from node_cache_private_work import WORKSPACE_GIB
 import node_cache_cpu_producer_fleet as capacity
 import node_cache_workspace_probe_control as q
 
@@ -51,7 +52,7 @@ def cpu_inventory(reviewed,base,environment,api):
 
 
 def resources(catalog,policy,original,storage_class,nodes,observed_cpus):
-    proposal=plan.staged_plan(catalog,policy,original,storage_class,nodes,observed_cpus,128)
+    proposal=plan.staged_plan(catalog,policy,original,storage_class,nodes,observed_cpus)
     for resource in proposal['resources']:
         listener=resource['spec']['listenerTemplate']['spec']
         c.require(len(listener['containers'])==1 and listener['containers'][0]['name']=='listener'
@@ -124,7 +125,7 @@ def admission(policy,resources,snapshots,owned=(),job_nodes=()):
             and listener['containers'][0]['resources']==capacity.LISTENER_RESOURCES
             and listener['nodeSelector']['kubernetes.io/hostname']=='mo-standard-0','reader contract changed')
         claim=pod['volumes'][0]['ephemeral']['volumeClaimTemplate']['spec']
-        c.require(q.pub.quantity(claim['resources']['requests']['storage'])==128*c.GIB
+        c.require(q.pub.quantity(claim['resources']['requests']['storage'])==WORKSPACE_GIB*c.GIB
             and pod['volumes'][1]['persistentVolumeClaim']['readOnly'] is True
             and pod['containers'][0]['volumeMounts'][1]['readOnly'] is True,'private/shared work boundary changed')
         extras['mo-standard-0'].append(listener);specs.append(listener)
@@ -147,14 +148,14 @@ def admission(policy,resources,snapshots,owned=(),job_nodes=()):
             if d['metadata'].get('labels',{}).get('directpv.min.io/node')==node
             and d['metadata']['labels'].get('directpv.min.io/tier')=='ephemeral'
             and d['status'].get('status')=='Ready'),default=0)
-        c.require(free>=(128*int(node in job_nodes)+20)*c.GIB,'private workspace capacity unavailable; wait')
+        c.require(free>=(WORKSPACE_GIB*int(node in job_nodes)+20)*c.GIB,'private workspace capacity unavailable; wait')
         result[node]={'root_free_bytes':stats['fs']['availableBytes'],'memory_available_bytes':stats['memory']['availableBytes'],
             'physical_free_bytes':free,'combined_cpu_limits':total[0],'combined_memory_limits_bytes':total[1],
             'initial_private_claims':int(node in job_nodes)}
     required={'pods':len(specs),'count/pods':len(specs),'persistentvolumeclaims':len(job_nodes),
-        'count/persistentvolumeclaims':len(job_nodes),'requests.storage':len(job_nodes)*128*c.GIB,
+        'count/persistentvolumeclaims':len(job_nodes),'requests.storage':len(job_nodes)*WORKSPACE_GIB*c.GIB,
         'directpv-min-io-ephemeral.storageclass.storage.k8s.io/persistentvolumeclaims':len(job_nodes),
-        'directpv-min-io-ephemeral.storageclass.storage.k8s.io/requests.storage':len(job_nodes)*128*c.GIB}
+        'directpv-min-io-ephemeral.storageclass.storage.k8s.io/requests.storage':len(job_nodes)*WORKSPACE_GIB*c.GIB}
     for kind in ('requests','limits'):
         values=[]
         for spec in copy.deepcopy(specs):

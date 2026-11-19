@@ -102,12 +102,14 @@ class ReaderRollout(unittest.TestCase):
         resources=p.resources(cat,policy,old,sc,list(p.plan.NODES),cpus)['resources']
         # Register all three listeners. Initial jobs only on nodes0/1; no
         # authored limit prevents later jobs from waiting for real storage.
-        snaps['mo-standard-2']['drives']['items'][0]['status']['freeCapacity']=143*p.c.GIB
+        snaps['mo-standard-2']['drives']['items'][0]['status']['freeCapacity']=100*p.c.GIB-1
         result=p.admission(policy,resources,snaps,job_nodes=['mo-standard-0','mo-standard-1'])
         self.assertEqual(result['registered_nodes'],list(p.plan.NODES))
         self.assertIsNone(result['runner_count_cap'])
         with self.assertRaisesRegex(ValueError,'private workspace capacity'):
             p.admission(policy,resources,snaps,job_nodes=['mo-standard-2'])
+        snaps['mo-standard-2']['drives']['items'][0]['status']['freeCapacity']+=1
+        p.admission(policy,resources,snaps,job_nodes=['mo-standard-2'])
 
     def test_memory_root_actual_declared_quota_and_cap_not_waived(self):
         for fault in ('memory','root','declared','quota','cap'):
@@ -116,7 +118,7 @@ class ReaderRollout(unittest.TestCase):
             if fault=='memory':snaps['mo-standard-1']['stats']['node']['memory']['availableBytes']=17.9*p.c.GIB
             elif fault=='root':snaps['mo-standard-0']['stats']['node']['fs']['availableBytes']=59*p.c.GIB
             elif fault=='declared':snaps['mo-standard-1']['nodes']['items'][1]['status']['allocatable']['memory']='16Gi'
-            elif fault=='quota':snaps['mo-standard-0']['quotas']['items']=[{'status':{'hard':{'requests.storage':'127Gi'},'used':{}}}]
+            elif fault=='quota':snaps['mo-standard-0']['quotas']['items']=[{'status':{'hard':{'requests.storage':'159Gi'},'used':{}}}]
             elif fault=='cap':resources[0]['spec']['maxRunners']=1
             with self.subTest(fault=fault),self.assertRaises(ValueError):
                 p.admission(policy,resources,snaps,job_nodes=['mo-standard-0','mo-standard-1'])

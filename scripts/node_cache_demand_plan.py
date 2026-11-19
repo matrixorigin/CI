@@ -8,12 +8,13 @@ import copy
 import incremental_cache as c
 import node_cache_demand_fleet as demand
 import node_compile_cache as cache
+from node_cache_private_work import WORKSPACE_GIB
 
 ENVIRONMENTS=('mty','jed','ruh','mnl2')
 NODES=tuple(f'mo-standard-{i}' for i in range(3))
 
 
-def plan(catalog,policy,original,storage_class,work_size_gib=128):
+def plan(catalog,policy,original,storage_class,work_size_gib=WORKSPACE_GIB):
     c.require(catalog['schema']==2,'catalog schema differs')
     rows=catalog['nodes'];wanted={(e,n) for e in ENVIRONMENTS for n in NODES}
     c.require(len(rows)==12 and {(n['environment'],n['node']) for n in rows}==wanted,
@@ -34,7 +35,7 @@ def plan(catalog,policy,original,storage_class,work_size_gib=128):
     return result
 
 
-def staged_plan(catalog,policy,original,storage_class,ready_nodes,observed_cpus,work_size_gib=128):
+def staged_plan(catalog,policy,original,storage_class,ready_nodes,observed_cpus,work_size_gib=WORKSPACE_GIB):
     """Explicit partial rollout; unready nodes remain targets, never block peers.
 
     This is only a proposal. The protected caller must authenticate the catalog

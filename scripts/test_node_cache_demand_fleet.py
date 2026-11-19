@@ -36,7 +36,7 @@ class DemandFleet(unittest.TestCase):
                                  {'claimName':policy['name'],'readOnly':True})
                 self.assertTrue(spec['template']['spec']['containers'][0]['volumeMounts'][1]['readOnly'])
                 work=spec['template']['spec']['volumes'][0]['ephemeral']['volumeClaimTemplate']
-                self.assertEqual(work['spec']['resources']['requests']['storage'],'128Gi')
+                self.assertEqual(work['spec']['resources']['requests']['storage'],'80Gi')
                 self.assertNotIn('ownerReferences',work['metadata'])
                 self.assertEqual(spec['template']['spec']['containers'][0]['volumeMounts'][-1]['mountPath'],'/tmp')
                 self.assertFalse(spec['template']['spec']['automountServiceAccountToken'])

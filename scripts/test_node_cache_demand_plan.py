@@ -23,7 +23,7 @@ class AllNodePlan(unittest.TestCase):
             for resource in resources:
                 spec=resource['spec'];pod=spec['template']['spec'];names.add(resource['metadata']['name'])
                 self.assertNotIn('minRunners',spec);self.assertNotIn('maxRunners',spec)
-                self.assertEqual(pod['volumes'][0]['ephemeral']['volumeClaimTemplate']['spec']['resources']['requests']['storage'],'128Gi')
+                self.assertEqual(pod['volumes'][0]['ephemeral']['volumeClaimTemplate']['spec']['resources']['requests']['storage'],'80Gi')
                 self.assertTrue(pod['volumes'][1]['persistentVolumeClaim']['readOnly'])
             self.assertEqual((cat,policy,old,sc),before)
         self.assertEqual(len(names),12)
