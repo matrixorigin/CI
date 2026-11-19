@@ -1,6 +1,7 @@
 """Separately approved writer phases; no compiler, credentials or source execution."""
 import json
 import sys
+from pathlib import Path
 import incremental_cache as c
 import node_cache_append_job as base_reader
 import node_cache_publish_job as approval
@@ -8,6 +9,13 @@ import node_cache_profile_append_job as paths
 import node_cache_profile_append as verify
 import node_cache_persistent_native_append as core
 import node_cache_native_selective as selective
+
+
+def read_catalog(root=Path('/probe')):
+    # Only resolve the fixed immutable ConfigMap projection, never cache paths.
+    catalog=(root/'persistent-catalog.json').resolve(strict=True)
+    c.require(root in catalog.parents,'persistent catalog escaped ConfigMap')
+    return c.read_json(catalog)
 
 
 def execute(phase,catalog,entry,base,request):
@@ -40,7 +48,7 @@ def execute(phase,catalog,entry,base,request):
 if __name__=='__main__':
     try:
         root=__import__('pathlib').Path('/probe')
-        print(c.canonical(execute(sys.argv[1],c.read_json(root/'persistent-catalog.json'),approval.read_approval(),
+        print(c.canonical(execute(sys.argv[1],read_catalog(root),approval.read_approval(),
             base_reader.read_base(),json.load(sys.stdin))).decode())
     except Exception as error:
         print(c.canonical({'success':False,'diagnostic':c.failure_report(error),'automatic_retry':False}).decode())

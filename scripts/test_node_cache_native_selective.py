@@ -33,6 +33,15 @@ def fixture():
 
 
 class DataPlane(unittest.TestCase):
+    def test_immutable_configmap_projection_only_inside_root(self):
+        import node_cache_persistent_native_job as j
+        with tempfile.TemporaryDirectory() as tmp:
+            parent=Path(tmp).resolve();root=parent/'probe';version=root/'..version';version.mkdir(parents=True)
+            (root/'..data').symlink_to('..version');(version/'persistent-catalog.json').write_text('{"pinned":true}')
+            f=root/'persistent-catalog.json';f.symlink_to('..data/persistent-catalog.json')
+            self.assertEqual(j.read_catalog(root),{'pinned':True})
+            outside=parent/'foreign.json';outside.write_text('{}');f.unlink();f.symlink_to(outside)
+            with self.assertRaises(ValueError):j.read_catalog(root)
     def exercise(self,raw,entry,objects,present,interrupt=False):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp).resolve();shared=root/'shared';stage=root/'own-stage'
