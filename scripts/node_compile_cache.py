@@ -89,11 +89,29 @@ def verify_binding(catalog, shared, environment, node, hints):
     return binding
 
 
-def reviewed_entries(catalog,current,api=legacy.api,now=None):
+def reviewed_entries(catalog,current,api=legacy.api,now=None,*,persistent_status=None):
     now=now or dt.datetime.now(dt.timezone.utc)
     selected=[]
+    persistent=None
+    if 'persistent_pvc_authority' in catalog:
+        import node_cache_pvc_authority as pvc
+        try:
+            persistent=pvc.Authority(catalog,api)
+            if persistent_status is not None:persistent_status.update(authorization_id=persistent.ident,
+                revocations_sha256=pvc.digest(persistent.revoked),authorized_indexes=[],
+                source_transport_retention_independent=True)
+        except (urllib.error.URLError,TimeoutError,PermissionError):
+            # Never fall back around an unavailable live revocation check.
+            return []
     for entry in catalog['entries']:
         if entry['runtime']!=current:
+            continue
+        if persistent is not None and persistent.covers(entry):
+            try:permitted=persistent.permits(entry,current)
+            except (urllib.error.URLError,TimeoutError,PermissionError):continue
+            if permitted:
+                selected.append(entry)
+                if persistent_status is not None:persistent_status['authorized_indexes'].append(entry['index_sha256'])
             continue
         expires=dt.datetime.fromisoformat(entry['expires_at'].replace('Z','+00:00'))
         c.require(expires.tzinfo is not None, 'cache expiry has no timezone')
@@ -136,7 +154,10 @@ def catalog_for_node(catalog, binding):
                       'invalid published volume identity')
         if identity in bindings:
             entries.append(entry)
-    return {'entries': entries}
+    result={'entries': entries}
+    if 'persistent_pvc_authority' in catalog:
+        result.update(binding=binding,persistent_pvc_authority=catalog['persistent_pvc_authority'])
+    return result
 
 
 def native_authorities(catalog, binding, selected):
@@ -175,14 +196,14 @@ def configure(catalog_path,shared,source,local,environment,repository):
     current=runtime(source,environment,repository)
     # A new/uncached node can cold-build. An advertised bound volume must be
     # correct; corruption and identity mismatch are NOT silent misses.
-    entries=[];authorities={}
+    entries=[];authorities={};persistent_status={}
     node=os.environ.get('CS_CACHE_NODE','')
     if shared.exists():
         readonly_mount(shared)
         c.require(node and node==os.environ.get('CS_CACHE_EXPECTED_NODE'), 'node identity missing')
         binding=verify_binding(catalog,shared,environment,node,
             {k:os.environ.get('CS_CACHE_'+k.upper(),'') for k in ('node_uid','pvc_uid','pv_uid')})
-        entries=reviewed_entries(catalog_for_node(catalog,binding),current)
+        entries=reviewed_entries(catalog_for_node(catalog,binding),current,persistent_status=persistent_status)
         authorities=native_authorities(catalog,binding,entries)
     cfg={'schema':2,'local':str(local/'objects-private'),'shared':str(shared) if shared.exists() else None,
          'indexes':[e['index_sha256'] for e in entries], 'runtime':current}
@@ -192,6 +213,7 @@ def configure(catalog_path,shared,source,local,environment,repository):
            'entries':entries,'native_authorities':authorities,'source':str(source),'configured_seconds':round(time.monotonic()-started,6)}
     c.atomic_json(local/'config.json',cfg)
     c.atomic_json(local/'state.json',state)
+    if persistent_status:c.atomic_json(local/'persistent-authorization.json',persistent_status)
     helper=Path(__file__).with_name('incremental_cache.py').resolve()
     prog=shlex.join([sys.executable,str(helper),'--config',str(local/'config.json')])
     c.require('\n' not in prog, 'invalid cache command path')
