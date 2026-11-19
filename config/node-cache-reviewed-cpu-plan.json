@@ -1,0 +1,479 @@
+{
+  "observations": [
+    {
+      "environment": "jed",
+      "node": "mo-standard-0",
+      "binding": {
+        "environment": "jed",
+        "marker_sha256": "86bc5d03b042dee86d516a50aa4b026b1d43172055257eef3b75e2fb6f0e0361",
+        "node": "mo-standard-0",
+        "node_uid": "22f40d19-bccd-468e-a34a-872b7f11a28a",
+        "pv_uid": "d599b06c-7a58-465a-838d-55aa0e4ac501",
+        "pvc_uid": "452d96a5-bc05-4e7d-a1e4-ea1fb39f542a"
+      },
+      "cpu": {
+        "cpu family": "6",
+        "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon pebs bts rep_good nopl xtopology cpuid tsc_known_freq pni pclmulqdq dtes64 ssse3 fma cx16 pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault ssbd ibrs ibpb stibp ibrs_enhanced fsgsbase tsc_adjust sgx bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves avx_vnni avx512_bf16 wbnoinvd arat avx512vbmi umip pku ospke waitpkg avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq la57 rdpid bus_lock_detect cldemote movdiri movdir64b sgx_lc fsrm md_clear serialize tsxldtrk amx_bf16 avx512_fp16 amx_tile amx_int8 flush_l1d arch_capabilities",
+        "model": "143",
+        "model name": "Intel(R) Xeon(R) Gold 6448H",
+        "stepping": "8",
+        "vendor_id": "GenuineIntel"
+      },
+      "cpu_sha256": "49215fa97d55c6d49d045241ffacb7782d9fadc9f30e20ab9ea3473be6f5363c",
+      "reviewed_cpu_sha256": [
+        "49215fa97d55c6d49d045241ffacb7782d9fadc9f30e20ab9ea3473be6f5363c"
+      ],
+      "exact_cpu_profile_present": true,
+      "readonly": true,
+      "filesystem_writes": 0,
+      "compiler_invocations": 0,
+      "external_tool_downloads": 0,
+      "cpu_profile_only": true,
+      "full_runtime_compatibility_proven": false,
+      "evidence_source": {
+        "kind": "authenticated-strict-workspace-cpu-gate",
+        "run_id": 44308679217,
+        "artifact_digest": "sha256:30cfba03355fb694a339f70835bf42076018fb3b5a00d9d5b11275717f59154f"
+      }
+    },
+    {
+      "environment": "jed",
+      "node": "mo-standard-1",
+      "binding": {
+        "environment": "jed",
+        "marker_sha256": "3c26a04e84767d8ef23f46d0d35e47a30d6d8545d4b3eb712b472dd2814b5bdb",
+        "node": "mo-standard-1",
+        "node_uid": "e244184e-8d5b-4560-818a-c97f610c2b19",
+        "pv_uid": "85d21765-54de-4f38-a0f1-1033ea389b61",
+        "pvc_uid": "647e4340-a08e-4efa-9600-965ce9c25a06"
+      },
+      "cpu": {
+        "cpu family": "6",
+        "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon pebs bts rep_good nopl xtopology cpuid tsc_known_freq pni pclmulqdq dtes64 ssse3 fma cx16 pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault ssbd ibrs ibpb stibp ibrs_enhanced fsgsbase tsc_adjust sgx bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves avx_vnni avx512_bf16 wbnoinvd arat avx512vbmi umip pku ospke waitpkg avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq la57 rdpid bus_lock_detect cldemote movdiri movdir64b sgx_lc fsrm md_clear serialize tsxldtrk amx_bf16 avx512_fp16 amx_tile amx_int8 flush_l1d arch_capabilities",
+        "model": "143",
+        "model name": "Intel(R) Xeon(R) Gold 6448H",
+        "stepping": "8",
+        "vendor_id": "GenuineIntel"
+      },
+      "cpu_sha256": "49215fa97d55c6d49d045241ffacb7782d9fadc9f30e20ab9ea3473be6f5363c",
+      "reviewed_cpu_sha256": [
+        "49215fa97d55c6d49d045241ffacb7782d9fadc9f30e20ab9ea3473be6f5363c"
+      ],
+      "exact_cpu_profile_present": true,
+      "readonly": true,
+      "filesystem_writes": 0,
+      "compiler_invocations": 0,
+      "external_tool_downloads": 0,
+      "cpu_profile_only": true,
+      "full_runtime_compatibility_proven": false,
+      "evidence_source": {
+        "kind": "authenticated-strict-workspace-cpu-gate",
+        "run_id": 44308679217,
+        "artifact_digest": "sha256:30cfba03355fb694a339f70835bf42076018fb3b5a00d9d5b11275717f59154f"
+      }
+    },
+    {
+      "environment": "jed",
+      "node": "mo-standard-2",
+      "binding": {
+        "environment": "jed",
+        "marker_sha256": "99060ba70d9f4ff3006349fc29f906d94d369a0349cee550d4fc1fb6dc4eb82f",
+        "node": "mo-standard-2",
+        "node_uid": "60d316fd-91d4-4b53-bab7-00a41eea4df1",
+        "pv_uid": "c9da142d-8022-4730-b071-1422da393d8a",
+        "pvc_uid": "f0551a2d-e68c-4847-8c08-470330b3d433"
+      },
+      "cpu": {
+        "cpu family": "6",
+        "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon pebs bts rep_good nopl xtopology cpuid tsc_known_freq pni pclmulqdq dtes64 ssse3 fma cx16 pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault ssbd ibrs ibpb stibp ibrs_enhanced fsgsbase tsc_adjust sgx bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves avx_vnni avx512_bf16 wbnoinvd arat avx512vbmi umip pku ospke waitpkg avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq la57 rdpid bus_lock_detect cldemote movdiri movdir64b sgx_lc fsrm md_clear serialize tsxldtrk amx_bf16 avx512_fp16 amx_tile amx_int8 flush_l1d arch_capabilities",
+        "model": "143",
+        "model name": "Intel(R) Xeon(R) Gold 6448H",
+        "stepping": "8",
+        "vendor_id": "GenuineIntel"
+      },
+      "cpu_sha256": "49215fa97d55c6d49d045241ffacb7782d9fadc9f30e20ab9ea3473be6f5363c",
+      "reviewed_cpu_sha256": [
+        "49215fa97d55c6d49d045241ffacb7782d9fadc9f30e20ab9ea3473be6f5363c"
+      ],
+      "exact_cpu_profile_present": true,
+      "readonly": true,
+      "filesystem_writes": 0,
+      "compiler_invocations": 0,
+      "external_tool_downloads": 0,
+      "cpu_profile_only": true,
+      "full_runtime_compatibility_proven": false,
+      "evidence_source": {
+        "kind": "authenticated-strict-workspace-cpu-gate",
+        "run_id": 44308679217,
+        "artifact_digest": "sha256:30cfba03355fb694a339f70835bf42076018fb3b5a00d9d5b11275717f59154f"
+      }
+    },
+    {
+      "environment": "mnl2",
+      "node": "mo-standard-0",
+      "binding": {
+        "environment": "mnl2",
+        "marker_sha256": "74fdde14d28afe0aa7f451b6f7a96c43a49adbbfd1eb54584fc71a09d75c1ca3",
+        "node": "mo-standard-0",
+        "node_uid": "632b11c0-317a-4635-83cc-bf77943f5c59",
+        "pv_uid": "af21a773-a32e-418e-9745-d121621e37b0",
+        "pvc_uid": "605bfe75-f3d9-4f10-8a9e-8d4fd8a97fa0"
+      },
+      "cpu": {
+        "cpu family": "6",
+        "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl xtopology cpuid tsc_known_freq pni pclmulqdq ssse3 fma cx16 pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault pti ssbd ibrs ibpb stibp fsgsbase tsc_adjust bmi1 hle avx2 smep bmi2 erms invpcid rtm mpx avx512f avx512dq rdseed adx smap clflushopt clwb avx512cd avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves arat umip pku ospke md_clear flush_l1d arch_capabilities",
+        "model": "85",
+        "model name": "Intel(R) Xeon(R) Gold 6148 CPU @ 2.40GHz",
+        "stepping": "4",
+        "vendor_id": "GenuineIntel"
+      },
+      "cpu_sha256": "0a17c779c9a8df631955c9e595e9dd2784a7ae8d042996b02da9d6f9929900b1",
+      "reviewed_cpu_sha256": [
+        "0a17c779c9a8df631955c9e595e9dd2784a7ae8d042996b02da9d6f9929900b1"
+      ],
+      "exact_cpu_profile_present": true,
+      "readonly": true,
+      "filesystem_writes": 0,
+      "compiler_invocations": 0,
+      "external_tool_downloads": 0,
+      "cpu_profile_only": true,
+      "full_runtime_compatibility_proven": false,
+      "evidence_source": {
+        "kind": "authenticated-strict-workspace-cpu-gate",
+        "run_id": 44307675272,
+        "artifact_digest": "sha256:e20cc692c1614d11f99f9bd62ac360cb4d1a3ace04672dc8def73df6bc293976"
+      }
+    },
+    {
+      "environment": "mnl2",
+      "node": "mo-standard-1",
+      "binding": {
+        "environment": "mnl2",
+        "marker_sha256": "51ef9dcd8ff8fcdb1c44d4801c45728f95102e05dfb62789b20d16cc4e6fc2e1",
+        "node": "mo-standard-1",
+        "node_uid": "95781cf6-84dd-4351-b65f-ad6bed7f9758",
+        "pv_uid": "aa93f757-df90-4e5e-b79e-d79a215b5a80",
+        "pvc_uid": "e7227a79-ae07-409b-9fba-08dc57ca4fa6"
+      },
+      "cpu": {
+        "cpu family": "6",
+        "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl xtopology cpuid tsc_known_freq pni pclmulqdq ssse3 fma cx16 pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault pti ssbd ibrs ibpb stibp fsgsbase tsc_adjust bmi1 hle avx2 smep bmi2 erms invpcid rtm mpx avx512f avx512dq rdseed adx smap clflushopt clwb avx512cd avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves arat umip pku ospke md_clear flush_l1d arch_capabilities",
+        "model": "85",
+        "model name": "Intel(R) Xeon(R) Gold 6148 CPU @ 2.40GHz",
+        "stepping": "4",
+        "vendor_id": "GenuineIntel"
+      },
+      "cpu_sha256": "0a17c779c9a8df631955c9e595e9dd2784a7ae8d042996b02da9d6f9929900b1",
+      "reviewed_cpu_sha256": [
+        "0a17c779c9a8df631955c9e595e9dd2784a7ae8d042996b02da9d6f9929900b1"
+      ],
+      "exact_cpu_profile_present": true,
+      "readonly": true,
+      "filesystem_writes": 0,
+      "compiler_invocations": 0,
+      "external_tool_downloads": 0,
+      "cpu_profile_only": true,
+      "full_runtime_compatibility_proven": false,
+      "evidence_source": {
+        "kind": "authenticated-strict-workspace-cpu-gate",
+        "run_id": 44307675272,
+        "artifact_digest": "sha256:e20cc692c1614d11f99f9bd62ac360cb4d1a3ace04672dc8def73df6bc293976"
+      }
+    },
+    {
+      "environment": "mnl2",
+      "node": "mo-standard-2",
+      "binding": {
+        "environment": "mnl2",
+        "marker_sha256": "5535b9e7b8d198e62c5ae669365567af85b3a303dc4b26f76d8434621aaf2e47",
+        "node": "mo-standard-2",
+        "node_uid": "fa78d205-6055-4bae-bef4-84cb6bc1f7c5",
+        "pv_uid": "5c229927-d099-4d5d-ae43-4546a5f0a17b",
+        "pvc_uid": "bf35fff9-83ed-45c4-b534-91ffd56d574d"
+      },
+      "cpu": {
+        "cpu family": "6",
+        "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl xtopology cpuid tsc_known_freq pni pclmulqdq ssse3 fma cx16 pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault pti ssbd ibrs ibpb stibp fsgsbase tsc_adjust bmi1 hle avx2 smep bmi2 erms invpcid rtm mpx avx512f avx512dq rdseed adx smap clflushopt clwb avx512cd avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves arat umip pku ospke md_clear flush_l1d arch_capabilities",
+        "model": "85",
+        "model name": "Intel(R) Xeon(R) Gold 6148 CPU @ 2.40GHz",
+        "stepping": "4",
+        "vendor_id": "GenuineIntel"
+      },
+      "cpu_sha256": "0a17c779c9a8df631955c9e595e9dd2784a7ae8d042996b02da9d6f9929900b1",
+      "reviewed_cpu_sha256": [
+        "0a17c779c9a8df631955c9e595e9dd2784a7ae8d042996b02da9d6f9929900b1"
+      ],
+      "exact_cpu_profile_present": true,
+      "readonly": true,
+      "filesystem_writes": 0,
+      "compiler_invocations": 0,
+      "external_tool_downloads": 0,
+      "cpu_profile_only": true,
+      "full_runtime_compatibility_proven": false,
+      "evidence_source": {
+        "kind": "authenticated-strict-workspace-cpu-gate",
+        "run_id": 44307675272,
+        "artifact_digest": "sha256:e20cc692c1614d11f99f9bd62ac360cb4d1a3ace04672dc8def73df6bc293976"
+      }
+    },
+    {
+      "environment": "ruh",
+      "node": "mo-standard-0",
+      "binding": {
+        "environment": "ruh",
+        "marker_sha256": "b2bd348699c99fc63822b7790d82c9c5371e203df3e127b153c3ec229d3cee83",
+        "node": "mo-standard-0",
+        "node_uid": "d45bcc63-fe79-4fd2-84c5-72c921267fc2",
+        "pv_uid": "d9186f6d-7e1b-43c0-8264-1e241a589eb5",
+        "pvc_uid": "320c6da9-c7ee-46c3-948d-f0de5395c493"
+      },
+      "cpu": {
+        "cpu family": "6",
+        "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl xtopology cpuid tsc_known_freq pni pclmulqdq ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault pti ssbd ibrs ibpb fsgsbase tsc_adjust bmi1 hle avx2 smep bmi2 erms invpcid rtm rdseed adx smap xsaveopt arat md_clear",
+        "model": "79",
+        "model name": "Intel(R) Xeon(R) CPU E5-2697 v4 @ 2.30GHz",
+        "stepping": "1",
+        "vendor_id": "GenuineIntel"
+      },
+      "cpu_sha256": "4eabd3534da6fba134429ea36aec51b19af272448fd500b76a0cb5bdab3d06b9",
+      "reviewed_cpu_sha256": [
+        "4eabd3534da6fba134429ea36aec51b19af272448fd500b76a0cb5bdab3d06b9"
+      ],
+      "exact_cpu_profile_present": true,
+      "readonly": true,
+      "filesystem_writes": 0,
+      "compiler_invocations": 0,
+      "external_tool_downloads": 0,
+      "cpu_profile_only": true,
+      "full_runtime_compatibility_proven": false,
+      "evidence_source": {
+        "kind": "authenticated-strict-workspace-cpu-gate",
+        "run_id": 44307680041,
+        "artifact_digest": "sha256:46a2036c9792eaf2ae349a1bdae2cb32e87324c341cfd16661918916854bdfbf"
+      }
+    },
+    {
+      "environment": "ruh",
+      "node": "mo-standard-1",
+      "binding": {
+        "environment": "ruh",
+        "marker_sha256": "0622ba830a3b48bbca7e99142bbc5acef8ef3dae318487e52cf2bc3b06883aab",
+        "node": "mo-standard-1",
+        "node_uid": "73ed3039-bec9-4289-bae5-e71b89d0249b",
+        "pv_uid": "e5e32937-3aa1-46c9-b39f-8fcf676e35de",
+        "pvc_uid": "e6c0901b-0aaf-4f74-89fa-74b049c68dfa"
+      },
+      "cpu": {
+        "cpu family": "6",
+        "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl xtopology cpuid tsc_known_freq pni pclmulqdq ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault pti ssbd ibrs ibpb fsgsbase tsc_adjust bmi1 hle avx2 smep bmi2 erms invpcid rtm rdseed adx smap xsaveopt arat md_clear",
+        "model": "79",
+        "model name": "Intel(R) Xeon(R) CPU E5-2697 v4 @ 2.30GHz",
+        "stepping": "1",
+        "vendor_id": "GenuineIntel"
+      },
+      "cpu_sha256": "4eabd3534da6fba134429ea36aec51b19af272448fd500b76a0cb5bdab3d06b9",
+      "reviewed_cpu_sha256": [
+        "4eabd3534da6fba134429ea36aec51b19af272448fd500b76a0cb5bdab3d06b9"
+      ],
+      "exact_cpu_profile_present": true,
+      "readonly": true,
+      "filesystem_writes": 0,
+      "compiler_invocations": 0,
+      "external_tool_downloads": 0,
+      "cpu_profile_only": true,
+      "full_runtime_compatibility_proven": false,
+      "evidence_source": {
+        "kind": "authenticated-strict-workspace-cpu-gate",
+        "run_id": 44307680041,
+        "artifact_digest": "sha256:46a2036c9792eaf2ae349a1bdae2cb32e87324c341cfd16661918916854bdfbf"
+      }
+    },
+    {
+      "environment": "ruh",
+      "node": "mo-standard-2",
+      "binding": {
+        "environment": "ruh",
+        "marker_sha256": "833c6c49b9d5b0a330d8dc9a68b50127b40747bf135cca5da8fdc85365987090",
+        "node": "mo-standard-2",
+        "node_uid": "b66e90e6-0dce-4b10-ac33-b1283c54b604",
+        "pv_uid": "a1d9ad6d-e9fd-49bd-a5a1-6482f3d483cf",
+        "pvc_uid": "97aead78-e501-4015-a955-90c8eae2e5a4"
+      },
+      "cpu": {
+        "cpu family": "6",
+        "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl xtopology cpuid tsc_known_freq pni pclmulqdq ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault pti ssbd ibrs ibpb fsgsbase tsc_adjust bmi1 hle avx2 smep bmi2 erms invpcid rtm rdseed adx smap xsaveopt arat md_clear",
+        "model": "79",
+        "model name": "Intel(R) Xeon(R) CPU E5-2697 v4 @ 2.30GHz",
+        "stepping": "1",
+        "vendor_id": "GenuineIntel"
+      },
+      "cpu_sha256": "4eabd3534da6fba134429ea36aec51b19af272448fd500b76a0cb5bdab3d06b9",
+      "reviewed_cpu_sha256": [
+        "4eabd3534da6fba134429ea36aec51b19af272448fd500b76a0cb5bdab3d06b9"
+      ],
+      "exact_cpu_profile_present": true,
+      "readonly": true,
+      "filesystem_writes": 0,
+      "compiler_invocations": 0,
+      "external_tool_downloads": 0,
+      "cpu_profile_only": true,
+      "full_runtime_compatibility_proven": false,
+      "evidence_source": {
+        "kind": "authenticated-strict-workspace-cpu-gate",
+        "run_id": 44307680041,
+        "artifact_digest": "sha256:46a2036c9792eaf2ae349a1bdae2cb32e87324c341cfd16661918916854bdfbf"
+      }
+    },
+    {
+      "binding": {
+        "environment": "mty",
+        "marker_sha256": "5106e9008d1cfae9bba13146ef56cd2084c1ffbdf1386dc570a223b745dda13d",
+        "node": "mo-standard-0",
+        "node_uid": "571fcdbf-80bb-404f-a8c3-9b4f7dbc4d0a",
+        "pv_uid": "53535c8c-0e05-43e5-a3b8-2223f5a9ae3c",
+        "pvc_uid": "89814db6-38ed-4e31-aa91-42eb8793b96b"
+      },
+      "compiler_invocations": 0,
+      "cpu": {
+        "cpu family": "6",
+        "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl xtopology cpuid tsc_known_freq pni pclmulqdq ssse3 fma cx16 pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault ssbd ibrs ibpb stibp ibrs_enhanced fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid mpx avx512f avx512dq rdseed adx smap clflushopt clwb avx512cd avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves arat umip pku ospke avx512_vnni md_clear arch_capabilities",
+        "model": "85",
+        "model name": "Intel(R) Xeon(R) Gold 5218R CPU @ 2.10GHz",
+        "stepping": "7",
+        "vendor_id": "GenuineIntel"
+      },
+      "cpu_profile_only": true,
+      "cpu_sha256": "0ee7394d2622cb4258cf3945aca022e82526431256c5185b246dd9161756e4ab",
+      "environment": "mty",
+      "exact_cpu_profile_present": true,
+      "external_tool_downloads": 0,
+      "filesystem_writes": 0,
+      "full_runtime_compatibility_proven": false,
+      "node": "mo-standard-0",
+      "readonly": true,
+      "reviewed_cpu_sha256": [
+        "0ee7394d2622cb4258cf3945aca022e82526431256c5185b246dd9161756e4ab"
+      ],
+      "evidence_source": {
+        "kind": "readonly-cpu-inventory",
+        "run_id": 44311269341,
+        "artifact_digest": "sha256:2f54eaf7210c0d9eabeaed68646a9c44a542ab03a1ee0a522b356798e45ff8c7"
+      }
+    },
+    {
+      "binding": {
+        "environment": "mty",
+        "marker_sha256": "41348447dbb48e74cf64a8eca9142cdc2a763608f6e6cd820f05d2d79857ac10",
+        "node": "mo-standard-1",
+        "node_uid": "3a3f68b5-9fca-4c62-9dd6-8a9b92559517",
+        "pv_uid": "26fd0368-7b17-4669-a249-8f67a78ac4af",
+        "pvc_uid": "3db987eb-9c02-4dd0-ba0a-83462c5ff454"
+      },
+      "compiler_invocations": 0,
+      "cpu": {
+        "cpu family": "6",
+        "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl xtopology cpuid tsc_known_freq pni pclmulqdq vmx ssse3 fma cx16 pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault ssbd ibrs ibpb stibp ibrs_enhanced tpr_shadow flexpriority ept vpid ept_ad fsgsbase tsc_adjust sgx bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves wbnoinvd arat vnmi avx512vbmi umip pku ospke avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq la57 rdpid sgx_lc fsrm md_clear arch_capabilities",
+        "model": "106",
+        "model name": "Intel(R) Xeon(R) Gold 6348 CPU @ 2.60GHz",
+        "stepping": "6",
+        "vendor_id": "GenuineIntel"
+      },
+      "cpu_profile_only": true,
+      "cpu_sha256": "36928e1c2d96ed3c0a80a3f3b29eaeb068634bd5cf0d6ec102767901bd134499",
+      "environment": "mty",
+      "exact_cpu_profile_present": false,
+      "external_tool_downloads": 0,
+      "filesystem_writes": 0,
+      "full_runtime_compatibility_proven": false,
+      "node": "mo-standard-1",
+      "readonly": true,
+      "reviewed_cpu_sha256": [
+        "0ee7394d2622cb4258cf3945aca022e82526431256c5185b246dd9161756e4ab"
+      ],
+      "evidence_source": {
+        "kind": "readonly-cpu-inventory",
+        "run_id": 44311269341,
+        "artifact_digest": "sha256:2f54eaf7210c0d9eabeaed68646a9c44a542ab03a1ee0a522b356798e45ff8c7"
+      }
+    },
+    {
+      "binding": {
+        "environment": "mty",
+        "marker_sha256": "5d81e99e2ee209655754b477f55e04d6594a84ea374894274a6ca8d78ea75935",
+        "node": "mo-standard-2",
+        "node_uid": "0ce60e08-4425-40e1-b069-eb062a1e41f6",
+        "pv_uid": "8bb6d1d2-bcfe-439f-9f24-eab14dd41d09",
+        "pvc_uid": "06897876-ae2d-441e-a97b-bd05780536d2"
+      },
+      "compiler_invocations": 0,
+      "cpu": {
+        "cpu family": "6",
+        "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl xtopology cpuid tsc_known_freq pni pclmulqdq ssse3 fma cx16 pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault ssbd ibrs ibpb stibp ibrs_enhanced fsgsbase tsc_adjust sgx bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves wbnoinvd arat avx512vbmi umip pku ospke avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq la57 rdpid sgx_lc fsrm md_clear arch_capabilities",
+        "model": "106",
+        "model name": "Intel(R) Xeon(R) Gold 6348 CPU @ 2.60GHz",
+        "stepping": "6",
+        "vendor_id": "GenuineIntel"
+      },
+      "cpu_profile_only": true,
+      "cpu_sha256": "8c424b925b5cb7938a3bad9c724b821753b2ffecea631768e5345579c90dab7e",
+      "environment": "mty",
+      "exact_cpu_profile_present": false,
+      "external_tool_downloads": 0,
+      "filesystem_writes": 0,
+      "full_runtime_compatibility_proven": false,
+      "node": "mo-standard-2",
+      "readonly": true,
+      "reviewed_cpu_sha256": [
+        "0ee7394d2622cb4258cf3945aca022e82526431256c5185b246dd9161756e4ab"
+      ],
+      "evidence_source": {
+        "kind": "readonly-cpu-inventory",
+        "run_id": 44311269341,
+        "artifact_digest": "sha256:2f54eaf7210c0d9eabeaed68646a9c44a542ab03a1ee0a522b356798e45ff8c7"
+      }
+    }
+  ],
+  "plan": {
+    "cpu_profile_only": true,
+    "observed_nodes": 12,
+    "missing_cpu_profiles": [
+      {
+        "environment": "mty",
+        "cpu_sha256": "36928e1c2d96ed3c0a80a3f3b29eaeb068634bd5cf0d6ec102767901bd134499",
+        "cpu": {
+          "cpu family": "6",
+          "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl xtopology cpuid tsc_known_freq pni pclmulqdq vmx ssse3 fma cx16 pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault ssbd ibrs ibpb stibp ibrs_enhanced tpr_shadow flexpriority ept vpid ept_ad fsgsbase tsc_adjust sgx bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves wbnoinvd arat vnmi avx512vbmi umip pku ospke avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq la57 rdpid sgx_lc fsrm md_clear arch_capabilities",
+          "model": "106",
+          "model name": "Intel(R) Xeon(R) Gold 6348 CPU @ 2.60GHz",
+          "stepping": "6",
+          "vendor_id": "GenuineIntel"
+        },
+        "nodes": [
+          "mo-standard-1"
+        ],
+        "trusted_producer_required": true,
+        "existing_generations_preserved": true
+      },
+      {
+        "environment": "mty",
+        "cpu_sha256": "8c424b925b5cb7938a3bad9c724b821753b2ffecea631768e5345579c90dab7e",
+        "cpu": {
+          "cpu family": "6",
+          "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl xtopology cpuid tsc_known_freq pni pclmulqdq ssse3 fma cx16 pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault ssbd ibrs ibpb stibp ibrs_enhanced fsgsbase tsc_adjust sgx bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves wbnoinvd arat avx512vbmi umip pku ospke avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq la57 rdpid sgx_lc fsrm md_clear arch_capabilities",
+          "model": "106",
+          "model name": "Intel(R) Xeon(R) Gold 6348 CPU @ 2.60GHz",
+          "stepping": "6",
+          "vendor_id": "GenuineIntel"
+        },
+        "nodes": [
+          "mo-standard-2"
+        ],
+        "trusted_producer_required": true,
+        "existing_generations_preserved": true
+      }
+    ],
+    "automatic_publication": false,
+    "compatibility_aliases": false,
+    "full_runtime_acceptance": false
+  }
+}
