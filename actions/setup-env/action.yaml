@@ -46,11 +46,11 @@ runs:
     # An invalid download fails during extraction, after the download itself
     # has succeeded. Retry the entire installation once.
     - name: Wait before retrying JDK setup
-      if: ${{ steps.java.outcome == 'failure' }}
+      if: ${{ success() && !cancelled() && steps.java.outcome == 'failure' }}
       shell: bash
       run: sleep 5
     - name: Retry JDK setup
-      if: ${{ steps.java.outcome == 'failure' }}
+      if: ${{ success() && !cancelled() && steps.java.outcome == 'failure' }}
       uses: actions/setup-java@v4
       with:
         java-version: ${{ inputs.java-version }}
