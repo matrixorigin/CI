@@ -107,6 +107,15 @@ class EntryTest(unittest.TestCase):
         src = path.read_text()
         # Reconstruct the old job wrapper only to preserve the pre-existing measured-body digest.
         worker = (ROOT/".github/workflows/coverage-worker-cs.yaml").read_text()
+        # Account only for the separately pinned, optional observer and its
+        # single report member. Keep the original measured worker digest below.
+        i = worker.index("    - name: Load optional read-only cache observer\n")
+        j = worker.index("    - id: coverage_ut\n", i)
+        self.assertEqual(hashlib.sha256(worker[i:j].encode()).hexdigest(),
+                         "585eaaa8441a44a36b060f33c5d9f1b7e2ef7bfd5274395e7071737846640d67")
+        member = "          ${{ runner.temp }}/cache-refresh-hint.json\n"
+        self.assertEqual(worker.count(member), 1)
+        worker = (worker[:i] + worker[j:]).replace(member, "")
         steps = "    - id: reader\n" + worker.split("    - id: reader\n", 1)[1]
         steps = (steps.replace("inputs.group", "matrix.group")
                       .replace("inputs.source", "needs.check_coverage_eligibility.outputs.head_repository")
