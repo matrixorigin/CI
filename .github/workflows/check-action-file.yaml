@@ -115,7 +115,7 @@ jobs:
       - name: Test TKE merge subject identity contract
         run: python3 scripts/test_merge_trigger_tke_subject.py -v
       - name: Test opt-in cache refresh demand and private preparation
-        run: python3 -m unittest scripts.test_cache_refresh_demand -v
+        run: python3 -m unittest scripts.test_cache_refresh_demand scripts.test_cache_refresh_worker -v
       - name: Test SCA license scope selection
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:

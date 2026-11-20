@@ -1,0 +1,48 @@
+name: Reconcile missing CS compilation cache
+on:
+  workflow_call:
+permissions:
+  actions: read
+  contents: read
+jobs:
+  screen:
+    if: github.repository == 'matrixorigin/matrixone' && github.event_name == 'workflow_run' && github.ref == 'refs/heads/main' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && vars.CS_CACHE_REFRESH_OBSERVE != 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      decision: ${{ steps.check.outputs.decision }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: matrixorigin/CI
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+          sparse-checkout: scripts
+      - id: check
+        env:
+          ACTIONS_TOKEN: ${{ github.token }}
+          CI_PIN: ${{ job.workflow_sha }}
+          WORKER_RUN: ${{ github.event.workflow_run.id }}
+        run: python3 -m scripts.cache_refresh_worker screen
+      - if: steps.check.outputs.decision == 'inspect' && vars.CS_CACHE_REFRESH_CONTROLLER_READY != 'true'
+        run: echo '::warning::Cache demand detected; protected controller not enabled. No shared write attempted.'
+  reconcile:
+    needs: screen
+    if: needs.screen.outputs.decision == 'inspect' && vars.CS_CACHE_REFRESH_CONTROLLER_READY == 'true'
+    environment: cs-cache-publish
+    runs-on:
+      group: cs-cache-maintenance
+      labels: cs-cache-refresh-controller
+    timeout-minutes: 180
+    steps:
+      # Read-only operator image. No checkout, PR code, report commands or mutable setup.
+      - name: Recheck worker and reconcile using installed operator
+        working-directory: /opt/matrixorigin/cache-refresh/ci
+        env:
+          ACTIONS_TOKEN: ${{ github.token }}
+          CI_PIN: ${{ job.workflow_sha }}
+          WORKER_RUN: ${{ github.event.workflow_run.id }}
+        run: |
+          set -eu
+          test "$(cat /opt/matrixorigin/cache-refresh/ci-revision)" = "$CI_PIN"
+          python3 -E -s -m scripts.cache_refresh_worker publish

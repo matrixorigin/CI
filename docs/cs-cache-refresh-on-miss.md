@@ -1,18 +1,20 @@
 # Refresh a missing CS compile profile (draft, disabled)
 
-This change does not seed a PVC, grant write privileges, dispatch jobs, or change
-test selection or scheduling. It is a proposed CI component, **not an installed
-refresh service**. The MatrixOne caller does not need new permissions.
+Coverage tests keep running on misses. A separate MatrixOne workflow listens for
+completed workers and invokes the pinned CI receiver. The hosted job can only read;
+it does not seed a PVC or change test selection or scheduling. The receiver alone
+is **not an installed refresh service**.
 
-1. With the caller's repository variable `CS_CACHE_REFRESH_OBSERVE=true`, a CS
+1. By default (opt out with `CS_CACHE_REFRESH_OBSERVE=false`), a CS
    worker records its environment, node and volume UIDs, runtime digest, native
    inputs key, root go.mod/go.sum blob fingerprint and compile recipe. The
    existing report contains the actual shared Go reads, compiler calls and native
    hit/miss. Failure to collect the optional hint does not fail tests. No compiler
    outputs, credentials or suggested executable paths are exported by the observer.
-2. The protected consumer must authenticate the **successful worker, workflow
-   revision, run/attempt, group and artifact** through Actions metadata before
-   passing the ZIP to `cache_refresh_demand.py reconcile --report ZIP --ledger DB`.
+2. `cache_refresh_worker.py` verifies the **successful worker, workflow
+   revision, parent grant, run/attempt, runner, group and artifact digest**.
+   A complete hit skips maintenance. A cold read or partial rebuild can request
+   an independent inventory check; neither alone permits a shared write.
    The ZIP is untrusted even after authentication. The controller must independently
    inspect the approved volume, live revocations, accepted generations and the
    protected upstream source. The optional `plan` command is read-only.
@@ -40,8 +42,14 @@ refresh service**. The MatrixOne caller does not need new permissions.
 
 ## Operational integration still required (cloudsigma-gitops)
 
-Implement and review a successful-report ingester and the fixed protected
-adapters under `/opt/matrixorigin/cache-refresh/bin/`. They exchange a single
+Restrict runner group `cs-cache-maintenance` to the authorized receiver; install
+the exact pinned CI code in its read-only image at `/opt/matrixorigin/cache-refresh/ci`
+with sibling `ci-revision`, and provision a durable private ledger directory at
+`/var/lib/matrixorigin/cache-refresh`. Configure the protected environment
+`cs-cache-publish` and the reviewed adapters **before** setting MatrixOne's
+`CS_CACHE_REFRESH_CONTROLLER_READY=true`. Until then the receiver reports the
+miss but never schedules a write. The controller rechecks the original evidence.
+The fixed protected adapters under `/opt/matrixorigin/cache-refresh/bin/` exchange a single
 JSON document on stdin/stdout. `inspect` returns an independently constructed
 profile, pinned upstream commit and admission/missing flags; `prepare` launches
 the private builder described above and captures its final receipt. Remaining

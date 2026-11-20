@@ -150,7 +150,7 @@ jobs:
         python3 .ci-workflow/scripts/node_cache_pr_source.py record
     - name: Load optional read-only cache observer
       id: refresh_helper
-      if: vars.CS_CACHE_REFRESH_OBSERVE == 'true'
+      if: vars.CS_CACHE_REFRESH_OBSERVE != 'false'
       continue-on-error: true
       timeout-minutes: 2
       uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
@@ -162,7 +162,7 @@ jobs:
         sparse-checkout-cone-mode: false
         persist-credentials: false
     - name: Record cache profile hint (not a publish request)
-      if: vars.CS_CACHE_REFRESH_OBSERVE == 'true' && steps.refresh_helper.outcome == 'success'
+      if: vars.CS_CACHE_REFRESH_OBSERVE != 'false' && steps.refresh_helper.outcome == 'success'
       continue-on-error: true
       timeout-minutes: 1
       run: |
