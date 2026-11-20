@@ -83,6 +83,11 @@ def freeze(state_path,request,destination):
     report=c.read_json(state_path.parent/'native-result.json')
     c.require(report['native_hit'] is False and n.native_digest(source)==report['native_output_sha256'],
         'native candidate must be freshly built and unchanged')
+    return pack_native(source,local,cfg,destination,key,inputs,revision,report)
+
+
+def pack_native(source,local,cfg,destination,key,inputs,revision,report):
+    """Pack validated private native outputs; neither selection nor publication authority."""
     destination.mkdir();native_key,mid=p.export_native(source,local,cfg['runtime'])
     c.require(native_key==key,'native key changed while freezing')
     manifest_path=local/'native'/(mid+'.json');native=c.read_json(manifest_path)
