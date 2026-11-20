@@ -83,13 +83,13 @@ class Queue(unittest.TestCase):
 
     def test_deadline(self):
         self.assertEqual(s.decide(self.q, 50, None), (None, 50))
-        self.assertEqual(s.decide(self.q, 649, 50), (None, 50))
-        self.assertEqual(s.decide(self.q, 650, 50), ('idc', 50))
-        self.assertEqual(s.decide(self.active, 670, 50), ('cs', 50))
-        self.assertEqual(s.decide(dict(self.q, runner_id=2), 670, 50), (None, 50))
-        self.assertEqual(s.decide(dict(self.q, status='waiting'), 670, 50), (None, 50))
+        self.assertEqual(s.decide(self.q, 3649, 50), (None, 50))
+        self.assertEqual(s.decide(self.q, 3650, 50), ('idc', 50))
+        self.assertEqual(s.decide(self.active, 3670, 50), ('cs', 50))
+        self.assertEqual(s.decide(dict(self.q, runner_id=2), 3670, 50), (None, 50))
+        self.assertEqual(s.decide(dict(self.q, status='waiting'), 3670, 50), (None, 50))
         with self.assertRaises(ValueError):
-            s.decide(dict(self.q, status='completed'), 670, 50)
+            s.decide(dict(self.q, status='completed'), 3670, 50)
 
     def scenario(self, observations, cancellation, count, selected, *, attempt='1', revisions=None):
         import tempfile, os, json
@@ -99,11 +99,13 @@ class Queue(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {**self.env, 'GITHUB_RUN_ATTEMPT': attempt, 'RUNNER_TEMP': tmp}), \
              patch.object(s,'parent_meta',return_value={'head_sha':'a'*40,'head_repository':{'full_name':'fork/matrixone'}}), \
              patch.object(s,'one',side_effect=[{'object':{'sha':sha}} for sha in revisions]), \
+             patch.object(s,'require_previous_grants_terminal') as previous, \
              patch.object(s,'dispatch',side_effect=[111,222]) as launch, \
              patch.object(s,'observe',side_effect=observations), \
              patch.object(s,'child_meta',return_value={'status':'completed','conclusion':'cancelled'}), \
              patch.object(s,'api') as api, patch.object(s.time,'sleep'), patch.object(s,'output'):
             s.choose()
+            self.assertEqual(previous.call_count, int(int(attempt) > 1))
             self.assertEqual(launch.call_count, count)
             self.assertEqual(api.call_count, int(cancellation))
             if cancellation:
@@ -116,18 +118,18 @@ class Queue(unittest.TestCase):
             self.assertEqual([call.args[2] for call in launch.call_args_list],revisions)
 
     def test_only_the_still_queued_child_is_withdrawn(self):
-        self.scenario([(self.q,1),(self.q,601),(self.q,602)],True,2,('idc',222))
+        self.scenario([(self.q,1),(self.q,3601),(self.q,3602)],True,2,('idc',222))
 
     def test_rerun_uses_attempt_bound_grant_and_fresh_shanghai_revision(self):
-        self.scenario([(self.q,1),(self.q,601),(self.q,602)],True,2,('idc',222),
+        self.scenario([(self.q,1),(self.q,3601),(self.q,3602)],True,2,('idc',222),
                       attempt='2', revisions=['b'*40,'c'*40])
 
     def test_assigned_during_final_read_is_never_cancelled(self):
-        self.scenario([(self.q,1),(self.q,601),(self.active,602)],False,1,('cs',111))
+        self.scenario([(self.q,1),(self.q,3601),(self.active,3602)],False,1,('cs',111))
 
     def test_queued_assignment_metadata_can_settle_before_grant(self):
         transitional = dict(self.q,runner_id=123,runner_name=self.active['runner_name'])
-        self.scenario([(self.q,1),(self.q,601),(transitional,602),(self.active,603)],
+        self.scenario([(self.q,1),(self.q,3601),(transitional,3602),(self.active,3603)],
                       False,1,('cs',111))
 
     def test_ambiguous_handoff_exhausts_bound_without_cancelling_or_granting(self):
@@ -137,7 +139,7 @@ class Queue(unittest.TestCase):
              patch.object(s,'HANDOFF_POLLS',3), patch.object(s,'parent_meta'), \
              patch.object(s,'one',return_value={'object':{'sha':'b'*40}}), \
              patch.object(s,'dispatch',return_value=111), \
-             patch.object(s,'observe',side_effect=[(self.q,1),(self.q,601)]+[(transitional,602)]*3), \
+             patch.object(s,'observe',side_effect=[(self.q,1),(self.q,3601)]+[(transitional,3602)]*3), \
              patch.object(s,'child_meta'), patch.object(s,'api') as api, patch.object(s.time,'sleep'):
             with self.assertRaisesRegex(ValueError,'did not settle'):
                 s.choose()
@@ -155,3 +157,31 @@ class Queue(unittest.TestCase):
             self.assertEqual(post.call_count,1)
             self.assertEqual(post.call_args.args[1]['ref'],'staging')
             self.assertIn('branch=staging',get.call_args.args[0])
+
+    def test_proof_is_specific_to_retry_group_and_attempt(self):
+        t = dict(parent=42, group=1, attempt=1)
+        self.assertEqual(s.proof_name(t), "real-pr-snapshot-42-attempt-1")
+        self.assertEqual(s.proof_name(dict(t,attempt=2)), "real-pr-retry-42-attempt-2-group-1")
+
+    def test_live_old_grant_blocks_only_its_group(self):
+        t = dict(parent=42,group=0,attempt=2,head='a'*40)
+        old = dict(display_title=s.title(dict(t,attempt=1,key='a'*64), 'cs'),
+                   path='.github/workflows/'+s.WORKER, event='workflow_dispatch',
+                   repository={'full_name':s.REPO},head_branch=s.WORKER_REF,status='in_progress')
+        with patch.object(s,'one',return_value={'artifacts':[{'name':'coverage-admit-81'}]}), \
+             patch.object(s,'run',return_value=old):
+            with self.assertRaisesRegex(ValueError,'still active'):
+                s.require_previous_grants_terminal(t)
+            s.require_previous_grants_terminal(dict(t,group=1))
+            old['status'] = 'completed'
+            s.require_previous_grants_terminal(t)
+
+    def test_failed_only_job_boundary(self):
+        from pathlib import Path
+        wf = (Path(__file__).resolve().parents[1]/'.github/workflows/coverage-queue-handoff.yaml').read_text()
+        selector, collector = wf.split('  collect:\n')
+        self.assertLess(selector.index('coverage_standby.py choose'), selector.index('coverage_standby.py wait'))
+        self.assertIn('real-pr-retry-', selector)
+        self.assertNotIn('coverage_standby.py wait', collector)
+        self.assertIn('actions: read', collector)
+        self.assertGreater(85*60, s.WAIT)

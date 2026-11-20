@@ -20,7 +20,7 @@ WORKER = "coverage-standby-worker.yaml"
 WORKER_REF = "main"
 ENTRY = ".github/workflows/entrypoint.yaml"
 POOLS = {"cs": "cs-node-cache-7c14g", "idc": "amd64-mo-shanghai-ut-safe"}
-WAIT = 600
+WAIT = 3600
 HANDOFF_POLLS = 60
 HANDOFF_POLL_SECONDS = 5
 
@@ -185,6 +185,11 @@ def choose():
              head=os.environ["HEAD"], source=os.environ["SOURCE"], pr=int(os.environ["PR"]))
     check(t["group"] in (0, 1) and re.fullmatch("[a-f0-9]{40}", t["head"]), "invalid input")
     parent_meta(t)
+    if attempt > 1:
+        # A previous selector may have lost its connection after publishing a
+        # grant. An old *ungranted* reservation cannot pass parent_meta; an
+        # already admitted worker must have stopped before issuing a new grant.
+        require_previous_grants_terminal(t)
     # A pull_request_target run reports the PR head; a workflow_dispatch run
     # reports the workflow branch head. These are not the same commit.
     rev = t["revision"] = one("/git/ref/heads/" + WORKER_REF)["object"]["sha"]
@@ -199,7 +204,7 @@ def choose():
         if route:
             print(f"group={t['group']} CS_job={j['id']} first_queued_utc={since} decision_utc={now} route={route}", flush=True)
             break
-        time.sleep(10)
+        time.sleep(30)
     if route == "idc":
         # A concurrently assigned CS worker is still blocked at admit: its nonce
         # was never published. Confirm identity again and cancel ONLY its own run.
@@ -266,6 +271,34 @@ def artifact(parent, name, filename):
         return json.loads(z.read(filename))
 
 
+def require_previous_grants_terminal(t):
+    page = 1
+    while True:
+        batch = one(f"/actions/runs/{t['parent']}/artifacts?per_page=100&page={page}")["artifacts"]
+        for item in batch:
+            found = re.fullmatch(r"coverage-admit-([1-9][0-9]*)", item["name"])
+            if not found:
+                continue
+            m = run(int(found[1]))
+            fields = re.fullmatch(r"Coverage standby / ([1-9][0-9]*)/([1-9][0-9]*)/([01])/"
+                                  r"([0-9a-f]{40})/(cs|idc)/[0-9a-f]{64}", m["display_title"])
+            check(fields and fields[1] == str(t["parent"]) and fields[4] == t["head"]
+                  and m["path"] == ".github/workflows/" + WORKER and m["event"] == "workflow_dispatch"
+                  and m["repository"]["full_name"] == REPO and m["head_branch"] == WORKER_REF,
+                  "unrecognized previous grant; no redispatch")
+            if fields[3] == str(t["group"]):
+                check(m["status"] == "completed", "previously granted group still active; no redispatch")
+        if len(batch) < 100:
+            return
+        page += 1
+
+
+def proof_name(t):
+    if t["attempt"] == 1:
+        return f"real-pr-snapshot-{t['parent']}-attempt-1"
+    return f"real-pr-retry-{t['parent']}-attempt-{t['attempt']}-group-{t['group']}"
+
+
 def admit():
     t = json.loads(os.environ["TICKET"])
     group, source, head, pool = int(os.environ["GROUP"]), os.environ["SOURCE"], os.environ["HEAD"], os.environ["POOL"]
@@ -288,7 +321,7 @@ def admit():
         time.sleep(10)
     else:
         raise ValueError("no grant; no PR code executed")
-    proof = artifact(t["parent"], f"real-pr-snapshot-{t['parent']}-attempt-{t['attempt']}",
+    proof = artifact(t["parent"], proof_name(t),
                      "real-pr-authorization.json")
     pr = one(f"/pulls/{int(t['pr'])}")
     check(proof and proof["allowed"] == "true" and proof["verified_membership_http_status"] == 204

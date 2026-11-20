@@ -164,6 +164,9 @@ jobs:
       actions: write
       contents: read
     uses: ./.github/workflows/coverage-queue-handoff.yaml
+    secrets:
+      TOKEN_ACTION: ${{ secrets.TOKEN_ACTION }}
+      CS_COVERAGE_CACHE_READ_TOKEN: ${{ secrets.CS_COVERAGE_CACHE_READ_TOKEN }}
     with:
       group: ${{ matrix.group }}
       source: ${{ needs.check_coverage_eligibility.outputs.head_repository }}
