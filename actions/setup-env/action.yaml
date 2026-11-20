@@ -18,9 +18,9 @@ inputs:
     required: false
     default: "8"
   java-distribution:
-    description: "distribution of java"
+    description: "JDK distribution override. Java 8 defaults to Temurin with Zulu fallback."
     required: false
-    default: "adopt"
+    default: ""
   cache:
     description: "wether use cache"
     required: false
@@ -42,11 +42,11 @@ runs:
       uses: actions/setup-java@v4
       with:
         java-version: ${{ inputs.java-version }}
-        distribution: ${{ inputs.java-distribution }}
-    # An invalid download fails during extraction, after the download itself
-    # has succeeded. Retry the entire installation once.
+        distribution: ${{ inputs.java-distribution || (inputs.java-version == '8' && 'temurin') || 'adopt' }}
+    # Retry explicit choices with the same distribution. The default Java 8
+    # retry goes through an independent provider after a Temurin failure.
     - name: Wait before retrying JDK setup
-      if: ${{ success() && !cancelled() && steps.java.outcome == 'failure' }}
+      if: ${{ success() && !cancelled() && steps.java.outcome == 'failure' && (inputs.java-distribution != '' || inputs.java-version != '8') }}
       shell: bash
       run: sleep 5
     - name: Retry JDK setup
@@ -54,7 +54,7 @@ runs:
       uses: actions/setup-java@v4
       with:
         java-version: ${{ inputs.java-version }}
-        distribution: ${{ inputs.java-distribution }}
+        distribution: ${{ inputs.java-distribution || (inputs.java-version == '8' && 'zulu') || 'adopt' }}
     - name: Setup CMake
       if: ${{ inputs.setup-cmake == 'true' }}
       uses: matrixorigin/CI/actions/setup-cmake@main

@@ -67,6 +67,7 @@ jobs:
           sudo docker system df -v;
 
       - name: docker compose launch-multi-cn
+        id: compose_launch
         timeout-minutes: 10
         run: |
           echo ""  >> ./etc/launch-tae-compose/config/cn-0.toml
@@ -169,12 +170,20 @@ jobs:
           sudo dmesg -T
 
       - name: export log
-        if: ${{ failure() || cancelled()}}
+        if: >-
+          ${{ (failure() || cancelled()) &&
+              contains(fromJSON('["success", "failure", "cancelled"]'), steps.compose_launch.outcome) }}
         run: |
           mkdir -p ${{ github.workspace }}/mo-tester/report
           mv ${{ github.workspace }}/mo-tester/report ${{ github.workspace }}/docker-compose-log
-          curl http://localhost:12345/debug/pprof/goroutine\?debug=2 -o ${{ github.workspace }}/docker-compose-log/cn-0-dump-stacks.log
-          curl http://localhost:22345/debug/pprof/goroutine\?debug=2 -o ${{ github.workspace }}/docker-compose-log/cn-1-dump-stacks.log
+          curl --fail --silent --show-error --max-time 10 \
+            'http://localhost:12345/debug/pprof/goroutine?debug=2' \
+            -o "$GITHUB_WORKSPACE/docker-compose-log/cn-0-dump-stacks.log" ||
+            echo "::warning::Could not collect CN 0 goroutine dump"
+          curl --fail --silent --show-error --max-time 10 \
+            'http://localhost:22345/debug/pprof/goroutine?debug=2' \
+            -o "$GITHUB_WORKSPACE/docker-compose-log/cn-1-dump-stacks.log" ||
+            echo "::warning::Could not collect CN 1 goroutine dump"
 
       - name: Check Log Messages Count per second
         if: ${{ always() && !cancelled() }}
@@ -247,6 +256,7 @@ jobs:
           sudo docker system df -v;
 
       - name: docker compose launch-multi-cn
+        id: compose_launch
         timeout-minutes: 10
         run: |
           cat ./etc/launch-tae-compose/config/cn-0.toml
@@ -467,12 +477,20 @@ jobs:
           sudo dmesg -T
 
       - name: export log
-        if: ${{ failure() || cancelled()}}
+        if: >-
+          ${{ (failure() || cancelled()) &&
+              contains(fromJSON('["success", "failure", "cancelled"]'), steps.compose_launch.outcome) }}
         run: |
           mkdir -p ${{ github.workspace }}/mo-tester/report
           mv ${{ github.workspace }}/mo-tester/report ${{ github.workspace }}/docker-compose-log
-          curl http://localhost:12345/debug/pprof/goroutine\?debug=2 -o ${{ github.workspace }}/docker-compose-log/cn-0-dump-stacks.log
-          curl http://localhost:22345/debug/pprof/goroutine\?debug=2 -o ${{ github.workspace }}/docker-compose-log/cn-1-dump-stacks.log
+          curl --fail --silent --show-error --max-time 10 \
+            'http://localhost:12345/debug/pprof/goroutine?debug=2' \
+            -o "$GITHUB_WORKSPACE/docker-compose-log/cn-0-dump-stacks.log" ||
+            echo "::warning::Could not collect CN 0 goroutine dump"
+          curl --fail --silent --show-error --max-time 10 \
+            'http://localhost:22345/debug/pprof/goroutine?debug=2' \
+            -o "$GITHUB_WORKSPACE/docker-compose-log/cn-1-dump-stacks.log" ||
+            echo "::warning::Could not collect CN 1 goroutine dump"
 
       - name: Check Log Messages Count per second
         if: ${{ always() && !cancelled() }}
