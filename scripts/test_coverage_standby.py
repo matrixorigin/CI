@@ -15,6 +15,12 @@ class ParentAdmission(unittest.TestCase):
                       event='pull_request_target', head_repository={'full_name':self.src},
                       head_sha=self.sha, status='in_progress', conclusion=None)
 
+    def test_rerun_parent_identity_is_attempt_bound(self):
+        rerun = dict(self.t,attempt=2)
+        s.parent_identity(rerun,dict(self.p,run_attempt=2))
+        with self.assertRaisesRegex(ValueError,'identity mismatch: run_attempt'):
+            s.parent_identity(rerun,self.p)
+
     def test_only_active_parent_returns(self):
         with patch.object(s,'run',side_effect=[dict(self.p,status=v) for v in
                           ('queued','waiting','in_progress')]) as read, patch.object(s.time,'sleep') as sleep:
@@ -80,17 +86,19 @@ class Queue(unittest.TestCase):
         self.assertEqual(s.decide(self.q, 649, 50), (None, 50))
         self.assertEqual(s.decide(self.q, 650, 50), ('idc', 50))
         self.assertEqual(s.decide(self.active, 670, 50), ('cs', 50))
-        self.assertEqual(s.decide(dict(self.q, runner_id=2), 670, 50), (None, None))
-        self.assertEqual(s.decide(dict(self.q, status='waiting'), 670, 50), (None, None))
+        self.assertEqual(s.decide(dict(self.q, runner_id=2), 670, 50), (None, 50))
+        self.assertEqual(s.decide(dict(self.q, status='waiting'), 670, 50), (None, 50))
         with self.assertRaises(ValueError):
             s.decide(dict(self.q, status='completed'), 670, 50)
 
-    def scenario(self, observations, cancellation, count, selected):
+    def scenario(self, observations, cancellation, count, selected, *, attempt='1', revisions=None):
         import tempfile, os, json
         from pathlib import Path
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {**self.env, 'RUNNER_TEMP': tmp}), \
+        if revisions is None:
+            revisions = ['b'*40] * (1 + int(cancellation))
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {**self.env, 'GITHUB_RUN_ATTEMPT': attempt, 'RUNNER_TEMP': tmp}), \
              patch.object(s,'parent_meta',return_value={'head_sha':'a'*40,'head_repository':{'full_name':'fork/matrixone'}}), \
-             patch.object(s,'one',return_value={'object':{'sha':'b'*40}}), \
+             patch.object(s,'one',side_effect=[{'object':{'sha':sha}} for sha in revisions]), \
              patch.object(s,'dispatch',side_effect=[111,222]) as launch, \
              patch.object(s,'observe',side_effect=observations), \
              patch.object(s,'child_meta',return_value={'status':'completed','conclusion':'cancelled'}), \
@@ -103,12 +111,37 @@ class Queue(unittest.TestCase):
             grant=json.loads(Path(tmp,'grant.json').read_text())
             self.assertEqual((grant['pool'],grant['child']),selected)
             self.assertEqual(grant['ticket']['key'],s.digest(grant['nonce']))
+            self.assertEqual(grant['ticket']['attempt'],int(attempt))
+            self.assertEqual(grant['ticket']['revision'],revisions[-1])
+            self.assertEqual([call.args[2] for call in launch.call_args_list],revisions)
 
     def test_only_the_still_queued_child_is_withdrawn(self):
         self.scenario([(self.q,1),(self.q,601),(self.q,602)],True,2,('idc',222))
 
+    def test_rerun_uses_attempt_bound_grant_and_fresh_shanghai_revision(self):
+        self.scenario([(self.q,1),(self.q,601),(self.q,602)],True,2,('idc',222),
+                      attempt='2', revisions=['b'*40,'c'*40])
+
     def test_assigned_during_final_read_is_never_cancelled(self):
         self.scenario([(self.q,1),(self.q,601),(self.active,602)],False,1,('cs',111))
+
+    def test_queued_assignment_metadata_can_settle_before_grant(self):
+        transitional = dict(self.q,runner_id=123,runner_name=self.active['runner_name'])
+        self.scenario([(self.q,1),(self.q,601),(transitional,602),(self.active,603)],
+                      False,1,('cs',111))
+
+    def test_ambiguous_handoff_exhausts_bound_without_cancelling_or_granting(self):
+        import tempfile
+        transitional = dict(self.q,runner_id=123,runner_name=self.active['runner_name'])
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,{**self.env,'RUNNER_TEMP':tmp}), \
+             patch.object(s,'HANDOFF_POLLS',3), patch.object(s,'parent_meta'), \
+             patch.object(s,'one',return_value={'object':{'sha':'b'*40}}), \
+             patch.object(s,'dispatch',return_value=111), \
+             patch.object(s,'observe',side_effect=[(self.q,1),(self.q,601)]+[(transitional,602)]*3), \
+             patch.object(s,'child_meta'), patch.object(s,'api') as api, patch.object(s.time,'sleep'):
+            with self.assertRaisesRegex(ValueError,'did not settle'):
+                s.choose()
+            api.assert_not_called()
 
     def test_immediate_assignment(self):
         self.scenario([(self.active,2)],False,1,('cs',111))

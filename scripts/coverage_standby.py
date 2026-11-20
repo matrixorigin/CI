@@ -21,6 +21,8 @@ WORKER_REF = "main"
 ENTRY = ".github/workflows/entrypoint.yaml"
 POOLS = {"cs": "cs-node-cache-7c14g", "idc": "amd64-mo-shanghai-ut-safe"}
 WAIT = 600
+HANDOFF_POLLS = 60
+HANDOFF_POLL_SECONDS = 5
 
 
 def check(ok, msg):
@@ -139,11 +141,13 @@ def decide(job, now, since):
         return "cs", since  # assignment wins, even at the exact deadline
     if job["status"] == "queued":
         if job.get("runner_id") or job.get("runner_name"):
-            return None, None
+            # GitHub can expose runner assignment before changing the status.
+            # Preserve the observed queue start while this transition settles.
+            return None, since
         since = now if since is None else since
         return ("idc" if now - since >= WAIT else None), since
     check(job["status"] in ("requested", "waiting", "pending"), "not a queue timeout")
-    return None, None
+    return None, since
 
 
 def dispatch(t, pool, revision):
@@ -175,8 +179,9 @@ def output(**fields):
 
 
 def choose():
-    check(os.environ["GITHUB_RUN_ATTEMPT"] == "1", "do not redispatch a previous generation")
-    t = dict(parent=int(os.environ["GITHUB_RUN_ID"]), attempt=1, group=int(os.environ["GROUP"]),
+    attempt = int(os.environ["GITHUB_RUN_ATTEMPT"])
+    check(0 < attempt < 1_000_000, "invalid parent attempt")
+    t = dict(parent=int(os.environ["GITHUB_RUN_ID"]), attempt=attempt, group=int(os.environ["GROUP"]),
              head=os.environ["HEAD"], source=os.environ["SOURCE"], pr=int(os.environ["PR"]))
     check(t["group"] in (0, 1) and re.fullmatch("[a-f0-9]{40}", t["head"]), "invalid input")
     parent_meta(t)
@@ -200,9 +205,17 @@ def choose():
         # was never published. Confirm identity again and cancel ONLY its own run.
         parent_meta(t)
         child_meta(r, t, "cs", rev)
-        j, now = observe(r, t, "cs")
-        route, _ = decide(j, now, since)
-        check(route is not None, "ambiguous assignment at handoff")
+        for poll in range(HANDOFF_POLLS):
+            j, now = observe(r, t, "cs")
+            route, since = decide(j, now, since)
+            if route is not None:
+                break
+            if poll + 1 < HANDOFF_POLLS:
+                time.sleep(HANDOFF_POLL_SECONDS)
+                parent_meta(t)
+                child_meta(r, t, "cs", rev)
+        else:
+            raise ValueError("CS assignment did not settle at handoff; no worker granted")
         if route == "idc":
             api(f"/actions/runs/{r}/cancel", {})
             for _ in range(60):
@@ -215,6 +228,9 @@ def choose():
                 raise ValueError("CS cancellation not confirmed; IDC not dispatched")
             nonce = secrets.token_hex(32)
             t["key"], pool = digest(nonce), "idc"
+            # The workflow_dispatch ref is moving. Bind each child to the
+            # revision observed immediately before that child's dispatch.
+            rev = t["revision"] = one("/git/ref/heads/" + WORKER_REF)["object"]["sha"]
             r = dispatch(t, pool, rev)
     # Grant is immutable and costs no extra control token on the worker. Until
     # this point neither pool has been authorized to check out or run PR code.
@@ -255,7 +271,8 @@ def admit():
     group, source, head, pool = int(os.environ["GROUP"]), os.environ["SOURCE"], os.environ["HEAD"], os.environ["POOL"]
     r = int(os.environ["GITHUB_RUN_ID"])
     check(os.environ["GITHUB_RUN_ATTEMPT"] == "1" and group == t["group"] and group in (0, 1)
-          and head == t["head"] and source == t["source"] and pool in POOLS and t["attempt"] == 1
+          and head == t["head"] and source == t["source"] and pool in POOLS
+          and type(t["attempt"]) is int and 0 < t["attempt"] < 1_000_000
           and type(t["parent"]) is int and type(t["pr"]) is int and re.fullmatch("[a-f0-9]{64}", t["key"]),
           "invalid worker ticket")
     parent_meta(t)
