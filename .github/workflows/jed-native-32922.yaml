@@ -1,0 +1,71 @@
+name: Prepare one unpublished JED native candidate for 32922
+on: workflow_call
+permissions:
+  contents: read
+  actions: read
+jobs:
+  prepare:
+    if: github.repository == 'matrixorigin/matrixone' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/weilu-runner-test' && github.actor == 'Ariznawlll' && github.run_attempt == 1
+    runs-on: cs-jed-nc-n0-pr-v1
+    concurrency:
+      group: jed-native-only-daa5fd9c15d6
+      cancel-in-progress: false
+    timeout-minutes: 45
+    env:
+      CGO_ENABLED: '1'
+      COVERAGE_GROUP: '0'
+      GOFLAGS: ''
+      GOWORK: 'off'
+      GOTOOLCHAIN: local
+      GOMAXPROCS: '7'
+      CS_CACHE_SOURCE_REPOSITORY: matrixorigin/matrixone
+    steps:
+      - name: Match JED Coverage system dependencies (ephemeral filesystem only)
+        run: |
+          set -euo pipefail
+          test "$CS_CACHE_ENV/$CS_CACHE_NODE/$CS_CACHE_EXPECTED_NODE" = jed/mo-standard-0/mo-standard-0
+          if ! (command -v gcc && command -v g++ && command -v make && command -v pkg-config && command -v cmake && command -v python); then
+            for p in /usr /etc/apt /var/lib/dpkg /var/lib/apt /var/cache/apt; do
+              test "$(findmnt -T "$p" -n -o TARGET,FSTYPE | xargs)" = "/ overlay"
+            done
+            sudo apt-get -o Acquire::ForceIPv4=true update
+            sudo apt-get -o Acquire::ForceIPv4=true install -y build-essential cmake pkg-config python3 python-is-python3
+          fi
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          repository: matrixorigin/matrixone
+          ref: c33ce3ff8e7555c8053c85693e55e93e73d898b7
+          persist-credentials: false
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          repository: matrixorigin/CI
+          ref: f430f899a6322e2ecaa21e6c9b9b95bd406f5df4
+          path: .ci-workflow
+          sparse-checkout: |
+            scripts
+            config
+          persist-credentials: false
+      - name: Restore verified job-local tools
+        run: |
+          set -euo pipefail
+          python3 .ci-workflow/scripts/node_cache_toolchain_store.py --catalog .ci-workflow/config/node-compile-cache-catalog.json --lock .ci-workflow/config/node-toolchain-lock.json --destination "$RUNNER_TEMP/node-toolchain-install" --report "$RUNNER_TEMP/persistent-toolchain.json"
+          echo "GOMODCACHE=$RUNNER_TEMP/cs-buildcache-gomod" >> "$GITHUB_ENV"
+          echo "GOCACHE=$RUNNER_TEMP/cs-buildcache-go" >> "$GITHUB_ENV"
+      - name: Select only reviewed cache entries
+        env:
+          CS_CACHE_READ_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 .ci-workflow/scripts/node_cache_native_pvc_catalog.py materialize
+          python3 .ci-workflow/scripts/node_compile_cache.py configure --catalog "$RUNNER_TEMP/cs-reviewed-persistent-catalog.json"
+      - name: Build native only, on the exact key
+        run: python3 .ci-workflow/scripts/jed_native_32922.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: unpublished-jed-native-daa5fd9c-${{ github.run_id }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/unpublished-jed-native/manifest.json
+            ${{ runner.temp }}/unpublished-jed-native/delta.tar.gz
