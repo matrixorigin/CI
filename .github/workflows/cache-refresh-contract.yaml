@@ -1,0 +1,28 @@
+name: Cache refresh release contract (local disks only)
+on:
+  pull_request:
+    paths:
+      - scripts/*cache_refresh*.py
+      - .github/workflows/*cache-refresh*.yaml
+      - .github/workflows/coverage-worker-cs.yaml
+permissions:
+  contents: read
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          repository: matrixorigin/CI
+          ref: 48edf24e44a888c1c4d57318c4eca7cbb310c6e7
+          path: .pinned-helper
+          sparse-checkout: scripts
+          persist-credentials: false
+      - env:
+          CACHE_REFRESH_HELPERS: ${{ github.workspace }}/.pinned-helper
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 -m unittest scripts.test_cache_refresh_demand scripts.test_cache_refresh_release scripts.test_cache_refresh_worker
