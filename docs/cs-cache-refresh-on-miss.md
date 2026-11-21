@@ -68,3 +68,39 @@ controller stops new publications. Rollout should start with one volume:
 prove two duplicate hints yield one candidate, unchanged old generation,
 independent readback, and a subsequent real PR with documented shared hits.
 No live acceptance or production deployment is implied by unit tests.
+
+## JED rollout and acceptance (off by default)
+
+Enroll only `jed-n0` and/or `jed-n1` on protected controller runners with
+matching `cs-cache-refresh-controller-<target>` labels. Set the repository
+variable `CS_CACHE_REFRESH_TARGETS` to a JSON list of those names. Use
+`CS_CACHE_REFRESH_READ_SITE=jed` only after GitOps installs the separately
+owned **read-only ConfigMap directory** at `/run/matrixorigin-cache-releases` on
+the selected node's readers. Never project it from the compiler-cache PVC or
+give PR jobs permission to patch it. Unenrolled sites keep their existing behavior.
+
+The release record is keyed by the full node/volume/runtime/native/module/recipe
+profile, with an exact verified index, native manifests, manifest digest and
+trusted upstream SHA. The publisher must independently rehash the physical
+objects from a read-only mount before a compare-and-swap on the pre-enrolled
+ConfigMap. The consumer verifies the live base authority and revocations before
+reading any new generation. Revoking its release digest, index, base authority,
+or site stops new selection. Delete the projection record to retire the profile;
+a stale projection is not a substitute for the live revocation check.
+ConfigMaps are bounded (1 MiB); perform protected retirement of unused profiles
+before filling one. Never merge permissions for reader and writer roles.
+
+A completed private prepare can wait for independent artifact registration.
+The controller polls inventory for up to five minutes; a later eligible worker
+can resume the saved index for that same upstream/profile. No ambiguous dispatch
+or write is automatically replayed. Distinct volumes must verify their own copy;
+reuse a candidate across volumes only if independently admitted for the target.
+
+For a **subsequent** successful real PR inspect the group report's
+`cs-node-cache/release-consumption.json`. Match its profile and index to the
+release. `released_shared_go_reads` only counts a shared Get for an action
+absent from all original layers, not a private re-read or Put.
+`released_native_hit` requires an actual native hit that wasn't available in
+the original selection. A selection receipt, UT success or aggregate hits alone
+are not evidence of reuse. Stop new writes with CONTROLLER_READY=false;
+unset READ_SITE (or revoke) to stop new reader selection.

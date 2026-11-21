@@ -81,6 +81,18 @@ class Demand(unittest.TestCase):
         d.reconcile(self.db,self.h,self.a,self.backend)
         self.assertEqual(self.calls,['inspect','prepare','verify_candidate','append_missing','readback','activate'])
 
+    def test_delayed_registration_never_rebuilds_or_writes_unregistered_bytes(self):
+        self.t['registration_required']=True
+        run=lambda:d.reconcile(self.db,self.h,self.a,self.backend)['decision']
+        self.assertEqual(run(),'awaiting-registration')
+        self.t['trusted_candidate_index']='d'*64
+        self.assertEqual(run(),'awaiting-registration')
+        self.assertNotIn('append_missing',self.calls)
+        self.t['trusted_candidate_index']='a'*64
+        self.assertEqual(run(),'activated')
+        self.assertEqual(self.calls.count('prepare'),1)
+        self.assertEqual(self.calls.count('append_missing'),1)
+
     def test_builder_takes_full_scope_not_triggering_group(self):
         pkg='github.com/matrixorigin/matrixone/pkg/'
         self.assertEqual(builder.full_scope('\n'.join(pkg+n for n in ('one','catalog','two'))),

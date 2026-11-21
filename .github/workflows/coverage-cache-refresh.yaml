@@ -11,6 +11,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       decision: ${{ steps.check.outputs.decision }}
+      target: ${{ steps.check.outputs.target }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -28,11 +29,11 @@ jobs:
         run: echo '::warning::Cache demand detected; protected controller not enabled. No shared write attempted.'
   reconcile:
     needs: screen
-    if: needs.screen.outputs.decision == 'inspect' && vars.CS_CACHE_REFRESH_CONTROLLER_READY == 'true'
+    if: needs.screen.outputs.decision == 'inspect' && vars.CS_CACHE_REFRESH_CONTROLLER_READY == 'true' && contains(fromJSON(vars.CS_CACHE_REFRESH_TARGETS || '[]'), needs.screen.outputs.target)
     environment: cs-cache-publish
     runs-on:
       group: cs-cache-maintenance
-      labels: cs-cache-refresh-controller
+      labels: ${{ format('cs-cache-refresh-controller-{0}', needs.screen.outputs.target) }}
     timeout-minutes: 180
     steps:
       # Read-only operator image. No checkout, PR code, report commands or mutable setup.
@@ -42,6 +43,7 @@ jobs:
           ACTIONS_TOKEN: ${{ github.token }}
           CI_PIN: ${{ job.workflow_sha }}
           WORKER_RUN: ${{ github.event.workflow_run.id }}
+          CACHE_REFRESH_TARGET: ${{ needs.screen.outputs.target }}
         run: |
           set -eu
           test "$(cat /opt/matrixorigin/cache-refresh/ci-revision)" = "$CI_PIN"

@@ -4,6 +4,7 @@ import os
 import re
 import sqlite3
 import sys
+import time
 import tempfile
 import urllib.error
 import urllib.request
@@ -106,12 +107,23 @@ def main():
     if mode == 'screen':
         with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
             print('decision=' + decision, file=output)
+            if decision == 'inspect':
+                profile = demand.checked(inputs[0]['profile'])
+                print('target=' + profile['site'] + '-n' + profile['node'][-1], file=output)
     elif decision == 'inspect':
+        p = demand.checked(inputs[0]['profile'])
+        check(os.environ['CACHE_REFRESH_TARGET'] == p['site']+'-n'+p['node'][-1],
+              'controller target differs from verified report')
         # The operator mounts its private ledger, independently evaluates the
         # approved source/node and owns the only writer. No PR bytes are copied.
         with closing(sqlite3.connect('/var/lib/matrixorigin/cache-refresh/ledger.sqlite',
                                      timeout=30)) as db:
             decision = demand.reconcile(db, *inputs, demand.protected_backend)['decision']
+            for _ in range(20):
+                if decision != 'awaiting-registration':
+                    break
+                time.sleep(15)
+                decision = demand.reconcile(db, *inputs, demand.protected_backend)['decision']
     print('cache refresh: ' + decision)
 
 

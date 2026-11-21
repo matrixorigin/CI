@@ -66,12 +66,15 @@ def observe(temp, repo):
     require(tools['persistent_tools'] is True and binding in catalog['nodes'] and
             cfg['shared']=='/ci-cache/incremental-v2' and binding['environment']==cfg['runtime']['environment']
             and cfg['runtime']['repository']=='matrixorigin/matrixone', 'unverified reader')
+    receipt = temp/'cs-node-cache/release-selection.json'
+    released = load(receipt,16384) if receipt.is_file() else None
+    extra = [released['index_sha256']] if released else []
     require(auth.get('authorization_id') and auth.get('revocations_sha256') and
-            sorted(auth['authorized_indexes'])==sorted(cfg['indexes']), 'authorization unavailable')
+            sorted(auth['authorized_indexes']+extra)==sorted(cfg['indexes']), 'authorization unavailable')
     bound = {k:binding[k] for k in ('node_uid','pv_uid','pvc_uid')}
     entries = [e for e in catalog['entries'] if bound in e['bindings']]
     compatible = [e for e in entries if e['runtime']==cfg['runtime']]
-    require(entries and {e['index_sha256'] for e in compatible} == set(cfg['indexes']),
+    require(entries and {e['index_sha256'] for e in compatible} == set(auth['authorized_indexes']),
             'unselected or revoked generation, not refreshable')
     native = state['native_key']
     require(state.get('native_authorities',{}).get(native,True) is not None,'native authority withheld')
@@ -80,8 +83,11 @@ def observe(temp, repo):
     profile = checked(dict(**bound,site=binding['environment'],node=binding['node'],
                            runtime=digest(cfg['runtime']),native=native,modules=modules(repo,head),
                            recipe=RECIPE))
-    return {'schema':1,'profile':profile,'head':head,'runtime_missing':not compatible,
-            'native_missing':not any(native in e['native_manifests'] for e in compatible)}
+    if released:
+        require(released['profile_key']==digest(profile),'release receipt does not match this reader')
+    return {'schema':1,'profile':profile,'head':head,'runtime_missing':not (compatible or released),
+            'native_missing':not (any(native in e['native_manifests'] for e in compatible)
+                                  or (released and native in released['native_manifests']))}
 
 
 def plan(hint, accepted, trusted):
@@ -133,14 +139,28 @@ def reconcile(db,hint,accepted,backend):
     profile=checked(hint['profile'])
     live=backend('inspect',{'profile':profile})
     result=claim(db,hint,accepted,live)
-    if result['decision']!='claimed':
+    if result['decision'] not in ('claimed','duplicate'):
         return result
     key=result['key']
     request={'key':key,'profile':profile,'upstream_commit':live['upstream_commit']}
     # Durable intent BEFORE each non-repeatable call. If a call fails or the
     # process dies, require reconciliation by key, not an automatic second write.
     ops=['verify_candidate','append_missing','readback','activate']
-    if live.get('trusted_candidate_index') is None:
+    if result['decision']=='duplicate':
+        # Resume only a confirmed private build. Never replay an ambiguous operation.
+        row=db.execute('SELECT upstream,phase,proof FROM intents WHERE id=?',(key,)).fetchone()
+        if row[1]!='awaiting-registration' or row[0]!=live['upstream_commit']:
+            return result
+        saved=json.loads(row[2])
+        require(saved['profile']==profile and saved['key']==key,'ledger identity mismatch')
+        if live.get('trusted_candidate_index') != saved['index_sha256']:
+            return {'decision':'awaiting-registration','key':key}
+        with db:
+            won=db.execute("UPDATE intents SET phase='registration:verified' WHERE id=? AND phase='awaiting-registration'",
+                           (key,)).rowcount
+        if not won: return result
+        request=saved
+    elif live.get('trusted_candidate_index') is None:
         ops.insert(0,'prepare')
     else:
         require(type(live['trusted_candidate_index']) is str and
@@ -158,9 +178,12 @@ def reconcile(db,hint,accepted,backend):
                 'missing immutable index')
         require(request.get('index_sha256',generation)==generation,'cache generation changed')
         request['index_sha256']=generation
+        wait = op=='prepare' and live.get('registration_required') is True
         with db:
             db.execute('UPDATE intents SET phase=?, proof=? WHERE id=?',
-                       (op+':verified',json.dumps(request,sort_keys=True),key))
+                       ('awaiting-registration' if wait else op+':verified',json.dumps(request,sort_keys=True),key))
+        if wait:
+            return {'decision':'awaiting-registration','key':key}
     return {'decision':'activated','key':key,'index_sha256':request['index_sha256']}
 
 
