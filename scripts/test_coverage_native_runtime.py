@@ -34,7 +34,8 @@ class CoverageNativeRuntimeTest(unittest.TestCase):
             "int main(void) { return mo_probe() + usearch_c_probe() == 42 ? 0 : 1; }\n"
         )
         for workflow_name, workspace_root, variables, assignment_count, result_variable in [
-            ("coverage-ut.yaml", repository, "thirdparties_install_dir|cgo_ldflags", 2, "cgo_ldflags"),
+            ("coverage-worker-cs.yaml", repository, "thirdparties_install_dir|cgo_ldflags", 2, "cgo_ldflags"),
+            ("coverage-worker-idc.yaml", repository, "thirdparties_install_dir|cgo_ldflags", 2, "cgo_ldflags"),
             (
                 "robot.yaml",
                 workspace,

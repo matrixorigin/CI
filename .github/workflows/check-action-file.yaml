@@ -20,6 +20,11 @@ on:
       - 'scripts/select_coverage_artifacts.py'
       - 'scripts/test_select_coverage_artifacts.py'
       - 'scripts/test_coverage_native_runtime.py'
+      - 'scripts/test_cs_s3_coverage.py'
+      - 'scripts/coverage_standby.py'
+      - 'scripts/test_coverage_standby.py'
+      - 'scripts/coverage_pr_entry.py'
+      - 'scripts/test_coverage_pr_entry.py'
       - 'scripts/test_merge_trigger_tke_subject.py'
       - 'scripts/compact_coverage_profile.go'
       - 'scripts/compact_coverage_profile_test.go'
@@ -104,6 +109,9 @@ jobs:
         run: python3 scripts/test_select_coverage_artifacts.py -v
       - name: Test coverage native runtime paths
         run: python3 scripts/test_coverage_native_runtime.py -v
+      - name: Test CS S3 routing and PR entry / two-group handoff
+        timeout-minutes: 3
+        run: python3 -m unittest scripts.test_cs_s3_coverage scripts.test_coverage_pr_entry scripts.test_coverage_standby -v
       - name: Test TKE merge subject identity contract
         run: python3 scripts/test_merge_trigger_tke_subject.py -v
       - name: Test SCA license scope selection

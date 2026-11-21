@@ -1,5 +1,7 @@
 self-hosted-runner:
   labels:
+    - amd64-mo-shanghai-ut-safe
+    - cs-node-cache-7c14g
     - amd64-mo-shanghai-8c16g
     - amd64-mo-guangzhou-2xlarge16
     - amd64-mo-guangzhou-2xlarge32
@@ -12,6 +14,19 @@ self-hosted-runner:
     - mac-arm64-mini
 
 paths:
+  .github/workflows/coverage-worker-cs.yaml:
+    ignore:
+      - 'property "workflow_sha" is not defined'
+  .github/workflows/coverage-worker-idc.yaml:
+    ignore:
+      - 'property "workflow_sha" is not defined'
+  .github/workflows/coverage-ut-standby.yaml:
+    ignore:
+      - 'property "workflow_sha" is not defined'
+  .github/workflows/coverage-queue-handoff.yaml:
+    ignore:
+      # Same GitHub.com reusable-workflow identity used by coverage-ut.yaml.
+      - 'property "workflow_sha" is not defined'
   .github/workflows/ci.yaml:
     ignore:
       - 'constant expression "false" in condition'
