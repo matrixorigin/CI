@@ -75,6 +75,19 @@ jobs:
             mv ./thirdparties/install/lib ./mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64/
           fi
 
+          # jieba resolves its runtime data next to mo-service. Older release
+          # branches without the tokenizer dictionaries keep their old payload.
+          if [ -d "./dict" ]; then
+            cp -R ./dict ./mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64/dict
+          elif [ -d "./pkg/monlp/tokenizer/dict" ]; then
+            cp -R ./pkg/monlp/tokenizer/dict ./mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64/dict
+          fi
+          if [ -d "./mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64/dict" ]; then
+            for file in jieba.dict.utf8 hmm_model.utf8 user.dict.utf8 idf.utf8 stop_words.utf8; do
+              test -f "./mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64/dict/$file"
+            done
+          fi
+
           zip -r mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64.zip mo-${{ steps.get_release.outputs.tag_name }}-linux-x86_64
       - name: Upload Release normal linux x86_64
         uses: actions/upload-release-asset@v1.0.2
@@ -142,6 +155,19 @@ jobs:
           if [ -d "./thirdparties/install/lib" ]; then
             mkdir -p mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64/lib
             mv ./thirdparties/install/lib ./mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64/
+          fi
+
+          # jieba resolves its runtime data next to mo-service. Older release
+          # branches without the tokenizer dictionaries keep their old payload.
+          if [ -d "./dict" ]; then
+            cp -R ./dict ./mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64/dict
+          elif [ -d "./pkg/monlp/tokenizer/dict" ]; then
+            cp -R ./pkg/monlp/tokenizer/dict ./mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64/dict
+          fi
+          if [ -d "./mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64/dict" ]; then
+            for file in jieba.dict.utf8 hmm_model.utf8 user.dict.utf8 idf.utf8 stop_words.utf8; do
+              test -f "./mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64/dict/$file"
+            done
           fi
 
           zip -r mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64.zip mo-${{ steps.get_release.outputs.tag_name }}-linux-arm64
