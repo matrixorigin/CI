@@ -19,6 +19,8 @@ API = "https://api.github.com/repos/" + REPO
 WORKER = "coverage-standby-worker.yaml"
 WORKER_REF = "main"
 ENTRY = ".github/workflows/entrypoint.yaml"
+# Kept in sync with coverage_pr_entry.py by the admission contract tests.
+CACHE_BASE_REFS = frozenset({"main", "4.2-dev"})
 POOLS = {"cs": "cs-node-cache-7c14g", "idc": "amd64-mo-shanghai-ut-safe"}
 WAIT = 3600
 HANDOFF_POLLS = 60
@@ -357,12 +359,16 @@ def admit():
     proof = artifact(t["parent"], proof_name(t),
                      "real-pr-authorization.json")
     pr = one(f"/pulls/{int(t['pr'])}")
+    # In-flight receipts from before the rollout could only authorize main.
+    # New receipts bind the exact base, including across allowed branches.
+    base = proof.get("base_ref", "main") if proof else None
     check(proof and proof["allowed"] == "true" and proof["verified_membership_http_status"] == 204
           and int(proof["pr_number"]) == pr["number"] and proof["author"] == pr["user"]["login"]
           and proof["head_repository"] == source == pr["head"]["repo"]["full_name"]
           and proof["head_sha"] == head == pr["head"]["sha"] and pr["state"] == "open"
           and not pr["draft"] and not pr["head"]["repo"]["archived"]
-          and pr["base"]["repo"]["full_name"] == REPO and pr["base"]["ref"] == "main"
+          and pr["base"]["repo"]["full_name"] == REPO
+          and pr["base"]["ref"] == base and base in CACHE_BASE_REFS
           and "kind/test-ci" in {v["name"] for v in pr["labels"]}, "PR no longer matches authorization")
     parent_meta(t)  # Reconfirm after checking the grant and live PR, before returning to checkout.
 

@@ -52,6 +52,21 @@ class EntryTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 route(ctx, self.event, self.pr, 204)
 
+    def test_only_main_and_4_2_dev_are_eligible_targets(self):
+        for base, expected in (("main", "cache"), ("4.2-dev", "cache"),
+                               ("4.1-dev", "legacy"), ("4.2-dev-other", "legacy"),
+                               ("v4.2.8-hotfix", "legacy"), ("3.0-dev", "legacy")):
+            with self.subTest(base=base):
+                self.event["pull_request"]["base"]["ref"] = self.pr["base"]["ref"] = base
+                self.assertEqual(route(CALLER, self.event, self.pr, 204)["route"], expected)
+        self.event["pull_request"]["base"]["ref"] = self.pr["base"]["ref"] = "4.2-dev"
+        self.assertEqual(route(CALLER, self.event, self.pr, 404)["route"], "legacy")
+        self.pr["labels"] = [{"name": "safe-to-test"}]
+        self.assertEqual(route(CALLER, self.event, self.pr, 204)["route"], "legacy")
+        self.pr["base"]["ref"] = "main"
+        with self.assertRaisesRegex(ValueError, "stale or invalid PR identity"):
+            route(CALLER, self.event, self.pr, 204)
+
     def test_pr_number_does_not_pin_either_group(self):
         for i in range(1, 9):
             self.pr["number"] = self.event["number"] = self.event["pull_request"]["number"] = i
@@ -98,6 +113,7 @@ class EntryTest(unittest.TestCase):
             self.assertNotIn("fixture-only", raw)
             receipt = json.loads(raw)
             self.assertEqual(receipt["head_sha"], self.pr["head"]["sha"])
+            self.assertEqual(receipt["base_ref"], self.pr["base"]["ref"])
             self.assertEqual(receipt["membership_checks"], checks)
 
     def test_exact_measured_jobs_and_coverage_handoff(self):

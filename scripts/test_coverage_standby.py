@@ -3,6 +3,7 @@ import json
 import os
 from unittest.mock import patch
 from scripts import coverage_standby as s
+from scripts.coverage_pr_entry import CACHE_BASE_REFS
 
 
 class ParentAdmission(unittest.TestCase):
@@ -73,6 +74,38 @@ class ParentAdmission(unittest.TestCase):
                         s.admit()
                 else:
                     s.admit()
+
+    def test_receipt_base_is_pinned_for_both_pools_and_retry(self):
+        self.assertEqual(s.CACHE_BASE_REFS, CACHE_BASE_REFS)
+        for attempt, pool in ((1, "cs"), (2, "idc")):
+            t = dict(self.t, attempt=attempt)
+            grant = dict(child=51, ticket=t, pool=pool, nonce="test-nonce")
+            env = dict(TICKET=json.dumps(t), GROUP="0", HEAD=self.sha, SOURCE=self.src,
+                       POOL=pool, GITHUB_RUN_ATTEMPT="1", GITHUB_RUN_ID="51")
+            for authorized, live, expected in (("4.2-dev", "4.2-dev", True),
+                                                ("4.2-dev", "main", False),
+                                                ("main", "4.2-dev", False),
+                                                ("4.1-dev", "4.1-dev", False),
+                                                (None, "main", True),
+                                                (None, "4.2-dev", False)):
+                proof = dict(allowed="true", verified_membership_http_status=204, pr_number="32922",
+                             author="dev", head_repository=self.src, head_sha=self.sha)
+                if authorized is not None:
+                    proof["base_ref"] = authorized
+                pr = dict(number=32922, user={"login": "dev"},
+                          head={"repo": {"full_name": self.src, "archived": False}, "sha": self.sha},
+                          state="open", draft=False, base={"repo": {"full_name": s.REPO}, "ref": live},
+                          labels=[{"name": "kind/test-ci"}])
+                with self.subTest(attempt=attempt, pool=pool, authorized=authorized, live=live), \
+                     patch.dict(os.environ, env), patch.object(s, "run", return_value=dict(self.p, run_attempt=attempt)), \
+                     patch.object(s, "child_meta"), patch.object(s, "one", return_value=pr), \
+                     patch.object(s, "artifact", side_effect=[grant, proof]) as artifact:
+                    if expected:
+                        s.admit()
+                    else:
+                        with self.assertRaisesRegex(ValueError, "PR no longer matches authorization"):
+                            s.admit()
+                    self.assertEqual(artifact.call_args.args[1], s.proof_name(t))
 
 
 class Queue(unittest.TestCase):
