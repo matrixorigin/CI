@@ -7,6 +7,7 @@ from pathlib import Path
 
 PROJECT = "matrixorigin/matrixone"
 ENTRY = PROJECT + "/.github/workflows/entrypoint.yaml@refs/heads/main"
+CACHE_BASE_REFS = frozenset({"main", "4.2-dev"})
 
 
 def require(ok, reason):
@@ -36,7 +37,7 @@ def route(ctx, event, live, member_status):
     labels = {row["name"] for row in live["labels"]}
     # Never use an arbitrary caller-selected head, runner label or environment.
     # The old path still enforces its own org/safe-to-test eligibility.
-    if (base != "main" or live["draft"] or live["head"]["repo"]["archived"] or
+    if (base not in CACHE_BASE_REFS or live["draft"] or live["head"]["repo"]["archived"] or
             member_status != 204 or "kind/test-ci" not in labels):
         return {"route": "legacy", "allowed": "false"}
     return {"route": "cache", "allowed": "true", "head_sha": sha, "head_repository": source}
@@ -59,6 +60,7 @@ def main():
         # authorization receipt; neither tokens nor the complete API payload are logged.
         receipt = {"schema": 1, "allowed": "true", "head_sha": result["head_sha"],
                    "head_repository": result["head_repository"], "pr_number": str(number),
+                   "base_ref": pr["base"]["ref"],
                    "author": pr["user"]["login"], "project_cache_namespace": PROJECT,
                    "verified_membership_http_status": status, "membership_checks": checks,
                    "checked_at": dt.datetime.now(dt.timezone.utc).isoformat()}
