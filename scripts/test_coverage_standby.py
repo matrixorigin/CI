@@ -76,6 +76,75 @@ class ParentAdmission(unittest.TestCase):
 
 
 class Queue(unittest.TestCase):
+    def test_moving_ref_reconciles_only_verified_ungranted_child(self):
+        for pool in ('cs', 'idc'):
+            t = dict(parent=1, attempt=1, group=0, head='a'*40)
+            rev1, rev2 = 'b'*40, 'c'*40
+            events, dispatched = [], []
+            def post(path, data):
+                if path.endswith('/cancel'):
+                    events.append('cancel')
+                    self.assertEqual(path, '/actions/runs/101/cancel')
+                    return {}, 0
+                dispatched.append(json.loads(data['inputs']['ticket']))
+                events.append('dispatch')
+                return {'workflow_run_id': 100 + len(dispatched)}, 0
+            def metadata(r):
+                stopped = 'cancel' in events and r == 101
+                if stopped:
+                    events.append('confirmed')
+                return dict(id=r, repository={'full_name':s.REPO},run_attempt=1,
+                    path='.github/workflows/'+s.WORKER,event='workflow_dispatch',
+                    head_branch=s.WORKER_REF,head_sha=rev2,
+                    display_title=s.title(dispatched[r-101],pool),
+                    status='completed' if stopped else 'queued')
+            with patch.object(s,'parent_meta'), patch.object(s,'api',side_effect=post), \
+                 patch.object(s,'one',side_effect=[{'object':{'sha':x}} for x in (rev1,rev2)]), \
+                 patch.object(s,'run',side_effect=metadata):
+                r, rev, nonce = s.reserve(t, pool)
+            self.assertEqual(events, ['dispatch','cancel','confirmed','dispatch'])
+            self.assertEqual((r,rev,s.digest(nonce)),(102,rev2,dispatched[1]['key']))
+            self.assertNotEqual(dispatched[0]['key'],dispatched[1]['key'])
+
+    def test_revision_retry_fails_closed(self):
+        t = dict(parent=1, attempt=1, group=0, head='a'*40)
+        for error, count in [(ValueError('identity mismatch'),0),
+                             (s.DispatchRevisionChanged(101,'c'*40),1)]:
+            with patch.object(s,'one',return_value={'object':{'sha':'b'*40}}), \
+                 patch.object(s,'parent_meta'), patch.object(s,'dispatch',side_effect=error) as send, \
+                 patch.object(s,'child_meta',return_value={'status':'queued'}), \
+                 patch.object(s,'api') as post, patch.object(s.time,'sleep'):
+                with self.assertRaises(ValueError):
+                    s.reserve(t,'idc')
+                self.assertEqual((send.call_count,post.call_count),(1,count))
+
+    def test_idc_diagnostics_preserve_assertion_and_internal_timeout(self):
+        import subprocess, tempfile, textwrap
+        from pathlib import Path
+        wf = (Path(__file__).resolve().parents[1]/'.github/workflows/coverage-worker-idc.yaml').read_text()
+        diag = wf.split('    - name: Collect bounded Shanghai failure evidence\n')[1]
+        before, after = diag.split('    - name: Record actual packages',1)
+        self.assertEqual(before.count("steps.coverage_ut.outcome == 'failure'"),2)
+        self.assertIn('exit "${test_status}"', wf.split('    - name: Collect bounded')[0])
+        script = textwrap.dedent(before.split('      run: |\n')[1].split('    - name: Upload')[0])
+        for reason in ('assertion', 'timeout'):
+            with tempfile.TemporaryDirectory() as d:
+                root = Path(d)
+                if reason == 'assertion':
+                    rows = [dict(Action='output',Package='p',Test='t',Output='expected 3, got 2'),
+                            dict(Action='fail',Package='p',Test='t')]
+                    (root/'ut-coverage-report.json').write_text('\n'.join(map(json.dumps,rows)))
+                else:
+                    (root/'ut-coverage-timeout.txt').write_text('deadline reached: coverage_ut')
+                output = root/'outputs'
+                subprocess.run(['bash','-c',script],check=True,capture_output=True,
+                    env={**os.environ,'RUNNER_TEMP':d,'GITHUB_OUTPUT':str(output)})
+                dst = Path(output.read_text().strip().split('=',1)[1])
+                if reason == 'assertion':
+                    self.assertIn('expected 3, got 2',(dst/'failed-test-output.txt').read_text())
+                else:
+                    self.assertIn('deadline reached',(dst/'ut-coverage-timeout.txt').read_text())
+
     def setUp(self):
         self.q = dict(status='queued', runner_name='', runner_id=0, id=2)
         self.active = dict(self.q, status='in_progress', runner_name='cs-jed-nc-n1-pr-v1-abc-runner-def', runner_id=123)

@@ -99,12 +99,22 @@ def parent_meta(t):
     raise ValueError(f"parent {t['parent']} still not active after {PARENT_POLLS} reads: status={status}")
 
 
+class DispatchRevisionChanged(ValueError):
+    def __init__(self, child, actual):
+        super().__init__("dispatch resolved a different workflow revision")
+        self.child, self.actual = child, actual
+
+
 def child_meta(r, t, pool, revision):
     m = run(r)
     check(m["id"] == r and m["repository"]["full_name"] == REPO and m["run_attempt"] == 1
           and m["path"] == ".github/workflows/" + WORKER and m["event"] == "workflow_dispatch"
-          and m["head_branch"] == WORKER_REF and m["head_sha"] == revision
+          and m["head_branch"] == WORKER_REF
           and m["display_title"] == title(t, pool), "dedicated worker identity mismatch")
+    actual = m["head_sha"]
+    check(re.fullmatch("[a-f0-9]{40}", actual), "invalid worker revision")
+    if actual != revision:
+        raise DispatchRevisionChanged(r, actual)
     return m
 
 
@@ -178,6 +188,36 @@ def output(**fields):
             print(f"{k}={v}", file=f)
 
 
+def reserve(t, pool):
+    # Retry ONLY a positively identified, ungranted child resolved at the
+    # wrong revision. Never retry an ambiguous dispatch or a lost response.
+    for attempt in range(3):
+        rev = t["revision"] = one("/git/ref/heads/" + WORKER_REF)["object"]["sha"]
+        check(re.fullmatch("[a-f0-9]{40}", rev), "invalid branch revision")
+        nonce = secrets.token_hex(32)
+        t["key"] = digest(nonce)
+        try:
+            return dispatch(t, pool, rev), rev, nonce
+        except DispatchRevisionChanged as changed:
+            r = changed.child
+            parent_meta(t)
+            meta = child_meta(r, t, pool, changed.actual)
+            if meta["status"] != "completed":
+                try:
+                    api(f"/actions/runs/{r}/cancel", {})
+                except urllib.error.HTTPError as exc:
+                    if exc.code != 409:
+                        raise
+                for _ in range(30):
+                    if child_meta(r, t, pool, changed.actual)["status"] == "completed":
+                        break
+                    time.sleep(2)
+                else:
+                    raise ValueError("ungranted worker did not stop; no redispatch")
+            print(f"{pool} child {r} ended without a grant after branch movement", flush=True)
+    raise ValueError("workflow revision kept changing; no worker granted")
+
+
 def choose():
     attempt = int(os.environ["GITHUB_RUN_ATTEMPT"])
     check(0 < attempt < 1_000_000, "invalid parent attempt")
@@ -192,11 +232,8 @@ def choose():
         require_previous_grants_terminal(t)
     # A pull_request_target run reports the PR head; a workflow_dispatch run
     # reports the workflow branch head. These are not the same commit.
-    rev = t["revision"] = one("/git/ref/heads/" + WORKER_REF)["object"]["sha"]
-    nonce = secrets.token_hex(32)
-    t["key"] = digest(nonce)
     pool = "cs"
-    r = dispatch(t, pool, rev)
+    r, rev, nonce = reserve(t, pool)
     since = None
     while True:
         j, now = observe(r, t, "cs")
@@ -231,12 +268,8 @@ def choose():
                 time.sleep(5)
             else:
                 raise ValueError("CS cancellation not confirmed; IDC not dispatched")
-            nonce = secrets.token_hex(32)
-            t["key"], pool = digest(nonce), "idc"
-            # The workflow_dispatch ref is moving. Bind each child to the
-            # revision observed immediately before that child's dispatch.
-            rev = t["revision"] = one("/git/ref/heads/" + WORKER_REF)["object"]["sha"]
-            r = dispatch(t, pool, rev)
+            pool = "idc"
+            r, rev, nonce = reserve(t, pool)
     # Grant is immutable and costs no extra control token on the worker. Until
     # this point neither pool has been authorized to check out or run PR code.
     parent_meta(t)

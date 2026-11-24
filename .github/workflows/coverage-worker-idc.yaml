@@ -81,6 +81,7 @@ jobs:
     - uses: matrixorigin/CI/actions/setup-python-udf@4670989748419fb169f88282cf05fb690ea91074
       if: hashFiles('pkg/udf/python/worker/requirements.txt') != ''
     - name: Run the reviewed Coverage UT group, cold build allowed
+      id: coverage_ut
       timeout-minutes: 190
       env:
         GOPROXY: http://goproxy.goproxy.svc.cluster.local|https://goproxy.cn|direct
@@ -463,6 +464,45 @@ jobs:
         set -e
         phase_end "${phase_status}"
         (( phase_status == 0 )) || exit "${phase_status}"
+    - name: Collect bounded Shanghai failure evidence
+      id: idc_diagnostics
+      if: ${{ failure() && !cancelled() && steps.coverage_ut.outcome == 'failure' }}
+      timeout-minutes: 5
+      continue-on-error: true
+      shell: bash
+      run: |
+        set -euo pipefail
+        out=$(mktemp -d "${RUNNER_TEMP}/idc-diagnostics.XXXXXXXX")
+        echo "path=$out" >> "$GITHUB_OUTPUT"
+        cd "$RUNNER_TEMP"
+        # Keep the failing test's output, not just its final FAIL event.
+        # Never glob the PR workspace or upload the entire runner directory.
+        report=ut-coverage-report.json
+        if [[ -f "$report" && ! -L "$report" ]]; then
+          jq -rc 'select(.Action=="fail") | [.Package,.Test] | @json' "$report" |
+            head -n 50 > "$out/failed-tests.txt" || true
+          jq -cn --rawfile failed "$out/failed-tests.txt" '
+            ($failed | split("\n") | map(select(length>0)) | INDEX(.)) as $fail |
+            reduce inputs as $e ({}; ([$e.Package,$e.Test]|@json) as $k |
+              if $fail[$k] and ($e.Action=="output" or $e.Action=="fail") then
+                .[$k] = ((.[$k] + [($e.Output // "FAIL")[:800]])[-20:])
+              else . end) | to_entries[]' "$report" > "$out/failed-test-output.txt" || true
+          # JSON quoting keeps embedded newlines and workflow commands inert.
+          head -c 8192 "$out/failed-test-output.txt"
+        fi
+        for f in ut-coverage-timeout.txt ut-coverage-status.json ut-coverage-phase-failure.txt ut-coverage-phase-timing.txt ut-coverage.stderr.log; do
+          if [[ -f "$f" && ! -L "$f" ]]; then tail -c 65536 "$f" > "$out/$f"; fi
+        done
+    - name: Upload Shanghai failure evidence
+      if: ${{ failure() && !cancelled() && steps.coverage_ut.outcome == 'failure' && steps.idc_diagnostics.outputs.path != '' }}
+      continue-on-error: true
+      timeout-minutes: 5
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: ut-coverage-diagnostics-group-${{ inputs.group }}-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ steps.idc_diagnostics.outputs.path }}
+        if-no-files-found: warn
+        retention-days: 7
     - name: Record actual packages, skips and source
       env:
         ASSIGNED: ${{ runner.name }}
