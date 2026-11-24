@@ -254,3 +254,80 @@ class Queue(unittest.TestCase):
         self.assertNotIn('coverage_standby.py wait', collector)
         self.assertIn('actions: read', collector)
         self.assertGreater(85*60, s.WAIT)
+
+
+class Progress(unittest.TestCase):
+    def test_live_worker_link_and_known_phases(self):
+        for pool, runner, step, site in (
+                ("cs", "cs-jed-nc-n1-pr-v1-abc-runner-def", "Run coverage unit tests", "JED"),
+                ("idc", "amd64-mo-shanghai-ut-safe-abc-runner-def",
+                 "Run the reviewed Coverage UT group, cold build allowed", "Shanghai IDC")):
+            for status, phase in (("pending", "runner assigned; preparing Coverage UT"),
+                                  ("in_progress", "Coverage UT running (setup and tests)"),
+                                  ("completed", "UT step finished; collecting results")):
+                target = dict(id=312, runner_id=7, runner_name=runner, status="in_progress",
+                              steps=[dict(name=step, status=status)])
+                with self.subTest(pool=pool, status=status), patch.object(s, "observe", return_value=(target, 1)) as read:
+                    self.assertEqual(s.worker_progress(123, 1, pool),
+                                     (f"{site}: {phase}", f"https://github.com/{s.REPO}/actions/runs/123/job/312"))
+                    read.assert_called_once_with(123, {"group": 1}, pool)
+
+    def test_progress_is_best_effort_and_child_result_is_authoritative(self):
+        env = dict(CHILD="123", GROUP="1", POOL="cs")
+        for conclusion in ("success", "failure"):
+            with self.subTest(conclusion=conclusion), patch.dict(os.environ, env), \
+                 patch.object(s, "run", side_effect=[dict(status="in_progress"),
+                                                    dict(status="completed", run_attempt=1, conclusion=conclusion)]), \
+                 patch.object(s, "worker_progress", side_effect=OSError("do not print API details")), \
+                 patch.object(s.time, "sleep"), patch("builtins.print") as out:
+                if conclusion == "success":
+                    s.wait()
+                else:
+                    with self.assertRaisesRegex(ValueError, "selected coverage group did not pass"):
+                        s.wait()
+                self.assertIn("worker details temporarily unavailable", str(out.call_args_list))
+                self.assertNotIn("do not print API details", str(out.call_args_list))
+
+
+class ShortWorkerTitle(unittest.TestCase):
+    def setUp(self):
+        self.ticket = dict(pr=33174, parent=42, attempt=1, group=0, head="a"*40,
+                           key="c"*64, title_version=2)
+        self.meta = dict(id=51, repository={"full_name": s.REPO}, run_attempt=1,
+                         path=".github/workflows/"+s.WORKER, event="workflow_dispatch",
+                         head_branch=s.WORKER_REF, head_sha="b"*40,
+                         display_title="GROUP0")
+        self.marker = dict(run_id=51, run_attempt=1, status="completed", conclusion="skipped",
+                           name=s.title(self.ticket, "cs")+s.IDENTITY_SUFFIX)
+
+    def test_exact_identity_still_required(self):
+        self.assertEqual(s.short_title(self.ticket), "GROUP0")
+        self.assertEqual(s.short_title(dict(self.ticket, group=1)), "GROUP1")
+        for marker, match in ((self.marker, True),
+                              (dict(self.marker, run_id=52), False),
+                              (dict(self.marker, conclusion="success"), False),
+                              (dict(self.marker, name=s.title(dict(self.ticket, group=1), "cs")+s.IDENTITY_SUFFIX), False),
+                              (dict(self.marker, name=self.marker["name"].replace("c"*64, "e"*64)), False)):
+            with self.subTest(marker=marker), patch.object(s, "run", return_value=self.meta), \
+                 patch.object(s, "one", return_value=dict(total_count=1, jobs=[marker])):
+                if match:
+                    self.assertEqual(s.child_meta(51, self.ticket, "cs", "b"*40), self.meta)
+                else:
+                    with self.assertRaisesRegex(ValueError, "identity"):
+                        s.child_meta(51, self.ticket, "cs", "b"*40)
+        legacy = dict(self.meta, display_title=s.title(self.ticket, "cs"))
+        with patch.object(s, "run", return_value=legacy), patch.object(s, "one") as lookup:
+            self.assertEqual(s.child_meta(51, self.ticket, "cs", "b"*40), legacy)
+            lookup.assert_not_called()
+
+    def test_dispatch_reconciles_two_identical_human_titles(self):
+        other = dict(self.meta, id=52)
+        wrong_marker = dict(self.marker, run_id=52, name=s.title(dict(self.ticket, parent=43), "cs")+s.IDENTITY_SUFFIX)
+        def read(path):
+            if "/actions/workflows/" in path:
+                return {"workflow_runs": [other, self.meta]}
+            return {"total_count": 1, "jobs": [wrong_marker if "/52/" in path else self.marker]}
+        with patch.object(s, "parent_meta"), patch.object(s, "api", return_value=({}, 0)) as post, \
+             patch.object(s, "one", side_effect=read), patch.object(s, "run", return_value=self.meta):
+            self.assertEqual(s.dispatch(self.ticket, "cs", "b"*40), 51)
+            post.assert_called_once()

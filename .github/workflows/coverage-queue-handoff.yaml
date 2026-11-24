@@ -12,6 +12,7 @@ permissions:
   contents: read
 jobs:
   select:
+    name: GROUP${{ inputs.group }}
     if: github.workflow_ref == 'matrixorigin/matrixone/.github/workflows/entrypoint.yaml@refs/heads/main' && github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     timeout-minutes: 360
@@ -64,6 +65,7 @@ jobs:
         path: ${{ runner.temp }}/real-pr-authorization.json
         if-no-files-found: error
     - id: select
+      name: Find a CS runner or use Shanghai standby
       timeout-minutes: 85
       env:
         PR: ${{ github.event.pull_request.number }}
@@ -81,12 +83,15 @@ jobs:
         retention-days: 1
     # A failed child must fail the job that dispatched it. Failed-only reruns
     # now create a new child for this group, not a new poll of the dead child.
-    - name: Wait for selected group, including its UT result
+    - name: Show live Coverage UT progress
       env:
         CHILD: ${{ steps.select.outputs.child }}
+        POOL: ${{ steps.select.outputs.pool }}
+        GROUP: ${{ inputs.group }}
         ACTIONS_TOKEN: ${{ github.token }}
       run: python3 -I scripts/coverage_standby.py wait
   collect:
+    name: Collect Group ${{ inputs.group }} coverage
     needs: select
     runs-on: ubuntu-latest
     timeout-minutes: 360
