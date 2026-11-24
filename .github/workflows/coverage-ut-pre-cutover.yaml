@@ -191,7 +191,7 @@ jobs:
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           repository: matrixorigin/CI
-          ref: a5b88037c61c0072f8bbd20427d35c3d1b4a4432
+          ref: 96874e708fa46db2af5a6f833b64bbd448b2d4d8
           sparse-checkout: |
             scripts/prepare_coverage_cgo.sh
             scripts/run_coverage_ut.py

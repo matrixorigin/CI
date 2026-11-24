@@ -15,7 +15,7 @@ from scripts.coverage_pr_entry import ENTRY, PROJECT, main, route
 
 ROOT = Path(__file__).resolve().parents[1]
 PIN = "48edf24e44a888c1c4d57318c4eca7cbb310c6e7"
-OLD = "a5b88037c61c0072f8bbd20427d35c3d1b4a4432"
+LEGACY_HELPER_SHA = "96874e708fa46db2af5a6f833b64bbd448b2d4d8"
 CALLER = (PROJECT, "pull_request_target", ENTRY)
 
 
@@ -135,7 +135,7 @@ class EntryTest(unittest.TestCase):
 
     def test_fallback_matches_existing_default_blob(self):
         s = (ROOT/".github/workflows/coverage-ut-pre-cutover.yaml").read_text()
-        checkout = "repository: matrixorigin/CI\n          ref: "+OLD
+        checkout = "repository: matrixorigin/CI\n          ref: "+LEGACY_HELPER_SHA
         self.assertEqual(s.count(checkout), 1)
         b = s.replace(checkout, "repository: ${{ job.workflow_repository }}\n          ref: ${{ job.workflow_sha }}").encode()
         self.assertEqual(hashlib.sha1(b"blob "+str(len(b)).encode()+b"\0"+b).hexdigest(),
