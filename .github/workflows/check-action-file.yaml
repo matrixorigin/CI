@@ -13,6 +13,7 @@ on:
       - 'actions/restore-sca-analysis-cache/**'
       - 'actions/seed-go-caches/**'
       - 'actions/setup-cmake/**'
+      - 'actions/setup-env/action.yaml'
       - 'actions/package-macos-release/**'
       - 'actions/upload-artifact-with-retry/action.yaml'
       - 'actions/upload-artifact-with-retry/state-machine.schema.json'
@@ -188,6 +189,7 @@ jobs:
             actions/resolve-sca-license-scope/action.yaml
             actions/restore-sca-analysis-cache/action.yaml
             actions/seed-go-caches/action.yaml
+            actions/setup-env/action.yaml
             actions/package-macos-release/action.yaml
             actions/upload-artifact-with-retry/action.yaml
       - name: Validate artifact retry state machine
