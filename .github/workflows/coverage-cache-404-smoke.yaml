@@ -1,0 +1,62 @@
+name: Coverage cache 404 smoke test
+on:
+  push:
+    branches: [codex/coverage-cache-404-smoke-798fcf0]
+    paths: [.github/workflows/coverage-cache-404-smoke.yaml]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  cache-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          ref: 798fcf088bd5ed0e24420a84e0edaef3b69b0c08
+          path: fix
+          persist-credentials: false
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          ref: 48edf24e44a888c1c4d57318c4eca7cbb310c6e7
+          path: reviewed
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+            config
+      - name: Reproduce the old preflight and verify the fix with live metadata
+        env:
+          CS_CACHE_READ_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          PYTHONPATH="$PWD/reviewed/scripts:$PWD/fix/scripts" python3 - <<'PY'
+          from functools import cache
+          from pathlib import Path
+          from urllib.error import HTTPError
+          import coverage_cache_preflight as fixed
+          import node_cache_native_pvc_catalog as reviewed
+
+          root = Path("reviewed/config")
+          legacy = reviewed.cache.legacy
+          raw_api = legacy.api
+          api = cache(raw_api)
+          old_run = "repos/matrixorigin/matrixone/actions/runs/44089010810"
+          known_run = api("repos/matrixorigin/matrixone/actions/runs/44117113781")
+          if known_run["id"] != 44117113781:
+              raise RuntimeError("Readable producer control did not match")
+          legacy.api = api
+          try:
+              reviewed.preflight(root)
+          except HTTPError as exc:
+              if exc.code != 404 or exc.url != "https://api.github.com/" + old_run:
+                  raise
+              print("Original preflight reproduced the producer 404")
+          else:
+              raise RuntimeError("Original failure was not reproduced")
+          missing = fixed.preflight(root, reviewed, api)
+          if 44089010810 not in missing or 44117113781 in missing:
+              raise RuntimeError("Fixed preflight did not separate missing and readable producers")
+          print("Fixed preflight passed; missing producers:", missing)
+          PY
