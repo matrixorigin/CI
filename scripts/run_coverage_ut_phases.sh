@@ -78,7 +78,7 @@ run_pass() {
   fi
   local started=${SECONDS} status
   log_phase "phase=coverage_ut_${name} status=started packages=$# parallelism=${pass_parallelism}"
-  rm -f "${pass_profile}"
+  rm -f "${pass_profile}" || return 1
   # -coverpkg names every package, so a pass warns once for each one that no
   # package in that pass imports. The single pass never did; drop the warning
   # so the report stays pure JSON, and pass any other stderr through.
@@ -105,20 +105,40 @@ MO_TEST_CLUSTER_ADMISSION_POOL_SIZE="${embedded_parallelism}" \
   run_pass embedded "${embedded_parallelism}" "${embedded_profile}" ${embedded[@]+"${embedded[@]}"}
 embedded_status=$?
 
-# Join the passes into one mode:set profile. The compaction step after this
-# merges duplicate blocks, so only the second header needs dropping.
-rm -f "${profile}"
-for pass_profile in "${ordinary_profile}" "${embedded_profile}"; do
-  [[ -s "${pass_profile}" ]] || continue
-  if [[ -s "${profile}" ]]; then
-    tail -n +2 "${pass_profile}" >> "${profile}"
-  else
-    cat "${pass_profile}" > "${profile}"
-  fi
-  rm -f "${pass_profile}"
-done
+# Stage beside the destination so rename is atomic. Only consume profiles
+# from passes we ran, and keep them for diagnosis if any merge step fails.
+merge_profiles() (
+  local staged part header
+  (( $# > 0 )) || { echo "no coverage passes to merge" >&2; return 1; }
+  [[ ! -d "${profile}" ]] || { echo "profile destination is a directory: ${profile}" >&2; return 1; }
+  staged=$(mktemp "${profile}.tmp.XXXXXXXX") || return 1
+  trap 'rm -f -- "${staged}"' EXIT
+  printf 'mode: set\n' > "${staged}" || return 1
+  for part in "$@"; do
+    if ! IFS= read -r header < "${part}" || [[ "${header}" != 'mode: set' ]]; then
+      echo "missing or invalid mode:set profile: ${part}" >&2
+      return 1
+    fi
+    tail -n +2 "${part}" >> "${staged}" || return 1
+  done
+  mv -f -- "${staged}" "${profile}" || return 1
+  trap - EXIT
+  rm -f -- "$@"
+)
+
+parts=()
+[[ -z "${ordinary[0]:-}" ]] || parts+=("${ordinary_profile}")
+[[ -z "${embedded[0]:-}" ]] || parts+=("${embedded_profile}")
+merge_profiles "${parts[@]}"
+merge_status=$?
+if (( merge_status != 0 )); then
+  echo "coverage profile merge failed: ${profile}" >&2
+fi
 
 if (( ordinary_status != 0 )); then
   exit "${ordinary_status}"
 fi
-exit "${embedded_status}"
+if (( embedded_status != 0 )); then
+  exit "${embedded_status}"
+fi
+exit "${merge_status}"

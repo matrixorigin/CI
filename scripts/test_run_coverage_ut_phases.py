@@ -58,6 +58,7 @@ class RunCoverageUTPhasesTest(unittest.TestCase):
         fake = bin_dir / "go"
         fake.write_text(FAKE_GO)
         fake.chmod(0o755)
+        self.bin = bin_dir
         self.path = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
         self.log = self.tmp / "go.log"
         self.profile = self.tmp / "coverage.out"
@@ -114,7 +115,7 @@ class RunCoverageUTPhasesTest(unittest.TestCase):
         profile = self.profile.read_text().splitlines()
         self.assertEqual(profile[0], "mode: set")
         self.assertEqual(profile.count("mode: set"), 1)
-        self.assertEqual(len(profile), 5)
+        self.assertEqual(profile[1:], [f"{p}/a.go:1.1,2.2 1 1" for p in ("a", "b", "emb1", "emb2")])
         self.assertFalse(Path(f"{self.profile}.ordinary").exists())
         self.assertFalse(Path(f"{self.profile}.embedded").exists())
         timing = self.timing.read_text()
@@ -122,11 +123,53 @@ class RunCoverageUTPhasesTest(unittest.TestCase):
         self.assertIn("phase=coverage_ut_embedded status=0", timing)
 
     def test_no_embedded_packages_is_one_pass(self) -> None:
+        # A skipped pass must not contribute an old file from a prior run.
+        Path(f"{self.profile}.embedded").write_text("mode: set\nstale/a.go:1.1,2.2 1 1\n")
         result = self.run_phases(["a", "b"], [])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([c["packages"] for c in self.calls()], [["a", "b"]])
         self.assertIn("phase=coverage_ut_embedded status=skipped", self.timing.read_text())
         self.assertEqual(len(self.profile.read_text().splitlines()), 3)
+
+    def test_embedded_only_ignores_stale_ordinary_profile(self) -> None:
+        Path(f"{self.profile}.ordinary").write_text("mode: set\nstale/a.go:1.1,2.2 1 1\n")
+        result = self.run_phases(["emb"], ["emb"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.profile.read_text().splitlines(), ["mode: set", "emb/a.go:1.1,2.2 1 1"])
+
+    def test_merge_read_failure_preserves_profiles_without_publishing_partial_output(self) -> None:
+        tail = self.bin / "tail"
+        tail.write_text('#!/bin/sh\ncase "$*" in *".embedded") echo partial; exit 28;; esac\n'
+                        'exec /usr/bin/tail "$@"\n')
+        tail.chmod(0o755)
+        result = self.run_phases(["a", "emb"], ["emb"])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.profile.exists())
+        for name in ("ordinary", "embedded"):
+            self.assertTrue(Path(f"{self.profile}.{name}").is_file(), name)
+        self.assertEqual(list(self.tmp.glob("coverage.out.tmp.*")), [])
+
+    def test_failed_publish_preserves_previous_output_and_inputs(self) -> None:
+        self.profile.write_text("previous complete profile\n")
+        mv = self.bin / "mv"
+        mv.write_text("#!/bin/sh\nexit 28\n")
+        mv.chmod(0o755)
+        result = self.run_phases(["a", "emb"], ["emb"])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.profile.read_text(), "previous complete profile\n")
+        for name in ("ordinary", "embedded"):
+            self.assertTrue(Path(f"{self.profile}.{name}").is_file(), name)
+        self.assertEqual(list(self.tmp.glob("coverage.out.tmp.*")), [])
+
+    def test_missing_empty_or_wrong_mode_profile_cannot_count_as_success(self) -> None:
+        go = self.bin / "go"
+        for sabotage in ('rm "$profile"', ': > "$profile"', 'echo "mode: count" > "$profile"'):
+            with self.subTest(sabotage=sabotage):
+                go.write_text(FAKE_GO.replace('exit "${status}"',
+                              'if [[ "$profile" == *.embedded ]]; then ' + sabotage + '; fi\nexit "${status}"'))
+                result = self.run_phases(["a", "emb"], ["emb"])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(self.profile.exists())
 
     def test_ordinary_failure_still_runs_embedded_pass(self) -> None:
         result = self.run_phases(["a", "emb"], ["emb"], fail_status="a=1")
