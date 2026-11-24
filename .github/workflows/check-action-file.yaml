@@ -25,6 +25,8 @@ on:
       - 'scripts/test_coverage_standby.py'
       - 'scripts/coverage_pr_entry.py'
       - 'scripts/test_coverage_pr_entry.py'
+      - 'scripts/coverage_cache_preflight.py'
+      - 'scripts/test_coverage_cache_preflight.py'
       - 'scripts/test_merge_trigger_tke_subject.py'
       - 'scripts/run_coverage_ut_phases.sh'
       - 'scripts/test_run_coverage_ut_phases.py'
@@ -113,7 +115,7 @@ jobs:
         run: python3 scripts/test_coverage_native_runtime.py -v
       - name: Test CS S3 routing and PR entry / two-group handoff
         timeout-minutes: 3
-        run: python3 -m unittest scripts.test_cs_s3_coverage scripts.test_coverage_pr_entry scripts.test_coverage_standby -v
+        run: python3 -m unittest scripts.test_cs_s3_coverage scripts.test_coverage_pr_entry scripts.test_coverage_standby scripts.test_coverage_cache_preflight -v
       - name: Test TKE merge subject identity contract
         run: python3 scripts/test_merge_trigger_tke_subject.py -v
       - name: Test coverage UT pass split

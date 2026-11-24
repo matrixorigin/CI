@@ -77,7 +77,9 @@ jobs:
           repository: matrixorigin/CI
           ref: ${{ job.workflow_sha }}
           path: entry
-          sparse-checkout: scripts/coverage_pr_entry.py
+          sparse-checkout: |
+            scripts/coverage_pr_entry.py
+            scripts/coverage_cache_preflight.py
           sparse-checkout-cone-mode: false
           persist-credentials: false
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
@@ -127,7 +129,7 @@ jobs:
         if: steps.entry.outputs.route == 'cache'
         env:
           CS_CACHE_READ_TOKEN: ${{ secrets.CS_COVERAGE_CACHE_READ_TOKEN || github.token }}
-        run: python3 reviewed/scripts/node_cache_native_pvc_catalog.py preflight
+        run: PYTHONPATH="$GITHUB_WORKSPACE/reviewed/scripts" python3 entry/scripts/coverage_cache_preflight.py reviewed/config
       - name: Retain the authorized PR head receipt
         if: steps.entry.outputs.route == 'cache'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
