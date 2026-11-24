@@ -148,6 +148,35 @@ jobs:
         python3 .ci-workflow/scripts/node_cache_native_pvc_catalog.py materialize
         python3 .ci-workflow/scripts/node_compile_cache.py configure --catalog "$RUNNER_TEMP/cs-reviewed-persistent-catalog.json"
         python3 .ci-workflow/scripts/node_cache_pr_source.py record
+    - name: Load optional read-only cache observer
+      id: refresh_helper
+      if: vars.CS_CACHE_REFRESH_OBSERVE != 'false' || vars.CS_CACHE_REFRESH_READ_SITE == steps.reader.outputs.site
+      continue-on-error: true
+      timeout-minutes: 2
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      with:
+        repository: matrixorigin/CI
+        ref: ${{ job.workflow_sha }}
+        path: .refresh-observer
+        sparse-checkout: |
+          scripts/cache_refresh_demand.py
+          scripts/cache_refresh_release.py
+        sparse-checkout-cone-mode: false
+        persist-credentials: false
+    - name: Select independently released generation (read only; site opt-in)
+      id: refresh_release
+      if: vars.CS_CACHE_REFRESH_READ_SITE != '' && vars.CS_CACHE_REFRESH_READ_SITE == steps.reader.outputs.site && steps.refresh_helper.outcome == 'success'
+      env:
+        CS_CACHE_READ_TOKEN: ${{ secrets.CS_COVERAGE_CACHE_READ_TOKEN || github.token }}
+      run: python3 -I .refresh-observer/scripts/cache_refresh_release.py --helpers .ci-workflow
+    - name: Record cache profile hint (not a publish request)
+      if: vars.CS_CACHE_REFRESH_OBSERVE != 'false' && steps.refresh_helper.outcome == 'success'
+      continue-on-error: true
+      timeout-minutes: 1
+      run: |
+        set -euo pipefail
+        python3 -I .refresh-observer/scripts/cache_refresh_demand.py observe --temp "$RUNNER_TEMP" --repo "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/cache-refresh-hint.partial"
+        mv "$RUNNER_TEMP/cache-refresh-hint.partial" "$RUNNER_TEMP/cache-refresh-hint.json"
     - id: coverage_ut
       name: Run coverage unit tests
       timeout-minutes: 190
@@ -639,6 +668,9 @@ jobs:
       run: |
         set -euo pipefail
         python3 .ci-workflow/scripts/node_compile_cache.py accept --state "$RUNNER_TEMP/cs-node-cache/state.json"
+    - name: Attribute actual reads to the released generation
+      if: always() && !cancelled() && steps.refresh_release.outcome == 'success'
+      run: python3 -I .refresh-observer/scripts/cache_refresh_release.py --helpers .ci-workflow --summarize
     - id: upload_node_cache_failures
       name: Upload sanitized incremental failure evidence
       if: ${{ always() && !cancelled() && true }}
@@ -784,6 +816,9 @@ jobs:
           ${{ runner.temp }}/cs-reviewed-persistent-catalog.json
           ${{ runner.temp }}/cs-node-cache/persistent-authorization.json
           ${{ runner.temp }}/go-rebuild-counts.json
+          ${{ runner.temp }}/cache-refresh-hint.json
+          ${{ runner.temp }}/cs-node-cache/release-selection.json
+          ${{ runner.temp }}/cs-node-cache/release-consumption.json
         if-no-files-found: warn
         retention-days: 7
     - id: upload_coverage_diagnostics

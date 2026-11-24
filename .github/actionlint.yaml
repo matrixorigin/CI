@@ -1,5 +1,6 @@
 self-hosted-runner:
   labels:
+    - cs-cache-refresh-controller
     - amd64-mo-shanghai-ut-safe
     - cs-node-cache-7c14g
     - amd64-mo-shanghai-8c16g
@@ -14,6 +15,9 @@ self-hosted-runner:
     - mac-arm64-mini
 
 paths:
+  .github/workflows/coverage-cache-refresh.yaml:
+    ignore:
+      - 'property "workflow_sha" is not defined'
   .github/workflows/coverage-worker-cs.yaml:
     ignore:
       - 'property "workflow_sha" is not defined'
