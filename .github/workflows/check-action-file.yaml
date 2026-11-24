@@ -26,6 +26,8 @@ on:
       - 'scripts/coverage_pr_entry.py'
       - 'scripts/test_coverage_pr_entry.py'
       - 'scripts/test_merge_trigger_tke_subject.py'
+      - 'scripts/run_coverage_ut_phases.sh'
+      - 'scripts/test_run_coverage_ut_phases.py'
       - 'scripts/compact_coverage_profile.go'
       - 'scripts/compact_coverage_profile_test.go'
       - 'scripts/*race_seed*.py'
@@ -114,6 +116,8 @@ jobs:
         run: python3 -m unittest scripts.test_cs_s3_coverage scripts.test_coverage_pr_entry scripts.test_coverage_standby -v
       - name: Test TKE merge subject identity contract
         run: python3 scripts/test_merge_trigger_tke_subject.py -v
+      - name: Test coverage UT pass split
+        run: python3 scripts/test_run_coverage_ut_phases.py -v
       - name: Test SCA license scope selection
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:

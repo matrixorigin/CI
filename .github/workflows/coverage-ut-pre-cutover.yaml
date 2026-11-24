@@ -191,10 +191,11 @@ jobs:
         with:
           token: ${{ secrets.TOKEN_ACTION }}
           repository: matrixorigin/CI
-          ref: 5fc75d89bc2841e50ae1557d28ebd9aaec6ec3e2
+          ref: a5b88037c61c0072f8bbd20427d35c3d1b4a4432
           sparse-checkout: |
             scripts/prepare_coverage_cgo.sh
             scripts/run_coverage_ut.py
+            scripts/run_coverage_ut_phases.sh
             scripts/compact_coverage_profile.go
             scripts/summarize_coverage_ut.py
             scripts/summarize_ut_report.py
@@ -241,6 +242,9 @@ jobs:
           # packages on one admission lock. Same-process exclusion is preserved.
           MO_TEST_CLUSTER_ADMISSION_POOL_SIZE: "2"
           COVERAGE_UT_PACKAGE_PARALLELISM: "8"
+          # Embedded-cluster packages run in a second pass on their own (see
+          # scripts/run_coverage_ut_phases.sh); this bounds that pass.
+          COVERAGE_UT_EMBEDDED_PACKAGE_PARALLELISM: "2"
           COVERAGE_UT_DISCOVERY_TIMEOUT_SECONDS: "900"
           COVERAGE_UT_CGO_TIMEOUT_SECONDS: "1800"
         run: |
@@ -370,6 +374,36 @@ jobs:
           set -e
           phase_end "${phase_status}" "${COVERAGE_UT_CGO_TIMEOUT_SECONDS}"
           (( phase_status == 0 )) || exit "${phase_status}"
+          # Find the packages whose tests start an embedded MO cluster, with the
+          # same dependency-graph rule optools/run_ut.sh uses for the race UT.
+          # If the checkout predates that helper or the lookup fails, run the
+          # single all-package pass as before.
+          scope_file="${RUNNER_TEMP}/ut-coverage-scope.txt"
+          embedded_file="${RUNNER_TEMP}/ut-coverage-embedded-packages.txt"
+          printf '%s\n' "${test_scope}" > "${scope_file}"
+          : > "${embedded_file}"
+          phase_start classify_embedded
+          classify_status=0
+          if [ -f "$GITHUB_WORKSPACE/optools/ut_tools.bash" ]; then
+            set +e
+            # The package list is passed as arguments, unquoted on purpose.
+            # shellcheck disable=SC2086
+            timeout --kill-after=30s "${COVERAGE_UT_DISCOVERY_TIMEOUT_SECONDS}s" \
+              bash -c 'source "$1"; shift; TAGS=matrixone_test GO_MODULE_MODE=-mod=readonly list_embedded_cluster_test_packages "$@"' \
+              classify "$GITHUB_WORKSPACE/optools/ut_tools.bash" ${test_scope} \
+              > "${embedded_file}.tmp" 2>> "${package_error}"
+            classify_status=$?
+            set -e
+            if (( classify_status == 0 )); then
+              mv "${embedded_file}.tmp" "${embedded_file}"
+            else
+              rm -f "${embedded_file}.tmp"
+            fi
+          fi
+          phase_end "${classify_status}"
+          embedded_count=$(awk 'NF { count++ } END { print count + 0 }' "${embedded_file}")
+          echo "coverage_ut embedded_package_count=${embedded_count} embedded_package_parallelism=${COVERAGE_UT_EMBEDDED_PACKAGE_PARALLELISM}" | tee -a "${phase_timing}"
+
           thirdparties_install_dir="$GITHUB_WORKSPACE/thirdparties/install"
           cgo_cflags="-I${GITHUB_WORKSPACE}/cgo -I${thirdparties_install_dir}/include"
           cgo_ldflags="-L${GITHUB_WORKSPACE}/cgo -lmo -Wl,-rpath,${GITHUB_WORKSPACE}/cgo -L${thirdparties_install_dir}/lib -lusearch_c -Wl,-rpath,${thirdparties_install_dir}/lib -lm"
@@ -437,11 +471,14 @@ jobs:
             --heartbeat-seconds "${COVERAGE_UT_HEARTBEAT_SECONDS}" \
             --console-heartbeat-seconds "${COVERAGE_UT_CONSOLE_HEARTBEAT_SECONDS}" \
             -- env CGO_CFLAGS="${cgo_cflags}" CGO_LDFLAGS="${cgo_ldflags}" \
-            go test -mod=readonly -count=1 -json -short -v -tags matrixone_test \
+            "$GITHUB_WORKSPACE/.ci-workflow/scripts/run_coverage_ut_phases.sh" \
+            --profile "${coverage_profile}" --phase-timing "${phase_timing}" \
+            --parallelism "${COVERAGE_UT_PACKAGE_PARALLELISM}" \
+            --embedded-parallelism "${COVERAGE_UT_EMBEDDED_PACKAGE_PARALLELISM}" \
+            --scope "${scope_file}" --embedded "${embedded_file}" \
+            -- -mod=readonly -count=1 -json -short -v -tags matrixone_test \
             -timeout=20m \
-            -p "${COVERAGE_UT_PACKAGE_PARALLELISM}" \
-            -covermode=set -coverprofile="${coverage_profile}" -coverpkg="${cover_pkgs}" \
-            ${test_scope} &
+            -covermode=set -coverpkg="${cover_pkgs}" &
           coverage_runner_pid=$!
           fallback_deadline=$((SECONDS + COVERAGE_UT_FALLBACK_TIMEOUT_SECONDS))
           while runner_alive "${coverage_runner_pid}"; do

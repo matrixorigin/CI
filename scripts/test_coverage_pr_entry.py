@@ -15,7 +15,7 @@ from scripts.coverage_pr_entry import ENTRY, PROJECT, main, route
 
 ROOT = Path(__file__).resolve().parents[1]
 PIN = "48edf24e44a888c1c4d57318c4eca7cbb310c6e7"
-OLD = "5fc75d89bc2841e50ae1557d28ebd9aaec6ec3e2"
+OLD = "a5b88037c61c0072f8bbd20427d35c3d1b4a4432"
 CALLER = (PROJECT, "pull_request_target", ENTRY)
 
 
@@ -139,4 +139,4 @@ class EntryTest(unittest.TestCase):
         self.assertEqual(s.count(checkout), 1)
         b = s.replace(checkout, "repository: ${{ job.workflow_repository }}\n          ref: ${{ job.workflow_sha }}").encode()
         self.assertEqual(hashlib.sha1(b"blob "+str(len(b)).encode()+b"\0"+b).hexdigest(),
-                         "12c2e0d3eccbb2b0f7e21b3379463cef9fa17498")
+                         "52b9213fa50e4de5184b9089ef15f13f82cf8a54")
