@@ -734,21 +734,40 @@ class ShortWorkerTitle(unittest.TestCase):
             self.assertIs(post.call_args.args[1]["return_run_details"], True)
             lookup.assert_called_once_with("/actions/runs/51/attempts/1/jobs?per_page=100")
 
+    def test_dispatch_retries_a_queued_marker_for_the_returned_id(self):
+        queued = dict(self.marker, status="queued", conclusion=None)
+        with patch.object(s, "parent_meta"), patch.object(s, "api", return_value=({"workflow_run_id": 51}, 0)) as post, \
+             patch.object(s, "one", side_effect=[{"total_count": 1, "jobs": [m]} for m in (queued, self.marker)]), \
+             patch.object(s, "run", return_value=self.meta), patch.object(s.time, "sleep") as sleep:
+            self.assertEqual(s.dispatch(self.ticket, "cs", "b"*40), 51)
+            post.assert_called_once()
+            sleep.assert_called_once_with(5)
+        for changes in (dict(run_id=90), dict(run_attempt=2), dict(conclusion="success")):
+            with self.subTest(changes=changes), patch.object(s, "one", return_value={
+                     "total_count": 1, "jobs": [{**queued, **changes}]}):
+                with self.assertRaisesRegex(ValueError, "invalid worker identity marker") as err:
+                    s.identity_title(51, self.meta)
+                self.assertNotIsInstance(err.exception, s.WorkerIdentityPending)
+
     def test_204_dispatch_ignores_unindexed_same_title_but_rejects_verified_duplicates(self):
         other = dict(self.meta, id=52)
-        for duplicate in (False, True):
+        for state in ("missing", "queued", "duplicate"):
             def read(path):
                 if "/actions/workflows/" in path:
                     return {"workflow_runs": [other, self.meta]}
                 if "/52/" in path:
-                    return ({"total_count": 1, "jobs": [dict(self.marker, run_id=52)]} if duplicate
-                            else {"total_count": 0, "jobs": []})
+                    if state == "missing":
+                        return {"total_count": 0, "jobs": []}
+                    marker = dict(self.marker, run_id=52)
+                    if state == "queued":
+                        marker.update(status="queued", conclusion=None)
+                    return {"total_count": 1, "jobs": [marker]}
                 return {"total_count": 1, "jobs": [self.marker]}
 
-            with self.subTest(duplicate=duplicate), patch.object(s, "parent_meta"), \
+            with self.subTest(state=state), patch.object(s, "parent_meta"), \
                  patch.object(s, "api", return_value=({}, 0)) as post, patch.object(s, "one", side_effect=read), \
                  patch.object(s, "run", return_value=self.meta) as metadata, patch.object(s.time, "sleep") as sleep:
-                if duplicate:
+                if state == "duplicate":
                     with self.assertRaisesRegex(ValueError, "duplicate dispatch"):
                         s.dispatch(self.ticket, "cs", "b"*40)
                     metadata.assert_not_called()

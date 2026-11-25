@@ -47,6 +47,8 @@ jobs:
         GROUP: ${{ inputs.group }}
         POOL: cs
       run: python3 -I .standby/scripts/coverage_standby.py admit
+    - name: Preserve the trusted failure summary helper
+      run: install -m 0444 .standby/scripts/summarize_ut_report.py "$RUNNER_TEMP/coverage-summarize-ut-report.py"
     - id: reader
       name: Verify assigned reader before checkout
       shell: bash
@@ -174,6 +176,18 @@ jobs:
         COVERAGE_GROUP_COUNT: '2'
       run: |
         set -euo pipefail
+        phase_failure="${RUNNER_TEMP}/ut-coverage-phase-failure.txt"
+        phase_name=configure_coverage
+        rm -f "${phase_failure}"
+        record_phase_failure() {
+          printf 'phase=%s status=%s\n' "${phase_name}" "$1" > "${phase_failure}"
+        }
+        record_unreported_phase_failure() {
+          if (( $1 != 0 )) && [[ ! -s "${phase_failure}" && ! -s "${coverage_report:-}" ]]; then
+            record_phase_failure "$1"
+          fi
+        }
+        trap 'record_unreported_phase_failure "$?"' EXIT
         cd "$GITHUB_WORKSPACE"
         test "${CS_CACHE_ENV:-}" = "$CS_S3_ENV"
         echo "Coverage comparison: GOMAXPROCS=${GOMAXPROCS}; package parallelism=${COVERAGE_UT_PACKAGE_PARALLELISM}"
@@ -225,6 +239,9 @@ jobs:
             phase_status_suffix=" raw_status=${raw_phase_status}"
           fi
           echo "phase=${phase_name} status=${phase_status} elapsed_seconds=${phase_elapsed_seconds}${phase_status_suffix}" >> "${phase_timing}"
+          if [ "${phase_status}" != '0' ]; then
+            record_phase_failure "${phase_status}"
+          fi
           if [ "${phase_status}" = '124' ]; then
             {
               echo "Coverage UT phase exceeded its internal deadline: ${phase_name}"
@@ -256,7 +273,7 @@ jobs:
                 echo 'CGo preparation log (last 100 lines):'
                 tail -n 100 "${cgo_log}"
               fi
-            } > "${phase_failure}"
+            } >> "${phase_failure}"
           fi
         }
 
@@ -291,6 +308,7 @@ jobs:
         set -e
         phase_end "${phase_status}" "${COVERAGE_UT_DISCOVERY_TIMEOUT_SECONDS}"
         (( phase_status == 0 )) || exit "${phase_status}"
+        phase_name=select_coverage_group
         package_count=$(printf '%s\n' "${test_scope}" | awk 'NF { count++ } END { print count + 0 }')
         instrumented_package_count=$(printf '%s\n' "${cover_pkgs}" | awk -F, '{ print NF }')
         printf '%s\n' "${test_scope}" > "$RUNNER_TEMP/coverage-full-scope.txt"
@@ -325,6 +343,7 @@ jobs:
         set -e
         phase_end "${phase_status}" "${COVERAGE_UT_CGO_TIMEOUT_SECONDS}"
         (( phase_status == 0 )) || exit "${phase_status}"
+        phase_name=configure_native_flags
         thirdparties_install_dir="$GITHUB_WORKSPACE/thirdparties/install"
         cgo_cflags="-I${GITHUB_WORKSPACE}/cgo -I${thirdparties_install_dir}/include"
         if [ -n "${CS_NODE_CACHE_STATE:-}" ]; then
@@ -352,6 +371,7 @@ jobs:
         done
         echo '- Restricted-account S3 initialization, basic and streaming smoke passed.' >> "$GITHUB_STEP_SUMMARY"
 
+        phase_name=launch_coverage_suite
         # Keep the same all-package scope, using environment-local CS S3.
         # Save the verbose JSON report as an artifact
         # rather than flooding the Actions console; the next step prints a
@@ -561,7 +581,7 @@ jobs:
         if [ ! -s "${report}" ]; then
           echo 'UT JSON report was not produced; inspect the failed test step.' | tee -a "${summary}"
         else
-          python3 -I "$GITHUB_WORKSPACE/.standby/scripts/summarize_ut_report.py" "${report}" \
+          python3 -I "$RUNNER_TEMP/coverage-summarize-ut-report.py" "${report}" \
             --compact-output "$RUNNER_TEMP/ut-failure-compact.txt" | tee -a "${summary}" || true
           status_result=$(jq -r '.result // "unknown"' "${status_file}" 2>/dev/null || true)
           if [ "${status_result}" = 'timeout' ]; then
@@ -826,7 +846,7 @@ jobs:
           jq -r '.reason | strings | gsub("[^a-zA-Z0-9_]"; "") | .[0:80] | "Coverage UT status: " + .' "$status" || true
         fi
         if [[ -s "$phase" && ! -L "$phase" ]]; then
-          head -c 512 "$phase" | awk '/^phase=[a-z_]+([[:space:]]|$)/ {print "Coverage UT phase: " substr($1, 7); exit}' || true
+          head -c 512 "$phase" | awk '/^phase=[a-z][a-z0-9_]*([[:space:]]|$)/ {print "Coverage UT phase: " substr($1, 7, 80); exit}' || true
         fi
         if [[ -s "$failure" && ! -L "$failure" ]]; then
           # Keep text produced by the tests inert as GitHub workflow commands.

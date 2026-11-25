@@ -92,7 +92,8 @@ class CSS3CoverageTest(unittest.TestCase):
             for attempt in ("1", "2"):
                 with self.subTest(stack=stack, config=bool(config), attempt=attempt), tempfile.TemporaryDirectory() as directory:
                     summary = Path(directory) / "summary"
-                    env = dict(PATH=os.environ["PATH"], GITHUB_WORKSPACE=directory, GITHUB_STEP_SUMMARY=str(summary),
+                    env = dict(PATH=os.environ["PATH"], RUNNER_TEMP=directory,
+                               GITHUB_WORKSPACE=directory, GITHUB_STEP_SUMMARY=str(summary),
                                GITHUB_RUN_ID="123", GITHUB_RUN_ATTEMPT=attempt, CS_CACHE_ENV=stack, CS_S3_ENV=stack, TEST_S3FS_CS=config,
                                COVERAGE_GROUP="0", GOMAXPROCS="7", COVERAGE_UT_PACKAGE_PARALLELISM="7",
                                endpoint="legacy", TEST_S3FS_ALIYUN="legacy", TEST_S3FS_QCLOUD="legacy")

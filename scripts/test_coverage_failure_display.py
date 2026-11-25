@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -65,8 +66,18 @@ class CoverageFailureDisplayTest(unittest.TestCase):
         script = textwrap.dedent(step.split("      run: |\n", 1)[1])
         with tempfile.TemporaryDirectory() as directory:
             temp = Path(directory)
-            (temp / ".standby").mkdir()
-            (temp / ".standby/scripts").symlink_to(ROOT / "scripts", target_is_directory=True)
+            workspace = temp / "workspace"
+            (workspace / ".standby").mkdir(parents=True)
+            (workspace / ".standby/scripts").symlink_to(ROOT / "scripts", target_is_directory=True)
+            copy_step = "    - name: Preserve the trusted failure summary helper\n"
+            source_step = "    - name: Checkout MatrixOne source\n"
+            self.assertLess(workflow.index(copy_step), workflow.index(source_step))
+            copy_cmd = workflow.split(copy_step, 1)[1].split("      run: ", 1)[1].splitlines()[0]
+            subprocess.run(["bash", "-ec", copy_cmd], cwd=workspace,
+                           env={**os.environ, "RUNNER_TEMP": str(temp)}, check=True)
+            # actions/checkout clears the root here because it has no root .git.
+            shutil.rmtree(workspace)
+            workspace.mkdir()
             (temp / "ut-coverage-status.json").write_text('{"result":"failed"}')
             (temp / "ut-coverage-report.json").write_text(json.dumps({
                 "Action": "fail", "Package": "example/pkg", "Test": "TestFailed"
@@ -75,7 +86,7 @@ class CoverageFailureDisplayTest(unittest.TestCase):
             go_stub = 'go() { [[ -s "$RUNNER_TEMP/ut-failure-compact.txt" ]] || exit 97; exit 124; }\n'
             interrupted = subprocess.run(
                 ["bash", "-e", "-c", go_stub + script],
-                env={**os.environ, "RUNNER_TEMP": str(temp), "GITHUB_WORKSPACE": str(temp),
+                env={**os.environ, "RUNNER_TEMP": str(temp), "GITHUB_WORKSPACE": str(workspace),
                      "GITHUB_STEP_SUMMARY": str(temp / "summary.md")},
                 text=True, capture_output=True, check=False,
             )
@@ -83,6 +94,30 @@ class CoverageFailureDisplayTest(unittest.TestCase):
         self.assertEqual(interrupted.returncode, 124, interrupted.stderr)
         self.assertEqual(result.returncode, 1)
         self.assertIn("FAILED example/pkg / TestFailed", result.stdout)
+
+    def test_actual_phase_producer_reports_timeouts_and_pre_report_failures(self):
+        workflow = (ROOT / ".github/workflows/coverage-worker-cs.yaml").read_text()
+        step = workflow.split("    - id: coverage_ut\n", 1)[1]
+        script = textwrap.dedent(step.split("      run: |\n", 1)[1].split("    - name: Print failed coverage UT", 1)[0])
+        setup = script.split('cd "$GITHUB_WORKSPACE"', 1)[0]
+        phases = "phase_start() {" + script.split("phase_start() {", 1)[1].split("\nphase_start discover_packages", 1)[0]
+        for phase, code, command in (
+                ("cs_s3_smoke", 7, "phase_start cs_s3_smoke; phase_end 7; exit 7"),
+                ("prepare_cgo", 124, "phase_start prepare_cgo; phase_end 124 30; exit 124"),
+                ("cs_s3_smoke", 1, "phase_start cs_s3_smoke; phase_end 0; exit 1"),
+                ("configure_coverage", 1, "exit 1")):
+            with self.subTest(phase=phase, code=code), tempfile.TemporaryDirectory() as directory:
+                temp = Path(directory)
+                fixtures = ('phase_timing="$RUNNER_TEMP/timing"\n'
+                            'timeout_diagnostics="$RUNNER_TEMP/timeout"\n'
+                            'cgo_log="$RUNNER_TEMP/cgo"\npackage_error="$RUNNER_TEMP/packages"\n')
+                failure = subprocess.run(["bash", "-ec", setup+fixtures+phases+command],
+                                         env={**os.environ, "RUNNER_TEMP": str(temp)},
+                                         capture_output=True, text=True, check=False)
+                self.assertEqual(failure.returncode, code, failure.stderr)
+                record = (temp / "ut-coverage-phase-failure.txt").read_text()
+                self.assertTrue(record.startswith(f"phase={phase} status={code}\n"), record)
+                self.assertIn(f"Coverage UT phase: {phase}", self.run_failure_step(temp).stdout)
 
     def test_red_step_prefixes_and_bounds_log_output(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -89,11 +89,13 @@ def identity_title(r, m):
         raise WorkerIdentityPending("worker identity is not indexed")
     check(len(marked) == 1, "ambiguous worker identity")
     marker = marked[0]
-    check(marker["run_id"] == r and marker["run_attempt"] == 1
-          and marker["status"] == "completed" and marker["conclusion"] == "skipped",
-          "invalid worker identity marker")
+    check(marker["run_id"] == r and marker["run_attempt"] == 1, "invalid worker identity marker")
     canonical = marker["name"][:-len(IDENTITY_SUFFIX)]
     check(canonical.split("/")[3:4] == [display[-1]], "worker identity group differs from title")
+    if marker["status"] in ("queued", "requested", "pending", "waiting", "in_progress") and marker["conclusion"] is None:
+        raise WorkerIdentityPending("worker identity marker has not completed")
+    check(marker["status"] == "completed" and marker["conclusion"] == "skipped",
+          "invalid worker identity marker")
     return canonical
 
 

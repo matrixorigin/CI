@@ -153,7 +153,7 @@ class EntryTest(unittest.TestCase):
         # Undo only the review-time diagnostic reordering for the digest;
         # production writes the compact summary before optional analysis.
         marker_summary = (
-            '          python3 -I "$GITHUB_WORKSPACE/.standby/scripts/summarize_ut_report.py" "${report}" \\\n'
+            '          python3 -I "$RUNNER_TEMP/coverage-summarize-ut-report.py" "${report}" \\\n'
             '            --compact-output "$RUNNER_TEMP/ut-failure-compact.txt" | tee -a "${summary}" || true\n'
         )
         old_summary = ('          python "$GITHUB_WORKSPACE/.ci-workflow/scripts/summarize_ut_report.py" '
@@ -167,6 +167,19 @@ class EntryTest(unittest.TestCase):
         self.assertEqual(analysis.count(summary_slot), 1)
         analysis = analysis.replace(marker_summary, "").replace(summary_slot, "          fi\n"+old_summary+"        fi\n")
         steps = before + analysis_start + analysis + diagnostics_start + after
+        # Ignore diagnostic-only instrumentation, not the smoke command or
+        # its mandatory pass assertions, when comparing the measured body.
+        phase_setup = '        phase_failure="${RUNNER_TEMP}/ut-coverage-phase-failure.txt"\n        phase_name=configure_coverage\n'
+        self.assertEqual(steps.count(phase_setup), 1)
+        before, after = steps.split(phase_setup, 1)
+        steps = before + after.split('        trap \'record_unreported_phase_failure "$?"\' EXIT\n', 1)[1]
+        record = '          if [ "${phase_status}" != \'0\' ]; then\n            record_phase_failure "${phase_status}"\n          fi\n'
+        self.assertEqual(steps.count(record), 1)
+        steps = steps.replace(record, '').replace('} >> "${phase_failure}"', '} > "${phase_failure}"')
+        for phase in ("select_coverage_group", "configure_native_flags", "launch_coverage_suite"):
+            marker_phase = f"        phase_name={phase}\n"
+            self.assertEqual(steps.count(marker_phase), 1)
+            steps = steps.replace(marker_phase, "")
         # The failure step may print diagnostics, but its condition, timeout,
         # placement and final exit must match the measured worker.
         marker = "    - name: Fail on coverage UT failure\n"
