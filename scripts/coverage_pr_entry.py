@@ -35,10 +35,9 @@ def route(ctx, event, live, member_status):
     # proof of membership; like a 404 it must never grant access to cache runners.
     require(member_status in (204, 302, 404), "membership could not be verified")
     # Never use an arbitrary caller-selected head, runner label or environment.
-    # PR type labels are metadata, not proof of trust. The old path still
-    # enforces its own org/safe-to-test eligibility.
-    if (base not in CACHE_BASE_REFS or live["draft"] or live["head"]["repo"]["archived"] or
-            member_status != 204):
+    # Draft and PR type labels do not alter CS eligibility. The old path
+    # still enforces its own org/safe-to-test eligibility.
+    if base not in CACHE_BASE_REFS or live["head"]["repo"]["archived"] or member_status != 204:
         return {"route": "legacy", "allowed": "false"}
     return {"route": "cache", "allowed": "true", "head_sha": sha, "head_repository": source}
 

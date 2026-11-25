@@ -65,13 +65,30 @@ class EntryTest(unittest.TestCase):
         for labels in ([], [{"name": "kind/refactor"}]):
             self.pr["labels"] = labels
             self.assertEqual(route(CALLER, self.event, self.pr, 204)["route"], "cache")
-        self.pr["draft"] = True
-        self.assertEqual(route(CALLER, self.event, self.pr, 204)["route"], "legacy")
-        self.pr["draft"] = False
         self.pr["head"]["repo"]["archived"] = True
         self.assertEqual(route(CALLER, self.event, self.pr, 204)["route"], "legacy")
         self.pr["head"]["repo"]["archived"] = False
         self.pr["base"]["ref"] = "main"
+        with self.assertRaisesRegex(ValueError, "stale or invalid PR identity"):
+            route(CALLER, self.event, self.pr, 204)
+
+    def test_drafts_use_the_same_routing_and_identity_checks(self):
+        self.pr["draft"] = self.event["pull_request"]["draft"] = True
+        for base, member, expected in (("main", 204, "cache"), ("4.2-dev", 204, "cache"),
+                                       ("main", 404, "legacy"), ("4.2-dev", 302, "legacy"),
+                                       ("4.1-dev", 204, "legacy")):
+            for action in ("opened", "synchronize"):
+                for labels in ([], [{"name": "kind/test-ci"}]):
+                    with self.subTest(base=base, member=member, action=action, labels=labels):
+                        self.event["action"] = action
+                        self.event["pull_request"]["base"]["ref"] = self.pr["base"]["ref"] = base
+                        self.pr["labels"] = labels
+                        self.assertEqual(route(CALLER, self.event, self.pr, member)["route"], expected)
+        self.pr["base"]["ref"] = self.event["pull_request"]["base"]["ref"] = "main"
+        self.pr["head"]["repo"]["archived"] = True
+        self.assertEqual(route(CALLER, self.event, self.pr, 204)["route"], "legacy")
+        self.pr["head"]["repo"]["archived"] = False
+        self.pr["head"]["sha"] = "b"*40
         with self.assertRaisesRegex(ValueError, "stale or invalid PR identity"):
             route(CALLER, self.event, self.pr, 204)
 

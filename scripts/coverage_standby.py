@@ -524,17 +524,18 @@ def admit():
                      "real-pr-authorization.json")
     pr = one(f"/pulls/{int(t['pr'])}")
     # In-flight receipts from the old entrypoint retain their original
-    # eligibility. New receipts bind the exact base and do not use type labels.
+    # eligibility. New receipts bind the exact base and allow Draft PRs
+    # independently of type labels.
     schema = proof.get("schema", 1) if proof else None
     base = proof.get("base_ref", "main" if schema == 1 else None) if proof else None
     check(proof and schema in (1, 2) and proof["allowed"] == "true" and proof["verified_membership_http_status"] == 204
           and int(proof["pr_number"]) == pr["number"] and proof["author"] == pr["user"]["login"]
           and proof["head_repository"] == source == pr["head"]["repo"]["full_name"]
           and proof["head_sha"] == head == pr["head"]["sha"] and pr["state"] == "open"
-          and not pr["draft"] and not pr["head"]["repo"]["archived"]
+          and not pr["head"]["repo"]["archived"]
           and pr["base"]["repo"]["full_name"] == REPO
           and pr["base"]["ref"] == base and base in CACHE_BASE_REFS
-          and (schema == 2 or "kind/test-ci" in {v["name"] for v in pr["labels"]}),
+          and (schema == 2 or (not pr["draft"] and "kind/test-ci" in {v["name"] for v in pr["labels"]})),
           "PR no longer matches authorization")
     # The selector can fail while the parent run remains active. Check the
     # exact selector again before the worker loads PR code.
