@@ -668,6 +668,19 @@ class Progress(unittest.TestCase):
                 self.assertIn("worker details temporarily unavailable", str(out.call_args_list))
                 self.assertNotIn("do not print API details", str(out.call_args_list))
 
+    def test_job_details_are_rate_limited_but_child_result_is_polled_each_time(self):
+        interval = s.JOB_DETAIL_INTERVAL
+        times = [0, interval-1, interval, interval+1]
+        finish = dict(status="completed", run_attempt=1, conclusion="success")
+        with patch.dict(os.environ, dict(CHILD="123", GROUP="1", POOL="cs")), \
+             patch.object(s, "run", side_effect=[dict(status="in_progress")]*len(times)+[finish]) as runs, \
+             patch.object(s.time, "monotonic", side_effect=times), patch.object(s.time, "sleep"), \
+             patch.object(s, "worker_progress", return_value=("running", s.run_url(123))) as details, \
+             patch("builtins.print"):
+            s.wait()
+        self.assertEqual(runs.call_count, len(times)+1)
+        self.assertEqual(details.call_count, 2)
+
 
 class ShortWorkerTitle(unittest.TestCase):
     def setUp(self):
@@ -711,3 +724,36 @@ class ShortWorkerTitle(unittest.TestCase):
              patch.object(s, "one", side_effect=read), patch.object(s, "run", return_value=self.meta):
             self.assertEqual(s.dispatch(self.ticket, "cs", "b"*40), 51)
             post.assert_called_once()
+
+    def test_dispatch_requests_run_id_and_checks_the_returned_worker(self):
+        with patch.object(s, "parent_meta"), patch.object(s, "api", return_value=({"workflow_run_id": 51}, 0)) as post, \
+             patch.object(s, "one", return_value={"total_count": 1, "jobs": [self.marker]}) as lookup, \
+             patch.object(s, "run", return_value=self.meta):
+            self.assertEqual(s.dispatch(self.ticket, "cs", "b"*40), 51)
+            post.assert_called_once()
+            self.assertIs(post.call_args.args[1]["return_run_details"], True)
+            lookup.assert_called_once_with("/actions/runs/51/attempts/1/jobs?per_page=100")
+
+    def test_204_dispatch_ignores_unindexed_same_title_but_rejects_verified_duplicates(self):
+        other = dict(self.meta, id=52)
+        for duplicate in (False, True):
+            def read(path):
+                if "/actions/workflows/" in path:
+                    return {"workflow_runs": [other, self.meta]}
+                if "/52/" in path:
+                    return ({"total_count": 1, "jobs": [dict(self.marker, run_id=52)]} if duplicate
+                            else {"total_count": 0, "jobs": []})
+                return {"total_count": 1, "jobs": [self.marker]}
+
+            with self.subTest(duplicate=duplicate), patch.object(s, "parent_meta"), \
+                 patch.object(s, "api", return_value=({}, 0)) as post, patch.object(s, "one", side_effect=read), \
+                 patch.object(s, "run", return_value=self.meta) as metadata, patch.object(s.time, "sleep") as sleep:
+                if duplicate:
+                    with self.assertRaisesRegex(ValueError, "duplicate dispatch"):
+                        s.dispatch(self.ticket, "cs", "b"*40)
+                    metadata.assert_not_called()
+                else:
+                    self.assertEqual(s.dispatch(self.ticket, "cs", "b"*40), 51)
+                    metadata.assert_called_once_with(51)
+                post.assert_called_once()
+                sleep.assert_not_called()

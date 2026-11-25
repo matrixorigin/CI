@@ -58,6 +58,32 @@ class CoverageFailureDisplayTest(unittest.TestCase):
         self.assertIn("Coverage UT status: coverage_phase_failure", result.stdout)
         self.assertNotIn("not for the console", result.stdout)
 
+    def test_compact_failure_is_ready_when_optional_tool_is_interrupted(self):
+        workflow = (ROOT / ".github/workflows/coverage-worker-cs.yaml").read_text()
+        step = workflow.split("    - name: Analyze and summarize failed coverage UT\n", 1)[1]
+        step = step.split("    - name: Collect coverage UT runner diagnostics\n", 1)[0]
+        script = textwrap.dedent(step.split("      run: |\n", 1)[1])
+        with tempfile.TemporaryDirectory() as directory:
+            temp = Path(directory)
+            (temp / ".standby").mkdir()
+            (temp / ".standby/scripts").symlink_to(ROOT / "scripts", target_is_directory=True)
+            (temp / "ut-coverage-status.json").write_text('{"result":"failed"}')
+            (temp / "ut-coverage-report.json").write_text(json.dumps({
+                "Action": "fail", "Package": "example/pkg", "Test": "TestFailed"
+            }) + "\n")
+            # Simulate termination while attempting the optional install.
+            go_stub = 'go() { [[ -s "$RUNNER_TEMP/ut-failure-compact.txt" ]] || exit 97; exit 124; }\n'
+            interrupted = subprocess.run(
+                ["bash", "-e", "-c", go_stub + script],
+                env={**os.environ, "RUNNER_TEMP": str(temp), "GITHUB_WORKSPACE": str(temp),
+                     "GITHUB_STEP_SUMMARY": str(temp / "summary.md")},
+                text=True, capture_output=True, check=False,
+            )
+            result = self.run_failure_step(temp)
+        self.assertEqual(interrupted.returncode, 124, interrupted.stderr)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("FAILED example/pkg / TestFailed", result.stdout)
+
     def test_red_step_prefixes_and_bounds_log_output(self):
         with tempfile.TemporaryDirectory() as directory:
             temp = Path(directory)

@@ -150,11 +150,23 @@ class EntryTest(unittest.TestCase):
         # Reconstruct the old job wrapper only to preserve the pre-existing measured-body digest.
         worker = (ROOT/".github/workflows/coverage-worker-cs.yaml").read_text()
         steps = "    - id: reader\n" + worker.split("    - id: reader\n", 1)[1]
-        steps = steps.replace(
+        # Undo only the review-time diagnostic reordering for the digest;
+        # production writes the compact summary before optional analysis.
+        marker_summary = (
             '          python3 -I "$GITHUB_WORKSPACE/.standby/scripts/summarize_ut_report.py" "${report}" \\\n'
-            '            --compact-output "$RUNNER_TEMP/ut-failure-compact.txt" | tee -a "${summary}" || true',
-            '          python "$GITHUB_WORKSPACE/.ci-workflow/scripts/summarize_ut_report.py" "${report}" | tee -a "${summary}" || true',
+            '            --compact-output "$RUNNER_TEMP/ut-failure-compact.txt" | tee -a "${summary}" || true\n'
         )
+        old_summary = ('          python "$GITHUB_WORKSPACE/.ci-workflow/scripts/summarize_ut_report.py" '
+                       '"${report}" | tee -a "${summary}" || true\n')
+        analysis_start = "    - name: Analyze and summarize failed coverage UT\n"
+        diagnostics_start = "    - name: Collect coverage UT runner diagnostics\n"
+        before, after = steps.split(analysis_start, 1)
+        analysis, after = after.split(diagnostics_start, 1)
+        self.assertEqual(analysis.count(marker_summary), 1)
+        summary_slot = "          fi\n        fi\n"
+        self.assertEqual(analysis.count(summary_slot), 1)
+        analysis = analysis.replace(marker_summary, "").replace(summary_slot, "          fi\n"+old_summary+"        fi\n")
+        steps = before + analysis_start + analysis + diagnostics_start + after
         # The failure step may print diagnostics, but its condition, timeout,
         # placement and final exit must match the measured worker.
         marker = "    - name: Fail on coverage UT failure\n"

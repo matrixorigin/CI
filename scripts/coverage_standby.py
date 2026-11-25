@@ -25,6 +25,7 @@ CACHE_BASE_REFS = frozenset({"main", "4.2-dev"})
 POOLS = {"cs": "cs-node-cache-7c14g", "idc": "amd64-mo-shanghai-ut-safe"}
 WAIT = 3600
 PROGRESS_INTERVAL = 300
+JOB_DETAIL_INTERVAL = 120
 HANDOFF_POLLS = 60
 HANDOFF_POLL_SECONDS = 5
 
@@ -296,9 +297,10 @@ def dispatch(t, pool, revision):
     parent_meta(t)
     # At most one POST. If the response is lost, fail closed; no blind retries.
     body, dispatched_at = api(f"/actions/workflows/{WORKER}/dispatches", {
-        "ref": WORKER_REF, "inputs": {"ticket": json.dumps(t, separators=(",", ":")),
-                                 "pool": pool}})
+        "ref": WORKER_REF, "return_run_details": True,
+        "inputs": {"ticket": json.dumps(t, separators=(",", ":")), "pool": pool}})
     r = body.get("workflow_run_id")
+    check(r is None or (type(r) is int and r > 0), "invalid dispatch run ID")
     # A plain GROUP0/GROUP1 is shared across PRs. The dispatch time bound is
     # just a discovery filter; always compare the full identity below.
     recent = datetime.fromtimestamp(dispatched_at - 60, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -307,7 +309,6 @@ def dispatch(t, pool, revision):
             page = one(f"/actions/workflows/{WORKER}/runs?" + urlencode(
                 dict(event="workflow_dispatch", branch=WORKER_REF, created=f">={recent}", per_page=100)))
             ids = []
-            unsettled = False
             for candidate in page["workflow_runs"]:
                 display = candidate["display_title"]
                 if display == title(t, pool):
@@ -317,11 +318,12 @@ def dispatch(t, pool, revision):
                         if identity_title(candidate["id"], candidate) == title(t, pool):
                             ids.append(candidate["id"])
                     except WorkerIdentityPending:
-                        # Indexing may lag a dispatch. Never pick a worker
-                        # while a same-title candidate is still ambiguous.
-                        unsettled = True
+                        # A display name cannot identify a worker. Ignore an
+                        # unindexed run on this scan; it cannot block an exact
+                        # ticket match or receive a grant by itself.
+                        continue
             check(len(ids) <= 1, "duplicate dispatch; refusing to select")
-            r = ids[0] if ids and not unsettled else None
+            r = ids[0] if ids else None
         if r:
             try:
                 child_meta(r, t, pool, revision)
@@ -617,21 +619,24 @@ def wait():
     print(f"Group {group}: open worker for live UT logs — {run_url(r)}", flush=True)
     previous = None
     last_report = None
+    next_details = None
     while True:
         m = run(r)
         if m["status"] == "completed":
             check(m["run_attempt"] == 1 and m["conclusion"] == "success", "selected coverage group did not pass")
             print(f"Group {group}: Coverage UT passed — {run_url(r)}", flush=True)
             return
-        try:
-            progress = worker_progress(r, group, pool)
-        except (OSError, ValueError, KeyError, TypeError, AttributeError):
-            progress = ("worker details temporarily unavailable; still waiting", run_url(r))
         now = time.monotonic()
-        if progress != previous or last_report is None or now - last_report >= PROGRESS_INTERVAL:
-            phase, url = progress
-            print(f"Group {group}: {phase} — {url}", flush=True)
-            previous, last_report = progress, now
+        if next_details is None or now >= next_details:
+            next_details = now + JOB_DETAIL_INTERVAL
+            try:
+                progress = worker_progress(r, group, pool)
+            except (OSError, ValueError, KeyError, TypeError, AttributeError):
+                progress = ("worker details temporarily unavailable; still waiting", run_url(r))
+            if progress != previous or last_report is None or now - last_report >= PROGRESS_INTERVAL:
+                phase, url = progress
+                print(f"Group {group}: {phase} — {url}", flush=True)
+                previous, last_report = progress, now
         time.sleep(30)
 
 

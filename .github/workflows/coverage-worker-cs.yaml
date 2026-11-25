@@ -561,6 +561,8 @@ jobs:
         if [ ! -s "${report}" ]; then
           echo 'UT JSON report was not produced; inspect the failed test step.' | tee -a "${summary}"
         else
+          python3 -I "$GITHUB_WORKSPACE/.standby/scripts/summarize_ut_report.py" "${report}" \
+            --compact-output "$RUNNER_TEMP/ut-failure-compact.txt" | tee -a "${summary}" || true
           status_result=$(jq -r '.result // "unknown"' "${status_file}" 2>/dev/null || true)
           if [ "${status_result}" = 'timeout' ]; then
             echo 'Coverage UT hit the controlled deadline; skipped go-ut-analysis installation to preserve diagnostic upload time.' | tee -a "${summary}"
@@ -572,8 +574,6 @@ jobs:
               echo 'go-ut-analysis is unavailable; the raw JSON report is attached.' | tee -a "${summary}"
             fi
           fi
-          python3 -I "$GITHUB_WORKSPACE/.standby/scripts/summarize_ut_report.py" "${report}" \
-            --compact-output "$RUNNER_TEMP/ut-failure-compact.txt" | tee -a "${summary}" || true
         fi
         if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
           {
