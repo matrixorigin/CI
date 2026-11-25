@@ -74,7 +74,11 @@ class ParentAdmission(unittest.TestCase):
             'name': f'Matrixone UT Coverage execution / Route Coverage group {group} / select',
             'status': 'in_progress',
             'conclusion': None,
-            'steps': [{'name': 'Release exactly one worker', 'conclusion': None}],
+            'steps': [
+                {'name': 'Release exactly one worker', 'status': 'pending', 'conclusion': None},
+                {'name': 'Wait for selected group, including its UT result', 'status': 'pending', 'conclusion': None},
+                {'name': 'Cancel the selected worker if the selector stops', 'status': 'pending', 'conclusion': None},
+            ],
             **changes,
         }
 
@@ -98,11 +102,15 @@ class ParentAdmission(unittest.TestCase):
                 {'name': 'Release exactly one worker', 'conclusion': 'success'},
                 {'name': 'Wait for selected group, including its UT result', 'conclusion': conclusion},
             ])
-            for conclusion in ('failure', 'cancelled', 'timed_out')
+            for conclusion in ('failure', 'cancelled', 'timed_out', 'skipped')
         ]
         for job in (self.selector(group=1), self.selector(status='completed', conclusion='cancelled'),
                     self.selector(status='queued'), self.selector(steps=[]),
                     *stopped_waits,
+                    self.selector(steps=[{'name': 'Release exactly one worker', 'conclusion': 'success'}]),
+                    self.selector(steps=[{'name': 'Release exactly one worker', 'conclusion': 'success'},
+                                         {'name': 'Wait for selected group, including its UT result', 'conclusion': None},
+                                         {'name': 'Wait for selected group, including its UT result', 'conclusion': 'skipped'}]),
                     self.selector(steps=[{'name': 'Release exactly one worker', 'conclusion': 'skipped'}]),
                     self.selector(steps=[{'name': 'Release exactly one worker'}])):
             with self.subTest(job=job), patch.object(s,'one',return_value={'jobs':[job]}):
@@ -136,6 +144,66 @@ class ParentAdmission(unittest.TestCase):
             self.assertEqual(s.parent_meta(self.t, require_selector=True), self.p)
             self.assertEqual(read.call_count, 3)
             sleep.assert_called_once_with(s.PARENT_POLL_SECONDS)
+
+    def test_parent_metadata_errors_retry_only_when_transient(self):
+        def http(code, headers=None):
+            return urllib.error.HTTPError('https://api.github.com', code, 'injected', headers, None)
+        cases = ((http(503), 5), (OSError('connection reset'), 5), (http(403), None),
+                 (http(429, {'Retry-After':'7'}), 7), (http(429), 60),
+                 (http(429, {'Retry-After':'Thu, 01 Jan 1970 00:16:47 GMT'}), 7),
+                 (http(403, {'X-RateLimit-Remaining':'0', 'X-RateLimit-Reset':'1007'}), 7),
+                 (http(403, {'X-RateLimit-Remaining':'0', 'X-RateLimit-Reset':'invalid'}), None),
+                 (http(503, {'Retry-After':'7'}), 7), (http(429, {'Retry-After':'300'}), None),
+                 (http(429, {'Retry-After':'invalid'}), None))
+        for error, delay in cases:
+            with self.subTest(error=error, delay=delay), patch.object(s, 'run', return_value=self.p), \
+                 patch.object(s, 'one', side_effect=[error, {'jobs':[self.selector()]}]) as jobs, \
+                 patch.object(s.time, 'time', return_value=1000), patch.object(s.time, 'sleep') as sleep:
+                if delay is not None:
+                    self.assertEqual(s.parent_meta(self.t, require_selector=True), self.p)
+                    self.assertEqual(jobs.call_count, 2)
+                    sleep.assert_called_once_with(delay)
+                else:
+                    with self.assertRaises(urllib.error.HTTPError):
+                        s.parent_meta(self.t, require_selector=True)
+                    jobs.assert_called_once()
+                    sleep.assert_not_called()
+
+    def test_persistent_parent_metadata_error_stops_at_poll_bound(self):
+        error = urllib.error.HTTPError('https://api.github.com', 503, 'unavailable', None, None)
+        with patch.object(s, 'run', return_value=self.p), patch.object(s, 'one', side_effect=error) as jobs, \
+             patch.object(s, 'PARENT_POLLS', 2), patch.object(s.time, 'sleep') as sleep:
+            with self.assertRaises(urllib.error.HTTPError):
+                s.parent_meta(self.t, require_selector=True)
+            self.assertEqual(jobs.call_count, 2)
+            sleep.assert_called_once_with(s.PARENT_POLL_SECONDS)
+
+    def test_retry_rechecks_parent_identity_before_admission(self):
+        error = urllib.error.HTTPError('https://api.github.com', 503, 'unavailable', None, None)
+        with patch.object(s, 'run', side_effect=[self.p, dict(self.p, run_attempt=2)]), \
+             patch.object(s, 'one', side_effect=error) as jobs, patch.object(s.time, 'sleep') as sleep:
+            with self.assertRaisesRegex(ValueError, 'identity mismatch: run_attempt'):
+                s.parent_meta(self.t, require_selector=True)
+            jobs.assert_called_once()
+            sleep.assert_called_once_with(s.PARENT_POLL_SECONDS)
+
+    def test_retry_restarts_parent_and_selector_validation(self):
+        for reads in ([OSError('timeout'), self.p, self.p], [self.p, OSError('timeout'), self.p, self.p]):
+            with self.subTest(reads=reads), patch.object(s, 'run', side_effect=reads) as parent, \
+                 patch.object(s, 'one', return_value={'jobs':[self.selector()]}) as jobs, \
+                 patch.object(s.time, 'sleep') as sleep:
+                self.assertEqual(s.parent_meta(self.t, require_selector=True), self.p)
+                self.assertEqual(parent.call_count, len(reads))
+                self.assertEqual(jobs.call_count, len(reads) - 2)
+                sleep.assert_called_once_with(s.PARENT_POLL_SECONDS)
+
+    def test_parent_metadata_retry_respects_elapsed_deadline(self):
+        with patch.object(s, 'run', side_effect=OSError('timeout')) as read, \
+             patch.object(s.time, 'monotonic', side_effect=[0, 66]), patch.object(s.time, 'sleep') as sleep:
+            with self.assertRaisesRegex(OSError, 'timeout'):
+                s.parent_meta(self.t)
+            read.assert_called_once()
+            sleep.assert_not_called()
 
     def test_queued_parent_dispatch_requires_its_active_selector(self):
         env = dict(GITHUB_RUN_ATTEMPT='1',GITHUB_RUN_ID='42',GROUP='0',HEAD=self.sha,
@@ -196,7 +264,7 @@ class ParentAdmission(unittest.TestCase):
         env = dict(TICKET=json.dumps(self.t),GROUP='0',HEAD=self.sha,SOURCE=self.src,POOL='cs',
                    GITHUB_RUN_ATTEMPT='1',GITHUB_RUN_ID='51')
         for parent_status in ('queued', 'in_progress'):
-            for failed in (False, True):
+            for scenario in ('running', 'pending', 'failed', 'skipped', 'cleanup', 'cleanup_done', 'transient'):
                 calls = 0
 
                 def metadata(path):
@@ -205,22 +273,31 @@ class ParentAdmission(unittest.TestCase):
                         return pr
                     calls += 1
                     prior_checks = 2 if parent_status == 'queued' else 0
-                    if failed and calls > prior_checks:
+                    if scenario == 'transient' and calls == prior_checks + 1:
+                        raise urllib.error.HTTPError('https://api.github.com', 503, 'unavailable', None, None)
+                    if calls > prior_checks:
+                        wait_status = ('completed' if scenario in ('failed', 'skipped') else
+                                       'pending' if scenario in ('pending', 'cleanup', 'cleanup_done') else 'in_progress')
+                        wait_conclusion = {'failed': 'failure', 'skipped': 'skipped'}.get(scenario)
                         steps = [
                             {'name': 'Release exactly one worker', 'conclusion': 'success'},
-                            {'name': 'Wait for selected group', 'conclusion': 'failure'},
-                            {'name': 'Post job cleanup', 'conclusion': None},
+                            {'name': 'Wait for selected group, including its UT result',
+                             'status': wait_status, 'conclusion': wait_conclusion},
+                            {'name': 'Cancel the selected worker if the selector stops',
+                             'status': ('completed' if scenario == 'cleanup_done' else
+                                        'in_progress' if scenario in ('skipped', 'cleanup') else 'pending'),
+                             'conclusion': 'success' if scenario == 'cleanup_done' else None},
                         ]
                         job = self.selector(steps=steps)
                     else:
                         job = self.selector()
                     return {'jobs':[job]}
 
-                with self.subTest(parent_status=parent_status, failed=failed), patch.dict(os.environ,env), \
+                with self.subTest(parent_status=parent_status, scenario=scenario), patch.dict(os.environ,env), \
                      patch.object(s,'run',return_value=dict(self.p,status=parent_status)), \
                      patch.object(s,'child_meta'), patch.object(s.time,'sleep'), patch.object(s,'PARENT_POLLS',2), \
                      patch.object(s,'one',side_effect=metadata), patch.object(s,'artifact',side_effect=[grant,proof]):
-                    if failed:
+                    if scenario in ('failed', 'skipped', 'cleanup', 'cleanup_done'):
                         with self.assertRaisesRegex(ValueError,'still not active'):
                             s.admit()
                     else:
@@ -493,6 +570,8 @@ class Queue(unittest.TestCase):
         from pathlib import Path
         wf = (Path(__file__).resolve().parents[1]/'.github/workflows/coverage-queue-handoff.yaml').read_text()
         selector, collector = wf.split('  collect:\n')
+        for name in (s.GRANT_STEP, s.WAIT_STEP, s.REVOKE_STEP):
+            self.assertEqual(selector.count(f'name: {name}\n'), 1)
         self.assertLess(selector.index('coverage_standby.py choose'), selector.index('coverage_standby.py wait'))
         self.assertIn("always() && steps.select.outputs.child != '' && steps.wait.outcome != 'success'", selector)
         self.assertIn('coverage_standby.py revoke', selector)
