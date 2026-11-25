@@ -98,6 +98,10 @@ def identity_title(r, m):
 
 PARENT_POLLS = 13
 PARENT_POLL_SECONDS = 5
+# Job step names are part of the GitHub API's selector metadata.
+GRANT_STEP = "Release exactly one worker"
+WAIT_STEP = "Wait for selected group, including its UT result"
+REVOKE_STEP = "Cancel the selected worker if the selector stops"
 
 
 def parent_identity(t, p):
@@ -114,59 +118,114 @@ def parent_identity(t, p):
         check(actual == value, f"parent {t['parent']} identity mismatch: {field}")
 
 
-def parent_status(t, p):
-    parent_identity(t, p)
-    status, conclusion = p.get("status"), p.get("conclusion")
-    check("conclusion" in p and conclusion is None,
-          f"parent {t['parent']} not active: conclusion={conclusion!r}")
-    check(status in ("in_progress", "queued", "pending", "requested", "waiting"),
-          f"parent {t['parent']} not active: status={status!r}")
-    return status
-
-
-def active_selector(t):
-    # An aggregate run can stay queued while its hosted selector is already
-    # running. Only the exact selector for this group and attempt is evidence.
-    # Do not accept a sibling, a worker job, or an arbitrary name suffix.
-    group = t["group"]
-    check(type(group) is int and group in (0, 1), "invalid selector group")
-    prefix = f"Matrixone UT Coverage execution / Route Coverage group {group} / "
-    names = {prefix + "select", prefix + short_title(t)}
-    data = one(f"/actions/runs/{int(t['parent'])}/attempts/{int(t['attempt'])}/jobs?per_page=100")
-    check(len(data["jobs"]) == data["total_count"], "incomplete parent jobs response")
-    matched = [job for job in data["jobs"] if job["name"] in names]
-    check(len(matched) <= 1, "ambiguous parent selector")
-    if not matched:
+def selector_active(t):
+    """Confirm this group's selector is still running in the parent attempt."""
+    page = 1
+    matches = []
+    while True:
+        data = one(f"/actions/runs/{t['parent']}/attempts/{t['attempt']}/jobs?"
+                   + urlencode(dict(per_page=100, page=page)))
+        jobs = data["jobs"]
+        for job in jobs:
+            # The matrix group and grant step identify the selector even if
+            # its display name changes.
+            names = job["name"].split(" / ")
+            if (len(names) >= 2 and names[-2] == f"Route Coverage group {t['group']}"
+                    and any(step["name"] == GRANT_STEP
+                            and step.get("conclusion") in (None, "success")
+                            for step in (job.get("steps") or []))):
+                check(job["run_id"] == t["parent"] and job["run_attempt"] == t["attempt"],
+                      "selector identity mismatch")
+                matches.append(job)
+        if len(jobs) < 100:
+            break
+        page += 1
+    check(len(matches) <= 1, "ambiguous parent selector")
+    if not matches:
         return False
-    job = matched[0]
-    check(job.get("run_id") == t["parent"] and job.get("run_attempt") == t["attempt"]
-          and job.get("head_sha") == t["head"] and job.get("labels") == ["ubuntu-latest"],
-          "parent selector identity mismatch")
-    return (job.get("status") == "in_progress" and "conclusion" in job
-            and job["conclusion"] is None and type(job.get("id")) is int and job["id"] > 0
-            and type(job.get("runner_id")) is int and job["runner_id"] > 0
-            and job.get("runner_group_name") == "GitHub Actions")
+    selector = matches[0]
+    waits = [step for step in selector["steps"] if step["name"] == WAIT_STEP]
+    return (selector["status"] == "in_progress"
+            and selector["conclusion"] is None
+            and len(waits) == 1 and waits[0].get("conclusion") != "skipped"
+            and all("conclusion" in step
+                    and step["conclusion"] in (None, "success", "skipped", "neutral")
+                    for step in selector["steps"])
+            and not any(
+                step["name"] == REVOKE_STEP
+                and step.get("status") in ("in_progress", "completed")
+                and step["conclusion"] != "skipped"
+                for step in selector["steps"]))
 
 
-def parent_meta(t):
-    """Require the same active parent attempt, even when its aggregate status lags."""
+def parent_retry_delay(error):
+    """Return a safe delay for a transient parent metadata read."""
+    if not isinstance(error, urllib.error.HTTPError):
+        return PARENT_POLL_SECONDS
+    headers = error.headers or {}
+    retry_after = headers.get("Retry-After")
+    rate_limited = error.code == 429 or (error.code == 403 and
+                   (retry_after is not None or headers.get("X-RateLimit-Remaining") == "0"))
+    if not rate_limited and error.code != 408 and not 500 <= error.code <= 599:
+        raise error
+    if retry_after is not None:
+        try:
+            delay = int(retry_after)
+        except (TypeError, ValueError):
+            try:
+                delay = parsedate_to_datetime(retry_after).timestamp() - time.time()
+            except (TypeError, ValueError, OverflowError):
+                raise error
+    elif rate_limited and headers.get("X-RateLimit-Remaining") == "0":
+        try:
+            delay = int(headers["X-RateLimit-Reset"]) - time.time()
+        except (KeyError, TypeError, ValueError, OverflowError):
+            raise error
+    else:
+        delay = 60 if rate_limited else PARENT_POLL_SECONDS
+    return max(PARENT_POLL_SECONDS, delay)
+
+
+def parent_meta(t, require_selector=False):
+    """Validate the identity and liveness of the parent attempt."""
+    # Polling and transient read failures share one bounded retry budget.
+    deadline = time.monotonic() + PARENT_POLLS * PARENT_POLL_SECONDS
+    status = None
     for poll in range(PARENT_POLLS):
-        p = run(t["parent"])
-        status = parent_status(t, p)
-        if status == "in_progress":
-            return p
-        if status == "queued" and active_selector(t):
-            # Refuse cancellation, completion or a new attempt if GitHub
-            # changed the parent while we were checking the selector.
+        error = None
+        delay = PARENT_POLL_SECONDS
+        try:
             p = run(t["parent"])
-            status = parent_status(t, p)
-            if status in ("queued", "in_progress"):
+            parent_identity(t, p)
+            status, conclusion = p.get("status"), p.get("conclusion")
+            check("conclusion" in p and conclusion is None,
+                  f"parent {t['parent']} not active: conclusion={conclusion!r}")
+            if status == "in_progress" and not require_selector:
                 return p
+            check(status in ("in_progress", "queued", "pending", "requested", "waiting"),
+                  f"parent {t['parent']} not active: status={status!r}")
+            # GitHub can report a queued run while one of its jobs is executing.
+            # The selector stays active until its worker finishes, so it proves
+            # that this group is still live without trusting another group's job.
+            if selector_active(t):
+                p = run(t["parent"])
+                parent_identity(t, p)
+                check("conclusion" in p and p["conclusion"] is None
+                      and p.get("status") in ("in_progress", "queued", "pending", "requested", "waiting"),
+                      f"parent {t['parent']} not active after selector check")
+                return p
+        except OSError as exc:
+            error = exc
+            delay = parent_retry_delay(exc)
         if poll == 0:
-            print(f"parent {t['parent']} status={status}; waiting without admitting", flush=True)
-        if poll + 1 < PARENT_POLLS:
-            time.sleep(PARENT_POLL_SECONDS)
-    raise ValueError(f"parent {t['parent']} still not active after {PARENT_POLLS} reads: status={status}")
+            reason = "metadata temporarily unavailable" if error is not None else f"status={status}"
+            print(f"parent {t['parent']} {reason}; waiting for its selector", flush=True)
+        if poll + 1 == PARENT_POLLS or time.monotonic() + delay > deadline:
+            break
+        time.sleep(delay)
+    if error is not None:
+        raise error
+    raise ValueError(f"parent {t['parent']} still not active after {poll + 1} reads: status={status}")
 
 
 class DispatchRevisionChanged(ValueError):
@@ -477,7 +536,42 @@ def admit():
           and pr["base"]["ref"] == base and base in CACHE_BASE_REFS
           and (schema == 2 or "kind/test-ci" in {v["name"] for v in pr["labels"]}),
           "PR no longer matches authorization")
-    parent_meta(t)  # Reconfirm after checking the grant and live PR, before returning to checkout.
+    # The selector can fail while the parent run remains active. Check the
+    # exact selector again before the worker loads PR code.
+    parent_meta(t, require_selector=True)
+
+
+def revoke():
+    """Stop this selector's worker after the grant or wait step fails."""
+    grant = json.loads(Path(os.environ["RUNNER_TEMP"], "grant.json").read_text())
+    t = grant["ticket"]
+    child = int(os.environ["CHILD"])
+    expected = dict(parent=int(os.environ["GITHUB_RUN_ID"]), attempt=int(os.environ["GITHUB_RUN_ATTEMPT"]),
+                    group=int(os.environ["GROUP"]), pr=int(os.environ["PR"]),
+                    head=os.environ["HEAD"], source=os.environ["SOURCE"])
+    check(all(t.get(key) == value for key, value in expected.items())
+          and grant["child"] == child and grant["pool"] in POOLS
+          and digest(grant["nonce"]) == t["key"], "invalid selector grant")
+    for attempt in range(3):
+        try:
+            meta = child_meta(child, t, grant["pool"], t["revision"])
+            if meta["status"] == "completed":
+                print(f"selected coverage worker {child} is already complete", flush=True)
+                return
+            check(meta["status"] in ("queued", "pending", "requested", "waiting", "in_progress"),
+                  "selected worker has an unexpected status")
+            api(f"/actions/runs/{child}/cancel", {})
+            print(f"cancellation requested for selected coverage worker {child}", flush=True)
+            return
+        except urllib.error.HTTPError as error:
+            if error.code not in (409, 429) and error.code < 500:
+                raise
+            if attempt == 2:
+                raise
+        except OSError:
+            if attempt == 2:
+                raise
+        time.sleep(2)
 
 
 def run_url(r):
@@ -542,4 +636,4 @@ def wait():
 
 if __name__ == "__main__":
     check(os.environ["GITHUB_REPOSITORY"] == REPO, "unexpected caller repository")
-    {"choose": choose, "admit": admit, "wait": wait}[sys.argv[1]]()
+    {"choose": choose, "admit": admit, "wait": wait, "revoke": revoke}[sys.argv[1]]()

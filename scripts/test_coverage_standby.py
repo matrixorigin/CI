@@ -1,6 +1,9 @@
 import unittest
 import json
 import os
+import tempfile
+import urllib.error
+from pathlib import Path
 from unittest.mock import patch
 from scripts import coverage_standby as s
 from scripts.coverage_pr_entry import CACHE_BASE_REFS
@@ -15,14 +18,13 @@ class ParentAdmission(unittest.TestCase):
         self.p = dict(id=42, run_attempt=1, repository={'full_name':s.REPO}, path=s.ENTRY,
                       event='pull_request_target', head_repository={'full_name':self.src},
                       head_sha=self.sha, status='in_progress', conclusion=None)
-
-    def selector(self, **fields):
-        return dict(dict(id=138967933698, run_id=self.t['parent'], run_attempt=self.t['attempt'],
-                         head_sha=self.sha, labels=['ubuntu-latest'], runner_id=1000740838,
-                         runner_group_name='GitHub Actions', status='in_progress',
-                         conclusion=None,
-                         name='Matrixone UT Coverage execution / Route Coverage group 0 / GROUP0'),
-                    **fields)
+        self.grant = dict(child=51, ticket=self.t, pool='cs', nonce='test-nonce')
+        self.worker = dict(id=51, repository={'full_name':s.REPO}, run_attempt=1,
+                           path='.github/workflows/'+s.WORKER, event='workflow_dispatch',
+                           head_branch=s.WORKER_REF, head_sha=self.t['revision'],
+                           display_title=s.title(self.t, 'cs'), status='in_progress')
+        self.selector_env = dict(GITHUB_RUN_ID='42', GITHUB_RUN_ATTEMPT='1', GROUP='0', PR='32922',
+                                 HEAD=self.sha, SOURCE=self.src, CHILD='51')
 
     def test_rerun_parent_identity_is_attempt_bound(self):
         rerun = dict(self.t,attempt=2)
@@ -33,7 +35,7 @@ class ParentAdmission(unittest.TestCase):
     def test_only_active_parent_returns(self):
         with patch.object(s,'run',side_effect=[dict(self.p,status=v) for v in
                           ('queued','waiting','in_progress')]) as read, \
-             patch.object(s,'active_selector',return_value=False), patch.object(s.time,'sleep') as sleep:
+             patch.object(s,'selector_active',return_value=False), patch.object(s.time,'sleep') as sleep:
             self.assertEqual(s.parent_meta(self.t)['id'],42)
             self.assertEqual((read.call_count,sleep.call_count),(3,2))
 
@@ -43,7 +45,7 @@ class ParentAdmission(unittest.TestCase):
                           ('head_repository',None),('head_sha','c'*40)]:
             with self.subTest(field=field), patch.object(s,'run',side_effect=[
                     dict(self.p,status='queued'),{**self.p,field:bad}]), \
-                 patch.object(s,'active_selector',return_value=False), patch.object(s.time,'sleep') as sleep:
+                 patch.object(s,'selector_active',return_value=False), patch.object(s.time,'sleep') as sleep:
                 with self.assertRaisesRegex(ValueError,'identity mismatch: '+field):
                     s.parent_meta(self.t)
                 self.assertEqual(sleep.call_count,1)
@@ -58,61 +60,178 @@ class ParentAdmission(unittest.TestCase):
 
     def test_queued_is_bounded_and_never_grants(self):
         with patch.object(s,'run',return_value=dict(self.p,status='queued')) as read, \
-             patch.object(s,'one',return_value={'total_count':0,'jobs':[]}) as jobs, \
+             patch.object(s,'selector_active',return_value=False), \
              patch.object(s.time,'sleep') as sleep, patch.object(s,'artifact') as artifact:
             with self.assertRaisesRegex(ValueError,'still not active'):
                 s.parent_meta(self.t)
             self.assertEqual((read.call_count,sleep.call_count),(s.PARENT_POLLS,s.PARENT_POLLS-1))
-            self.assertEqual(jobs.call_count,s.PARENT_POLLS)
             artifact.assert_not_called()
 
-    def test_queued_run_with_same_group_selector_in_progress(self):
-        for group, attempt, label in ((0, 1, 'GROUP0'), (1, 2, 'select')):
-            p = dict(self.p, status='queued', run_attempt=attempt)
-            t = dict(self.t, group=group, attempt=attempt)
-            own = self.selector(name=f'Matrixone UT Coverage execution / Route Coverage group {group} / {label}',
-                                run_attempt=attempt)
-            other = self.selector(name='Matrixone CI execution / UT Test on Ubuntu/x86', status='queued')
-            with self.subTest(group=group,attempt=attempt), patch.object(s,'run',return_value=p) as run, \
-                 patch.object(s,'one',return_value={'total_count':2,'jobs':[own,other]}) as jobs, \
-                 patch.object(s.time,'sleep') as sleep:
-                self.assertEqual(s.parent_meta(t),p)
-                self.assertEqual(run.call_count,2)
-                jobs.assert_called_once_with(f'/actions/runs/42/attempts/{attempt}/jobs?per_page=100')
-                sleep.assert_not_called()
+    def selector(self, group=0, **changes):
+        return {
+            'id': 123,
+            'run_id': 42,
+            'run_attempt': 1,
+            'name': f'Matrixone UT Coverage execution / Route Coverage group {group} / select',
+            'status': 'in_progress',
+            'conclusion': None,
+            'steps': [
+                {'name': 'Release exactly one worker', 'status': 'pending', 'conclusion': None},
+                {'name': 'Wait for selected group, including its UT result', 'status': 'pending', 'conclusion': None},
+                {'name': 'Cancel the selected worker if the selector stops', 'status': 'pending', 'conclusion': None},
+            ],
+            **changes,
+        }
 
-    def test_unrelated_inactive_or_not_hosted_selector_is_not_evidence(self):
-        cases = ({'name':'Matrixone UT Coverage execution / Route Coverage group 1 / GROUP1'},
-                 {'name':'Unrelated workflow / Route Coverage group 0 / GROUP0'},
-                 {'name':'Matrixone UT Coverage execution / Route Coverage group 0 / collect'},
-                 {'status':'queued'}, {'status':'completed','conclusion':'cancelled'}, {'runner_id':0},
-                 {'runner_group_name':'Self-hosted'}, {'conclusion':'cancelled'})
-        for fields in cases:
-            with self.subTest(fields=fields), patch.object(s,'one',return_value={
-                    'total_count':1,'jobs':[self.selector(**fields)]}):
-                self.assertFalse(s.active_selector(self.t))
+    def test_queued_run_admits_only_its_active_selector(self):
+        queued = dict(self.p, status='queued')
+        with patch.object(s,'run',return_value=queued) as read, \
+             patch.object(s,'one',return_value={'jobs':[self.selector()]}) as jobs, \
+             patch.object(s.time,'sleep') as sleep:
+            self.assertEqual(s.parent_meta(self.t),queued)
+            self.assertEqual(read.call_count,2)
+            jobs.assert_called_once_with('/actions/runs/42/attempts/1/jobs?per_page=100&page=1')
+            sleep.assert_not_called()
 
-    def test_wrong_or_ambiguous_selector_identity_is_rejected(self):
-        for fields in ({'run_id':43},{'run_attempt':2},{'head_sha':'a'*40},{'labels':['self-hosted']}):
-            with self.subTest(fields=fields), patch.object(s,'one',return_value={
-                    'total_count':1,'jobs':[self.selector(**fields)]}):
+    def test_selector_lookup_checks_group_attempt_and_pages(self):
+        others = [self.selector(group=1,id=i) for i in range(100)]
+        with patch.object(s,'one',side_effect=[{'jobs':others}, {'jobs':[self.selector()]}]) as jobs:
+            self.assertTrue(s.selector_active(self.t))
+            self.assertEqual(jobs.call_count,2)
+        stopped_waits = [
+            self.selector(steps=[
+                {'name': 'Release exactly one worker', 'conclusion': 'success'},
+                {'name': 'Wait for selected group, including its UT result', 'conclusion': conclusion},
+            ])
+            for conclusion in ('failure', 'cancelled', 'timed_out', 'skipped')
+        ]
+        for job in (self.selector(group=1), self.selector(status='completed', conclusion='cancelled'),
+                    self.selector(status='queued'), self.selector(steps=[]),
+                    *stopped_waits,
+                    self.selector(steps=[{'name': 'Release exactly one worker', 'conclusion': 'success'}]),
+                    self.selector(steps=[{'name': 'Release exactly one worker', 'conclusion': 'success'},
+                                         {'name': 'Wait for selected group, including its UT result', 'conclusion': None},
+                                         {'name': 'Wait for selected group, including its UT result', 'conclusion': 'skipped'}]),
+                    self.selector(steps=[{'name': 'Release exactly one worker', 'conclusion': 'skipped'}]),
+                    self.selector(steps=[{'name': 'Release exactly one worker'}])):
+            with self.subTest(job=job), patch.object(s,'one',return_value={'jobs':[job]}):
+                self.assertFalse(s.selector_active(self.t))
+        for field, value in (('run_id',43),('run_attempt',2)):
+            with self.subTest(field=field), patch.object(s,'one',return_value={'jobs':[self.selector(**{field:value})]}):
                 with self.assertRaisesRegex(ValueError,'selector identity mismatch'):
-                    s.active_selector(self.t)
-        for total, jobs, reason in (
-                (2,[self.selector()],'incomplete parent jobs'),
-                (2,[self.selector(),self.selector(id=999)],'ambiguous parent selector')):
-            with patch.object(s,'one',return_value={'total_count':total,'jobs':jobs}):
-                with self.assertRaisesRegex(ValueError,reason):
-                    s.active_selector(self.t)
+                    s.selector_active(self.t)
+        with patch.object(s,'one',return_value={'jobs':[self.selector(),self.selector(id=124)]}):
+            with self.assertRaisesRegex(ValueError,'ambiguous parent selector'):
+                s.selector_active(self.t)
 
-    def test_terminal_or_new_attempt_after_checking_selector_is_rejected(self):
-        p = dict(self.p,status='queued')
-        for latest in (dict(p,status='completed',conclusion='cancelled'), dict(p,run_attempt=2)):
-            with self.subTest(latest=latest), patch.object(s,'run',side_effect=[p,latest]), \
-                 patch.object(s,'one',return_value={'total_count':1,'jobs':[self.selector()]}):
-                with self.assertRaisesRegex(ValueError,'cancelled|run_attempt'):
+    def test_selector_is_identified_by_group_and_grant_step(self):
+        job = self.selector(name='Matrixone UT Coverage execution / Route Coverage group 0 / GROUP0')
+        with patch.object(s,'one',return_value={'jobs':[job]}):
+            self.assertTrue(s.selector_active(self.t))
+
+    def test_parent_is_rechecked_after_active_selector(self):
+        for changed in (dict(self.p,status='completed',conclusion='cancelled'),
+                        dict(self.p,run_attempt=2),dict(self.p,head_sha='c'*40)):
+            with self.subTest(changed=changed), \
+                 patch.object(s,'run',side_effect=[dict(self.p,status='queued'),changed]), \
+                 patch.object(s,'one',return_value={'jobs':[self.selector()]}):
+                with self.assertRaises(ValueError):
                     s.parent_meta(self.t)
 
+    def test_running_parent_waits_for_selector_metadata_before_checkout(self):
+        responses = [{'jobs':[]}, {'jobs':[self.selector()]}]
+        with patch.object(s, 'run', return_value=self.p) as read, \
+             patch.object(s, 'one', side_effect=responses), patch.object(s.time, 'sleep') as sleep:
+            self.assertEqual(s.parent_meta(self.t, require_selector=True), self.p)
+            self.assertEqual(read.call_count, 3)
+            sleep.assert_called_once_with(s.PARENT_POLL_SECONDS)
+
+    def test_parent_metadata_errors_retry_only_when_transient(self):
+        def http(code, headers=None):
+            return urllib.error.HTTPError('https://api.github.com', code, 'injected', headers, None)
+        cases = ((http(503), 5), (OSError('connection reset'), 5), (http(403), None),
+                 (http(429, {'Retry-After':'7'}), 7), (http(429), 60),
+                 (http(429, {'Retry-After':'Thu, 01 Jan 1970 00:16:47 GMT'}), 7),
+                 (http(403, {'X-RateLimit-Remaining':'0', 'X-RateLimit-Reset':'1007'}), 7),
+                 (http(403, {'X-RateLimit-Remaining':'0', 'X-RateLimit-Reset':'invalid'}), None),
+                 (http(503, {'Retry-After':'7'}), 7), (http(429, {'Retry-After':'300'}), None),
+                 (http(429, {'Retry-After':'invalid'}), None))
+        for error, delay in cases:
+            with self.subTest(error=error, delay=delay), patch.object(s, 'run', return_value=self.p), \
+                 patch.object(s, 'one', side_effect=[error, {'jobs':[self.selector()]}]) as jobs, \
+                 patch.object(s.time, 'time', return_value=1000), patch.object(s.time, 'sleep') as sleep:
+                if delay is not None:
+                    self.assertEqual(s.parent_meta(self.t, require_selector=True), self.p)
+                    self.assertEqual(jobs.call_count, 2)
+                    sleep.assert_called_once_with(delay)
+                else:
+                    with self.assertRaises(urllib.error.HTTPError):
+                        s.parent_meta(self.t, require_selector=True)
+                    jobs.assert_called_once()
+                    sleep.assert_not_called()
+
+    def test_persistent_parent_metadata_error_stops_at_poll_bound(self):
+        error = urllib.error.HTTPError('https://api.github.com', 503, 'unavailable', None, None)
+        with patch.object(s, 'run', return_value=self.p), patch.object(s, 'one', side_effect=error) as jobs, \
+             patch.object(s, 'PARENT_POLLS', 2), patch.object(s.time, 'sleep') as sleep:
+            with self.assertRaises(urllib.error.HTTPError):
+                s.parent_meta(self.t, require_selector=True)
+            self.assertEqual(jobs.call_count, 2)
+            sleep.assert_called_once_with(s.PARENT_POLL_SECONDS)
+
+    def test_retry_rechecks_parent_identity_before_admission(self):
+        error = urllib.error.HTTPError('https://api.github.com', 503, 'unavailable', None, None)
+        with patch.object(s, 'run', side_effect=[self.p, dict(self.p, run_attempt=2)]), \
+             patch.object(s, 'one', side_effect=error) as jobs, patch.object(s.time, 'sleep') as sleep:
+            with self.assertRaisesRegex(ValueError, 'identity mismatch: run_attempt'):
+                s.parent_meta(self.t, require_selector=True)
+            jobs.assert_called_once()
+            sleep.assert_called_once_with(s.PARENT_POLL_SECONDS)
+
+    def test_retry_restarts_parent_and_selector_validation(self):
+        for reads in ([OSError('timeout'), self.p, self.p], [self.p, OSError('timeout'), self.p, self.p]):
+            with self.subTest(reads=reads), patch.object(s, 'run', side_effect=reads) as parent, \
+                 patch.object(s, 'one', return_value={'jobs':[self.selector()]}) as jobs, \
+                 patch.object(s.time, 'sleep') as sleep:
+                self.assertEqual(s.parent_meta(self.t, require_selector=True), self.p)
+                self.assertEqual(parent.call_count, len(reads))
+                self.assertEqual(jobs.call_count, len(reads) - 2)
+                sleep.assert_called_once_with(s.PARENT_POLL_SECONDS)
+
+    def test_parent_metadata_retry_respects_elapsed_deadline(self):
+        with patch.object(s, 'run', side_effect=OSError('timeout')) as read, \
+             patch.object(s.time, 'monotonic', side_effect=[0, 66]), patch.object(s.time, 'sleep') as sleep:
+            with self.assertRaisesRegex(OSError, 'timeout'):
+                s.parent_meta(self.t)
+            read.assert_called_once()
+            sleep.assert_not_called()
+
+    def test_queued_parent_dispatch_requires_its_active_selector(self):
+        env = dict(GITHUB_RUN_ATTEMPT='1',GITHUB_RUN_ID='42',GROUP='0',HEAD=self.sha,
+                   SOURCE=self.src,PR='32922')
+        assigned = dict(id=9,status='in_progress',runner_id=1,
+                        runner_name='cs-jed-nc-n1-pr-v1-abc-runner-def')
+        for active in (False, True):
+            def metadata(path):
+                if '/jobs?' in path:
+                    return {'jobs':[self.selector()] if active else []}
+                return {'object':{'sha':'b'*40}}
+
+            with self.subTest(active=active), tempfile.TemporaryDirectory() as tmp, \
+                 patch.dict(os.environ,{**env,'RUNNER_TEMP':tmp}), \
+                 patch.object(s,'run',return_value=dict(self.p,status='queued')), \
+                 patch.object(s,'one',side_effect=metadata), patch.object(s,'dispatch',return_value=51) as dispatch, \
+                 patch.object(s,'observe',return_value=(assigned,1)), patch.object(s,'output'), \
+                 patch.object(s,'PARENT_POLLS',2), patch.object(s.time,'sleep'):
+                if active:
+                    s.choose()
+                    dispatch.assert_called_once()
+                    grant = json.loads(Path(tmp,'grant.json').read_text())
+                    self.assertEqual((grant['child'],grant['ticket']['group']),(51,0))
+                else:
+                    with self.assertRaisesRegex(ValueError,'still not active'):
+                        s.choose()
+                    dispatch.assert_not_called()
     def test_real_grant_path_and_terminal_change_before_checkout(self):
         grant=dict(child=51,ticket=self.t,pool='cs',nonce='test-nonce')
         proof=dict(allowed='true',verified_membership_http_status=204,pr_number='32922',
@@ -124,10 +243,10 @@ class ParentAdmission(unittest.TestCase):
                  GITHUB_RUN_ATTEMPT='1',GITHUB_RUN_ID='51')
         for cancel in (False,True):
             reads=[dict(self.p,status='queued'),self.p,self.p,
-                   dict(self.p,status='completed',conclusion='cancelled') if cancel else self.p]
+                   dict(self.p,status='completed',conclusion='cancelled') if cancel else self.p,self.p]
             with self.subTest(cancel=cancel), patch.dict(os.environ,env), patch.object(s,'run',side_effect=reads), \
-                 patch.object(s,'child_meta'), patch.object(s.time,'sleep'), patch.object(s,'one',return_value=pr), \
-                 patch.object(s,'active_selector',return_value=False), \
+                 patch.object(s,'selector_active',side_effect=[False, True]), patch.object(s,'child_meta'), \
+                 patch.object(s.time,'sleep'), patch.object(s,'one',return_value=pr), \
                  patch.object(s,'artifact',side_effect=[grant,proof]):
                 if cancel:
                     with self.assertRaisesRegex(ValueError,'cancelled'):
@@ -135,39 +254,147 @@ class ParentAdmission(unittest.TestCase):
                 else:
                     s.admit()
 
-    def test_worker_admission_requires_live_selector_until_checkout_when_parent_is_queued(self):
-        p = dict(self.p,status='queued')
+    def test_queued_worker_checks_selector_before_checkout(self):
         grant = dict(child=51,ticket=self.t,pool='cs',nonce='test-nonce')
-        proof = dict(schema=2,allowed='true',verified_membership_http_status=204,pr_number='32922',
-                     author='dev',head_repository=self.src,head_sha=self.sha,base_ref='main')
-        pr = dict(number=32922,user={'login':'dev'},
-                  head={'repo':{'full_name':self.src,'archived':False},'sha':self.sha},
-                  state='open',draft=False,base={'repo':{'full_name':s.REPO},'ref':'main'},labels=[])
+        proof = dict(allowed='true',verified_membership_http_status=204,pr_number='32922',
+                     author='dev',head_repository=self.src,head_sha=self.sha)
+        pr = dict(number=32922,user={'login':'dev'},head={'repo':{'full_name':self.src,'archived':False},
+                  'sha':self.sha},state='open',draft=False,base={'repo':{'full_name':s.REPO},'ref':'main'},
+                  labels=[{'name':'kind/test-ci'}])
         env = dict(TICKET=json.dumps(self.t),GROUP='0',HEAD=self.sha,SOURCE=self.src,POOL='cs',
                    GITHUB_RUN_ATTEMPT='1',GITHUB_RUN_ID='51')
-        for cancel in (False,True):
-            def read_parent(_):
-                # The live PR check happens immediately before the final
-                # parent/selector check. Simulate cancellation at that point.
-                return dict(p,status='completed',conclusion='cancelled') if cancel and checked else p
+        for parent_status in ('queued', 'in_progress'):
+            for scenario in ('running', 'pending', 'failed', 'skipped', 'cleanup', 'cleanup_done', 'transient'):
+                calls = 0
 
-            def read(path):
-                if path == '/actions/runs/42/attempts/1/jobs?per_page=100':
-                    return {'total_count':1,'jobs':[self.selector()]}
-                self.assertEqual(path,'/pulls/32922')
-                checked.append(path)
-                return pr
+                def metadata(path):
+                    nonlocal calls
+                    if path.startswith('/pulls/'):
+                        return pr
+                    calls += 1
+                    prior_checks = 2 if parent_status == 'queued' else 0
+                    if scenario == 'transient' and calls == prior_checks + 1:
+                        raise urllib.error.HTTPError('https://api.github.com', 503, 'unavailable', None, None)
+                    if calls > prior_checks:
+                        wait_status = ('completed' if scenario in ('failed', 'skipped') else
+                                       'pending' if scenario in ('pending', 'cleanup', 'cleanup_done') else 'in_progress')
+                        wait_conclusion = {'failed': 'failure', 'skipped': 'skipped'}.get(scenario)
+                        steps = [
+                            {'name': 'Release exactly one worker', 'conclusion': 'success'},
+                            {'name': 'Wait for selected group, including its UT result',
+                             'status': wait_status, 'conclusion': wait_conclusion},
+                            {'name': 'Cancel the selected worker if the selector stops',
+                             'status': ('completed' if scenario == 'cleanup_done' else
+                                        'in_progress' if scenario in ('skipped', 'cleanup') else 'pending'),
+                             'conclusion': 'success' if scenario == 'cleanup_done' else None},
+                        ]
+                        job = self.selector(steps=steps)
+                    else:
+                        job = self.selector()
+                    return {'jobs':[job]}
 
-            checked = []
-            with self.subTest(cancel=cancel), patch.dict(os.environ,env), patch.object(s,'run',side_effect=read_parent), \
-                 patch.object(s,'child_meta'), patch.object(s,'one',side_effect=read), \
-                 patch.object(s,'artifact',side_effect=[grant,proof]):
-                if cancel:
-                    with self.assertRaisesRegex(ValueError,'cancelled'):
+                with self.subTest(parent_status=parent_status, scenario=scenario), patch.dict(os.environ,env), \
+                     patch.object(s,'run',return_value=dict(self.p,status=parent_status)), \
+                     patch.object(s,'child_meta'), patch.object(s.time,'sleep'), patch.object(s,'PARENT_POLLS',2), \
+                     patch.object(s,'one',side_effect=metadata), patch.object(s,'artifact',side_effect=[grant,proof]):
+                    if scenario in ('failed', 'skipped', 'cleanup', 'cleanup_done'):
+                        with self.assertRaisesRegex(ValueError,'still not active'):
+                            s.admit()
+                    else:
                         s.admit()
-                else:
-                    s.admit()
-                self.assertEqual(checked,['/pulls/32922'])
+
+    def test_revoke_only_the_worker_owned_by_the_selector(self):
+        for scenario in ('active', 'completed', 'wrong_child', 'wrong_attempt', 'wrong_nonce',
+                         'wrong_worker', 'unexpected_status'):
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as tmp:
+                local_grant = json.loads(json.dumps(self.grant))
+                metadata = dict(self.worker)
+                if scenario == 'completed':
+                    metadata['status'] = 'completed'
+                elif scenario == 'wrong_child':
+                    local_grant['child'] = 52
+                elif scenario == 'wrong_attempt':
+                    local_grant['ticket']['attempt'] = 2
+                elif scenario == 'wrong_nonce':
+                    local_grant['nonce'] = 'wrong'
+                elif scenario == 'wrong_worker':
+                    metadata['display_title'] = 'unrelated worker'
+                elif scenario == 'unexpected_status':
+                    metadata['status'] = 'unknown'
+                Path(tmp, 'grant.json').write_text(json.dumps(local_grant))
+                with patch.dict(os.environ, {**self.selector_env, 'RUNNER_TEMP':tmp}), \
+                     patch.object(s, 'run', return_value=metadata), patch.object(s, 'api') as api:
+                    if scenario in ('active', 'completed'):
+                        s.revoke()
+                        if scenario == 'active':
+                            api.assert_called_once_with('/actions/runs/51/cancel', {})
+                        else:
+                            api.assert_not_called()
+                    else:
+                        with self.assertRaises(ValueError):
+                            s.revoke()
+                        api.assert_not_called()
+
+    def test_admitted_worker_is_cancelled_when_selector_fails(self):
+        proof = dict(allowed='true', verified_membership_http_status=204, pr_number='32922',
+                     author='dev', head_repository=self.src, head_sha=self.sha)
+        pr = dict(number=32922, user={'login':'dev'}, state='open', draft=False,
+                  head={'repo':{'full_name':self.src, 'archived':False}, 'sha':self.sha},
+                  base={'repo':{'full_name':s.REPO}, 'ref':'main'}, labels=[{'name':'kind/test-ci'}])
+        common = dict(GITHUB_RUN_ATTEMPT='1', GROUP='0', PR='32922', HEAD=self.sha, SOURCE=self.src)
+        worker_env = dict(common, GITHUB_RUN_ID='51', TICKET=json.dumps(self.t), POOL='cs')
+
+        def read_run(run_id):
+            return self.p if run_id == 42 else self.worker
+
+        def read_metadata(path):
+            return pr if path.startswith('/pulls/') else {'jobs':[self.selector()]}
+
+        with tempfile.TemporaryDirectory() as tmp, patch.object(s, 'run', side_effect=read_run), \
+             patch.object(s, 'one', side_effect=read_metadata), \
+             patch.object(s, 'artifact', side_effect=[self.grant,proof]), patch.object(s, 'api') as api:
+            Path(tmp, 'grant.json').write_text(json.dumps(self.grant))
+            with patch.dict(os.environ, worker_env):
+                s.admit()
+            with patch.dict(os.environ, {**self.selector_env, 'RUNNER_TEMP':tmp}):
+                s.revoke()
+            api.assert_called_once_with('/actions/runs/51/cancel', {})
+
+    def test_revoke_retries_transient_errors_and_handles_completion_race(self):
+        for status in (500, 409):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as tmp:
+                Path(tmp, 'grant.json').write_text(json.dumps(self.grant))
+                error = urllib.error.HTTPError('https://api.github.com', status, 'injected', None, None)
+                metadata = [self.worker, dict(self.worker, status='completed')] if status == 409 else [self.worker] * 2
+                responses = [error] if status == 409 else [error, ({}, 0)]
+                with patch.dict(os.environ, {**self.selector_env, 'RUNNER_TEMP':tmp}), \
+                     patch.object(s, 'run', side_effect=metadata), patch.object(s, 'api', side_effect=responses) as api, \
+                     patch.object(s.time, 'sleep') as sleep:
+                    s.revoke()
+                    self.assertEqual(api.call_count, len(responses))
+                    sleep.assert_called_once_with(2)
+
+    def test_revoke_retries_lookup_and_surfaces_cancellation_failure(self):
+        for scenario in ('lookup_transient', 'cancel_denied', 'cancel_exhausted'):
+            error_code = 403 if scenario == 'cancel_denied' else 500
+            error = urllib.error.HTTPError('https://api.github.com', error_code, 'injected', None, None)
+            metadata = [error, self.worker] if scenario == 'lookup_transient' else [self.worker] * 3
+            response = None if scenario == 'lookup_transient' else error
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as tmp:
+                Path(tmp, 'grant.json').write_text(json.dumps(self.grant))
+                with patch.dict(os.environ, {**self.selector_env, 'RUNNER_TEMP':tmp}), \
+                     patch.object(s, 'run', side_effect=metadata), patch.object(s, 'api', side_effect=response) as api, \
+                     patch.object(s.time, 'sleep') as sleep:
+                    if scenario == 'lookup_transient':
+                        s.revoke()
+                        api.assert_called_once_with('/actions/runs/51/cancel', {})
+                        sleep.assert_called_once_with(2)
+                    else:
+                        with self.assertRaises(urllib.error.HTTPError):
+                            s.revoke()
+                        self.assertEqual(api.call_count, 1 if scenario == 'cancel_denied' else 3)
+                        self.assertEqual(sleep.call_count, 0 if scenario == 'cancel_denied' else 2)
+
 
     def test_receipt_base_is_pinned_for_both_pools_and_retry(self):
         self.assertEqual(s.CACHE_BASE_REFS, CACHE_BASE_REFS)
@@ -201,9 +428,12 @@ class ParentAdmission(unittest.TestCase):
                           state="open", draft=False, base={"repo": {"full_name": s.REPO}, "ref": live},
                           labels=[{"name": label} for label in labels])
                 def read_run(run_id):
-                    return {42: dict(self.p, run_attempt=attempt), 51: child}[run_id]
+                    return {42: dict(self.p, run_attempt=attempt, status="queued"), 51: child}[run_id]
                 def read(path):
-                    return {"/actions/runs/51/attempts/1/jobs?per_page=100": {"total_count": 1, "jobs": [marker]},
+                    selector = self.selector(group=t["group"], run_attempt=attempt,
+                                             name=f"Matrixone UT Coverage execution / Route Coverage group {t['group']} / {s.short_title(t)}")
+                    return {f"/actions/runs/42/attempts/{attempt}/jobs?per_page=100&page=1": {"jobs": [selector]},
+                            "/actions/runs/51/attempts/1/jobs?per_page=100": {"total_count": 1, "jobs": [marker]},
                             "/pulls/32922": pr}[path]
                 with self.subTest(attempt=attempt, pool=pool, schema=schema, authorized=authorized,
                                   live=live, member=member, labels=labels), \
@@ -392,7 +622,11 @@ class Queue(unittest.TestCase):
         from pathlib import Path
         wf = (Path(__file__).resolve().parents[1]/'.github/workflows/coverage-queue-handoff.yaml').read_text()
         selector, collector = wf.split('  collect:\n')
+        for name in (s.GRANT_STEP, s.WAIT_STEP, s.REVOKE_STEP):
+            self.assertEqual(selector.count(f'name: {name}\n'), 1)
         self.assertLess(selector.index('coverage_standby.py choose'), selector.index('coverage_standby.py wait'))
+        self.assertIn("always() && steps.select.outputs.child != '' && steps.wait.outcome != 'success'", selector)
+        self.assertIn('coverage_standby.py revoke', selector)
         self.assertIn('real-pr-retry-', selector)
         self.assertNotIn('coverage_standby.py wait', collector)
         self.assertIn('actions: read', collector)
