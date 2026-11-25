@@ -23,7 +23,8 @@ class ParentAdmission(unittest.TestCase):
 
     def test_only_active_parent_returns(self):
         with patch.object(s,'run',side_effect=[dict(self.p,status=v) for v in
-                          ('queued','waiting','in_progress')]) as read, patch.object(s.time,'sleep') as sleep:
+                          ('queued','waiting','in_progress')]) as read, \
+             patch.object(s,'selector_active',return_value=False), patch.object(s.time,'sleep') as sleep:
             self.assertEqual(s.parent_meta(self.t)['id'],42)
             self.assertEqual((read.call_count,sleep.call_count),(3,2))
 
@@ -32,7 +33,8 @@ class ParentAdmission(unittest.TestCase):
                           ('path','wrong-workflow'),('event','workflow_dispatch'),
                           ('head_repository',None),('head_sha','c'*40)]:
             with self.subTest(field=field), patch.object(s,'run',side_effect=[
-                    dict(self.p,status='queued'),{**self.p,field:bad}]), patch.object(s.time,'sleep') as sleep:
+                    dict(self.p,status='queued'),{**self.p,field:bad}]), \
+                 patch.object(s,'selector_active',return_value=False), patch.object(s.time,'sleep') as sleep:
                 with self.assertRaisesRegex(ValueError,'identity mismatch: '+field):
                     s.parent_meta(self.t)
                 self.assertEqual(sleep.call_count,1)
@@ -47,11 +49,97 @@ class ParentAdmission(unittest.TestCase):
 
     def test_queued_is_bounded_and_never_grants(self):
         with patch.object(s,'run',return_value=dict(self.p,status='queued')) as read, \
+             patch.object(s,'selector_active',return_value=False), \
              patch.object(s.time,'sleep') as sleep, patch.object(s,'artifact') as artifact:
             with self.assertRaisesRegex(ValueError,'still not active'):
                 s.parent_meta(self.t)
             self.assertEqual((read.call_count,sleep.call_count),(s.PARENT_POLLS,s.PARENT_POLLS-1))
             artifact.assert_not_called()
+
+    def selector(self, group=0, **changes):
+        return {
+            'id': 123,
+            'run_id': 42,
+            'run_attempt': 1,
+            'name': f'Matrixone UT Coverage execution / Route Coverage group {group} / select',
+            'status': 'in_progress',
+            'conclusion': None,
+            'steps': [{'name': 'Release exactly one worker', 'conclusion': None}],
+            **changes,
+        }
+
+    def test_queued_run_admits_only_its_active_selector(self):
+        queued = dict(self.p, status='queued')
+        with patch.object(s,'run',return_value=queued) as read, \
+             patch.object(s,'one',return_value={'jobs':[self.selector()]}) as jobs, \
+             patch.object(s.time,'sleep') as sleep:
+            self.assertEqual(s.parent_meta(self.t),queued)
+            self.assertEqual(read.call_count,2)
+            jobs.assert_called_once_with('/actions/runs/42/attempts/1/jobs?per_page=100&page=1')
+            sleep.assert_not_called()
+
+    def test_selector_lookup_checks_group_attempt_and_pages(self):
+        others = [self.selector(group=1,id=i) for i in range(100)]
+        with patch.object(s,'one',side_effect=[{'jobs':others}, {'jobs':[self.selector()]}]) as jobs:
+            self.assertTrue(s.selector_active(self.t))
+            self.assertEqual(jobs.call_count,2)
+        for job in (self.selector(group=1), self.selector(status='completed', conclusion='cancelled'),
+                    self.selector(status='queued'), self.selector(steps=[]),
+                    self.selector(steps=[{'name': 'Release exactly one worker', 'conclusion': 'skipped'}]),
+                    self.selector(steps=[{'name': 'Release exactly one worker'}])):
+            with self.subTest(job=job), patch.object(s,'one',return_value={'jobs':[job]}):
+                self.assertFalse(s.selector_active(self.t))
+        for field, value in (('run_id',43),('run_attempt',2)):
+            with self.subTest(field=field), patch.object(s,'one',return_value={'jobs':[self.selector(**{field:value})]}):
+                with self.assertRaisesRegex(ValueError,'selector identity mismatch'):
+                    s.selector_active(self.t)
+        with patch.object(s,'one',return_value={'jobs':[self.selector(),self.selector(id=124)]}):
+            with self.assertRaisesRegex(ValueError,'ambiguous parent selector'):
+                s.selector_active(self.t)
+
+    def test_selector_is_identified_by_group_and_grant_step(self):
+        job = self.selector(name='Matrixone UT Coverage execution / Route Coverage group 0 / GROUP0')
+        with patch.object(s,'one',return_value={'jobs':[job]}):
+            self.assertTrue(s.selector_active(self.t))
+
+    def test_parent_is_rechecked_after_active_selector(self):
+        for changed in (dict(self.p,status='completed',conclusion='cancelled'),
+                        dict(self.p,run_attempt=2),dict(self.p,head_sha='c'*40)):
+            with self.subTest(changed=changed), \
+                 patch.object(s,'run',side_effect=[dict(self.p,status='queued'),changed]), \
+                 patch.object(s,'one',return_value={'jobs':[self.selector()]}):
+                with self.assertRaises(ValueError):
+                    s.parent_meta(self.t)
+
+    def test_queued_parent_dispatch_requires_its_active_selector(self):
+        import tempfile
+        from pathlib import Path
+
+        env = dict(GITHUB_RUN_ATTEMPT='1',GITHUB_RUN_ID='42',GROUP='0',HEAD=self.sha,
+                   SOURCE=self.src,PR='32922')
+        assigned = dict(id=9,status='in_progress',runner_id=1,
+                        runner_name='cs-jed-nc-n1-pr-v1-abc-runner-def')
+        for active in (False, True):
+            def metadata(path):
+                if '/jobs?' in path:
+                    return {'jobs':[self.selector()] if active else []}
+                return {'object':{'sha':'b'*40}}
+
+            with self.subTest(active=active), tempfile.TemporaryDirectory() as tmp, \
+                 patch.dict(os.environ,{**env,'RUNNER_TEMP':tmp}), \
+                 patch.object(s,'run',return_value=dict(self.p,status='queued')), \
+                 patch.object(s,'one',side_effect=metadata), patch.object(s,'dispatch',return_value=51) as dispatch, \
+                 patch.object(s,'observe',return_value=(assigned,1)), patch.object(s,'output'), \
+                 patch.object(s,'PARENT_POLLS',2), patch.object(s.time,'sleep'):
+                if active:
+                    s.choose()
+                    dispatch.assert_called_once()
+                    grant = json.loads(Path(tmp,'grant.json').read_text())
+                    self.assertEqual((grant['child'],grant['ticket']['group']),(51,0))
+                else:
+                    with self.assertRaisesRegex(ValueError,'still not active'):
+                        s.choose()
+                    dispatch.assert_not_called()
 
     def test_real_grant_path_and_terminal_change_before_checkout(self):
         grant=dict(child=51,ticket=self.t,pool='cs',nonce='test-nonce')
@@ -66,10 +154,44 @@ class ParentAdmission(unittest.TestCase):
             reads=[dict(self.p,status='queued'),self.p,self.p,
                    dict(self.p,status='completed',conclusion='cancelled') if cancel else self.p]
             with self.subTest(cancel=cancel), patch.dict(os.environ,env), patch.object(s,'run',side_effect=reads), \
-                 patch.object(s,'child_meta'), patch.object(s.time,'sleep'), patch.object(s,'one',return_value=pr), \
+                 patch.object(s,'selector_active',return_value=False), patch.object(s,'child_meta'), \
+                 patch.object(s.time,'sleep'), patch.object(s,'one',return_value=pr), \
                  patch.object(s,'artifact',side_effect=[grant,proof]):
                 if cancel:
                     with self.assertRaisesRegex(ValueError,'cancelled'):
+                        s.admit()
+                else:
+                    s.admit()
+
+    def test_queued_worker_checks_selector_before_checkout(self):
+        grant = dict(child=51,ticket=self.t,pool='cs',nonce='test-nonce')
+        proof = dict(allowed='true',verified_membership_http_status=204,pr_number='32922',
+                     author='dev',head_repository=self.src,head_sha=self.sha)
+        pr = dict(number=32922,user={'login':'dev'},head={'repo':{'full_name':self.src,'archived':False},
+                  'sha':self.sha},state='open',draft=False,base={'repo':{'full_name':s.REPO},'ref':'main'},
+                  labels=[{'name':'kind/test-ci'}])
+        env = dict(TICKET=json.dumps(self.t),GROUP='0',HEAD=self.sha,SOURCE=self.src,POOL='cs',
+                   GITHUB_RUN_ATTEMPT='1',GITHUB_RUN_ID='51')
+        for canceled in (False, True):
+            calls = 0
+
+            def metadata(path):
+                nonlocal calls
+                if path.startswith('/pulls/'):
+                    return pr
+                calls += 1
+                if canceled and calls > 2:
+                    job = self.selector(status='completed',conclusion='cancelled')
+                else:
+                    job = self.selector()
+                return {'jobs':[job]}
+
+            with self.subTest(canceled=canceled), patch.dict(os.environ,env), \
+                 patch.object(s,'run',return_value=dict(self.p,status='queued')), \
+                 patch.object(s,'child_meta'), patch.object(s.time,'sleep'), patch.object(s,'PARENT_POLLS',2), \
+                 patch.object(s,'one',side_effect=metadata), patch.object(s,'artifact',side_effect=[grant,proof]):
+                if canceled:
+                    with self.assertRaisesRegex(ValueError,'still not active'):
                         s.admit()
                 else:
                     s.admit()

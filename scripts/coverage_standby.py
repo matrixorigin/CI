@@ -80,8 +80,36 @@ def parent_identity(t, p):
         check(actual == value, f"parent {t['parent']} identity mismatch: {field}")
 
 
+def selector_active(t):
+    """Confirm this group's selector is still running in the parent attempt."""
+    page = 1
+    matches = []
+    while True:
+        data = one(f"/actions/runs/{t['parent']}/attempts/{t['attempt']}/jobs?"
+                   + urlencode(dict(per_page=100, page=page)))
+        jobs = data["jobs"]
+        for job in jobs:
+            # The matrix group and grant step identify the selector even if
+            # its display name changes.
+            names = job["name"].split(" / ")
+            if (len(names) >= 2 and names[-2] == f"Route Coverage group {t['group']}"
+                    and any(step["name"] == "Release exactly one worker"
+                            and "conclusion" in step
+                            and step["conclusion"] in (None, "success")
+                            for step in (job.get("steps") or []))):
+                check(job["run_id"] == t["parent"] and job["run_attempt"] == t["attempt"],
+                      "selector identity mismatch")
+                matches.append(job)
+        if len(jobs) < 100:
+            break
+        page += 1
+    check(len(matches) <= 1, "ambiguous parent selector")
+    return bool(matches and matches[0]["status"] == "in_progress"
+                and matches[0]["conclusion"] is None)
+
+
 def parent_meta(t):
-    """Retry only a known, nonterminal state of the same parent attempt."""
+    """Validate the identity and liveness of the parent attempt."""
     for poll in range(PARENT_POLLS):
         p = run(t["parent"])
         parent_identity(t, p)
@@ -92,8 +120,18 @@ def parent_meta(t):
             return p
         check(status in ("queued", "pending", "requested", "waiting"),
               f"parent {t['parent']} not active: status={status!r}")
+        # GitHub can report a queued run while one of its jobs is executing.
+        # The selector stays active until its worker finishes, so it proves
+        # that this group is still live without trusting another group's job.
+        if selector_active(t):
+            p = run(t["parent"])
+            parent_identity(t, p)
+            check("conclusion" in p and p["conclusion"] is None
+                  and p.get("status") in ("in_progress", "queued", "pending", "requested", "waiting"),
+                  f"parent {t['parent']} not active after selector check")
+            return p
         if poll == 0:
-            print(f"parent {t['parent']} status={status}; waiting without admitting", flush=True)
+            print(f"parent {t['parent']} status={status}; waiting for its selector", flush=True)
         if poll + 1 < PARENT_POLLS:
             time.sleep(PARENT_POLL_SECONDS)
     raise ValueError(f"parent {t['parent']} still not active after {PARENT_POLLS} reads: status={status}")
