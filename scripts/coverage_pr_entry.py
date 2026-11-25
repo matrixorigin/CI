@@ -7,7 +7,8 @@ from pathlib import Path
 
 PROJECT = "matrixorigin/matrixone"
 ENTRY = PROJECT + "/.github/workflows/entrypoint.yaml@refs/heads/main"
-CACHE_BASE_REFS = frozenset({"main", "4.2-dev"})
+# Keep 4.2-dev on legacy until admission can verify the S3 fixtures at the PR head.
+CACHE_BASE_REFS = frozenset({"main"})
 
 
 def require(ok, reason):

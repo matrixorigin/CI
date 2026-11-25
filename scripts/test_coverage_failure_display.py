@@ -32,6 +32,11 @@ class CoverageFailureDisplayTest(unittest.TestCase):
              "Output": "    a_test.go:56: Expected: committed; Actual: rolled back\n"},
             {"Action": "fail", "Package": "another/package", "Test": "TestAssert"},
         ]
+        events.append({"Action": "output", "Package": "timeout/pkg", "Test": "TestSlow",
+                       "Output": "panic: test timed out after 1s\n"})
+        events.extend({"Action": "output", "Package": "timeout/pkg", "Output": f"stack line {i}\n"}
+                      for i in range(100))
+        events.append({"Action": "fail", "Package": "timeout/pkg"})
         with tempfile.TemporaryDirectory() as directory:
             temp = Path(directory)
             report = temp / "report.json"
@@ -46,6 +51,8 @@ class CoverageFailureDisplayTest(unittest.TestCase):
         self.assertIn("panic: runtime error: invalid memory address or nil pointer dereference", result.stdout)
         self.assertIn("a_test.go:56: Expected: committed; Actual: rolled back", result.stdout)
         self.assertNotIn(f"FAILED {package} / <package>", result.stdout)
+        self.assertIn("FAILED timeout/pkg / TestSlow", result.stdout)
+        self.assertIn("panic: test timed out after 1s", result.stdout)
         self.assertNotIn("\x1b", result.stdout)
 
     def test_red_step_reports_a_preparation_failure_without_a_test_report(self):

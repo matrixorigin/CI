@@ -29,8 +29,15 @@ def clean_log_line(value):
 
 
 def compact_failure_log(build_failures, test_failures, build_outputs, test_outputs, package_outputs, panic_like):
-    named_packages = {package for _, package, test, _ in test_failures if test}
+    named_failures = {(package, test) for _, package, test, _ in test_failures if test}
+    package_failures = {package for _, package, test, _ in test_failures if not test}
+    unmatched_panics = collections.defaultdict(list)
+    for _, package, test, line in panic_like:
+        if test and package in package_failures and (package, test) not in named_failures:
+            unmatched_panics[package, test].append(line)
+    named_packages = {package for package, _ in named_failures | unmatched_panics.keys()}
     entries = [(package, "build failed", build_outputs.get(package, [])) for _, package in build_failures]
+    entries.extend((package, test, lines) for (package, test), lines in unmatched_panics.items())
     for _, package, test, _ in test_failures:
         if not test and package in named_packages:
             continue  # the named tests already explain this package's failure

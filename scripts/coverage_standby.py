@@ -21,7 +21,7 @@ WORKER = "coverage-standby-worker.yaml"
 WORKER_REF = "main"
 ENTRY = ".github/workflows/entrypoint.yaml"
 # Kept in sync with coverage_pr_entry.py by the admission contract tests.
-CACHE_BASE_REFS = frozenset({"main", "4.2-dev"})
+CACHE_BASE_REFS = frozenset({"main"})
 POOLS = {"cs": "cs-node-cache-7c14g", "idc": "amd64-mo-shanghai-ut-safe"}
 WAIT = 3600
 PROGRESS_INTERVAL = 300
@@ -319,6 +319,10 @@ def dispatch(t, pool, revision):
                     try:
                         if identity_title(candidate["id"], candidate) == title(t, pool):
                             ids.append(candidate["id"])
+                    except urllib.error.HTTPError as error:
+                        if error.code != 404:
+                            raise
+                        error.close()
                     except WorkerIdentityPending:
                         # A display name cannot identify a worker. Ignore an
                         # unindexed run on this scan; it cannot block an exact

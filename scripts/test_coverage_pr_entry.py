@@ -53,8 +53,8 @@ class EntryTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 route(ctx, self.event, self.pr, 204)
 
-    def test_only_main_and_4_2_dev_are_eligible_targets(self):
-        for base, expected in (("main", "cache"), ("4.2-dev", "cache"),
+    def test_only_main_is_an_eligible_target(self):
+        for base, expected in (("main", "cache"), ("4.2-dev", "legacy"),
                                ("4.1-dev", "legacy"), ("4.2-dev-other", "legacy"),
                                ("v4.2.8-hotfix", "legacy"), ("3.0-dev", "legacy")):
             with self.subTest(base=base):
@@ -62,19 +62,20 @@ class EntryTest(unittest.TestCase):
                 self.assertEqual(route(CALLER, self.event, self.pr, 204)["route"], expected)
         self.event["pull_request"]["base"]["ref"] = self.pr["base"]["ref"] = "4.2-dev"
         self.assertEqual(route(CALLER, self.event, self.pr, 404)["route"], "legacy")
+        self.event["pull_request"]["base"]["ref"] = self.pr["base"]["ref"] = "main"
         for labels in ([], [{"name": "kind/refactor"}]):
             self.pr["labels"] = labels
             self.assertEqual(route(CALLER, self.event, self.pr, 204)["route"], "cache")
         self.pr["head"]["repo"]["archived"] = True
         self.assertEqual(route(CALLER, self.event, self.pr, 204)["route"], "legacy")
         self.pr["head"]["repo"]["archived"] = False
-        self.pr["base"]["ref"] = "main"
+        self.pr["base"]["ref"] = "4.2-dev"
         with self.assertRaisesRegex(ValueError, "stale or invalid PR identity"):
             route(CALLER, self.event, self.pr, 204)
 
     def test_drafts_use_the_same_routing_and_identity_checks(self):
         self.pr["draft"] = self.event["pull_request"]["draft"] = True
-        for base, member, expected in (("main", 204, "cache"), ("4.2-dev", 204, "cache"),
+        for base, member, expected in (("main", 204, "cache"), ("4.2-dev", 204, "legacy"),
                                        ("main", 404, "legacy"), ("4.2-dev", 302, "legacy"),
                                        ("4.1-dev", 204, "legacy")):
             for action in ("opened", "synchronize"):

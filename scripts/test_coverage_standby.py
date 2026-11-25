@@ -409,8 +409,8 @@ class ParentAdmission(unittest.TestCase):
             env = dict(TICKET=json.dumps(t), GROUP=str(t["group"]), HEAD=self.sha, SOURCE=self.src,
                        POOL=pool, GITHUB_RUN_ATTEMPT="1", GITHUB_RUN_ID="51")
             for schema, authorized, live, member, labels, draft, expected in (
-                    (2, "4.2-dev", "4.2-dev", 204, ["kind/refactor"], False, True),
-                    (2, "4.2-dev", "4.2-dev", 204, [], True, True),
+                    (2, "4.2-dev", "4.2-dev", 204, ["kind/refactor"], False, False),
+                    (2, "4.2-dev", "4.2-dev", 204, [], True, False),
                     (2, "main", "main", 204, [], False, True),
                     (2, "main", "main", 204, [], True, True),
                     (2, "main", "main", 404, ["kind/test-ci"], True, False),
@@ -751,11 +751,13 @@ class ShortWorkerTitle(unittest.TestCase):
 
     def test_204_dispatch_ignores_unindexed_same_title_but_rejects_verified_duplicates(self):
         other = dict(self.meta, id=52)
-        for state in ("missing", "queued", "duplicate"):
+        for state in ("missing", "queued", "vanished", "duplicate"):
             def read(path):
                 if "/actions/workflows/" in path:
                     return {"workflow_runs": [other, self.meta]}
                 if "/52/" in path:
+                    if state == "vanished":
+                        raise urllib.error.HTTPError(path, 404, "not found", None, None)
                     if state == "missing":
                         return {"total_count": 0, "jobs": []}
                     marker = dict(self.marker, run_id=52)
