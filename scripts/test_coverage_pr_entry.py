@@ -1,6 +1,7 @@
 """Production routing has its own tests; the measured consumer is immutable."""
 import copy
 import hashlib
+from http.client import IncompleteRead, RemoteDisconnected
 import json
 import os
 import subprocess
@@ -104,6 +105,7 @@ class EntryTest(unittest.TestCase):
                                   ([dict(files[0], sha="b"*40), *files[1:]], "legacy")):
             with self.subTest(expected=expected), mock.patch("scripts.coverage_pr_entry.build_opener") as opener:
                 response = opener.return_value.open.return_value.__enter__.return_value
+                response.getheader.return_value = None
                 response.read.return_value = json.dumps(listing).encode()
                 self.assertEqual(route(CALLER, self.event, self.pr, 204, verify)["route"], expected)
                 request = opener.return_value.open.call_args.args[0]
@@ -112,6 +114,34 @@ class EntryTest(unittest.TestCase):
         with mock.patch("scripts.coverage_pr_entry.build_opener") as opener:
             opener.return_value.open.side_effect = HTTPError("https://api.github.com", 404, "missing", {}, None)
             self.assertEqual(route(CALLER, self.event, self.pr, 204, verify)["route"], "legacy")
+
+    def test_fixture_transport_errors_keep_legacy_route(self):
+        verify = lambda source, sha: has_s3_fixture(source, sha, "fixture-only")
+        for error in (RemoteDisconnected("peer closed the connection"), ConnectionResetError(),
+                      IncompleteRead(b"[", 10)):
+            with self.subTest(error=type(error).__name__), \
+                 mock.patch("scripts.coverage_pr_entry.build_opener") as opener:
+                open_request = opener.return_value.open
+                if isinstance(error, IncompleteRead):
+                    response = open_request.return_value.__enter__.return_value
+                    response.getheader.return_value = None
+                    response.read.side_effect = error
+                else:
+                    open_request.side_effect = error
+                self.assertEqual(route(CALLER, self.event, self.pr, 204, verify),
+                                 {"route": "legacy", "allowed": "false"})
+
+    def test_fixture_response_shorter_than_content_length_keeps_legacy_route(self):
+        files = [{"type": "file", "name": name, "sha": sorted(shas)[0]}
+                 for name, shas in S3_FIXTURE_BLOBS.items()]
+        raw = json.dumps(files).encode()
+        with mock.patch("scripts.coverage_pr_entry.build_opener") as opener:
+            response = opener.return_value.open.return_value.__enter__.return_value
+            response.read.return_value = raw
+            response.getheader.return_value = str(len(raw) + 10)
+            verify = lambda source, sha: has_s3_fixture(source, sha, "fixture-only")
+            self.assertEqual(route(CALLER, self.event, self.pr, 204, verify),
+                             {"route": "legacy", "allowed": "false"})
 
     def test_pr_number_does_not_pin_either_group(self):
         for i in range(1, 9):

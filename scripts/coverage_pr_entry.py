@@ -1,10 +1,10 @@
 """Trusted event adapter. No dispatch, cache publication or PR-head execution."""
 import datetime as dt
+from http.client import HTTPException
 import json
 import os
 import re
 from pathlib import Path
-from urllib.error import URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 PROJECT = "matrixorigin/matrixone"
@@ -33,11 +33,13 @@ def has_s3_fixture(source, sha, token):
     try:
         with build_opener(NoRedirect).open(request, timeout=10) as response:
             limit = 512 * 1024
+            size = response.getheader("Content-Length")
             raw = response.read(limit + 1)
-            if len(raw) > limit:
+            # A bounded read can return early without raising IncompleteRead.
+            if len(raw) > limit or (size is not None and len(raw) != int(size)):
                 return False
             entries = json.loads(raw)
-    except (URLError, TimeoutError, ValueError):
+    except (OSError, HTTPException, ValueError):
         return False
     if not isinstance(entries, list):
         return False
