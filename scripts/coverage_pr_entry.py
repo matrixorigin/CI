@@ -34,11 +34,11 @@ def route(ctx, event, live, member_status):
     # The approved client never follows membership redirects. A 302 is not
     # proof of membership; like a 404 it must never grant access to cache runners.
     require(member_status in (204, 302, 404), "membership could not be verified")
-    labels = {row["name"] for row in live["labels"]}
     # Never use an arbitrary caller-selected head, runner label or environment.
-    # The old path still enforces its own org/safe-to-test eligibility.
+    # PR type labels are metadata, not proof of trust. The old path still
+    # enforces its own org/safe-to-test eligibility.
     if (base not in CACHE_BASE_REFS or live["draft"] or live["head"]["repo"]["archived"] or
-            member_status != 204 or "kind/test-ci" not in labels):
+            member_status != 204):
         return {"route": "legacy", "allowed": "false"}
     return {"route": "cache", "allowed": "true", "head_sha": sha, "head_repository": source}
 
@@ -58,7 +58,7 @@ def main():
     if result["route"] == "cache":
         # Preserve the validation workflow's allowlisted, independently auditable
         # authorization receipt; neither tokens nor the complete API payload are logged.
-        receipt = {"schema": 1, "allowed": "true", "head_sha": result["head_sha"],
+        receipt = {"schema": 2, "allowed": "true", "head_sha": result["head_sha"],
                    "head_repository": result["head_repository"], "pr_number": str(number),
                    "base_ref": pr["base"]["ref"],
                    "author": pr["user"]["login"], "project_cache_namespace": PROJECT,

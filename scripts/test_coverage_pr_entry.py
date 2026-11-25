@@ -21,7 +21,7 @@ CALLER = (PROJECT, "pull_request_target", ENTRY)
 
 class EntryTest(unittest.TestCase):
     def setUp(self):
-        self.pr = {"number": 32871, "state": "open", "draft": False, "labels": [{"name": "kind/test-ci"}],
+        self.pr = {"number": 32871, "state": "open", "draft": False, "labels": [{"name": "size/XL"}],
                    "base": {"repo": {"full_name": PROJECT}, "ref": "main"},
                    "head": {"repo": {"full_name": "example/matrixone", "archived": False}, "sha": "a"*40},
                    "user": {"login": "example"}}
@@ -45,8 +45,9 @@ class EntryTest(unittest.TestCase):
                 route(CALLER, self.event, self.pr, status)
         self.assertEqual(route(CALLER, self.event, self.pr, 404)["route"], "legacy")
         self.assertEqual(route(CALLER, self.event, self.pr, 302)["route"], "legacy")
-        self.pr["labels"] = [{"name": "safe-to-test"}]
-        self.assertEqual(route(CALLER, self.event, self.pr, 204)["route"], "legacy")
+        for label in ("safe-to-test", "kind/test-ci"):
+            self.pr["labels"] = [{"name": label}]
+            self.assertEqual(route(CALLER, self.event, self.pr, 404)["route"], "legacy")
         for ctx in [(PROJECT, "workflow_dispatch", ENTRY), (PROJECT, "pull_request", ENTRY),
                     ("example/matrixone", CALLER[1], ENTRY), (*CALLER[:2], ENTRY+"x")]:
             with self.assertRaises(ValueError):
@@ -61,8 +62,15 @@ class EntryTest(unittest.TestCase):
                 self.assertEqual(route(CALLER, self.event, self.pr, 204)["route"], expected)
         self.event["pull_request"]["base"]["ref"] = self.pr["base"]["ref"] = "4.2-dev"
         self.assertEqual(route(CALLER, self.event, self.pr, 404)["route"], "legacy")
-        self.pr["labels"] = [{"name": "safe-to-test"}]
+        for labels in ([], [{"name": "kind/refactor"}]):
+            self.pr["labels"] = labels
+            self.assertEqual(route(CALLER, self.event, self.pr, 204)["route"], "cache")
+        self.pr["draft"] = True
         self.assertEqual(route(CALLER, self.event, self.pr, 204)["route"], "legacy")
+        self.pr["draft"] = False
+        self.pr["head"]["repo"]["archived"] = True
+        self.assertEqual(route(CALLER, self.event, self.pr, 204)["route"], "legacy")
+        self.pr["head"]["repo"]["archived"] = False
         self.pr["base"]["ref"] = "main"
         with self.assertRaisesRegex(ValueError, "stale or invalid PR identity"):
             route(CALLER, self.event, self.pr, 204)
@@ -112,6 +120,7 @@ class EntryTest(unittest.TestCase):
             raw = (root/"real-pr-authorization.json").read_text()
             self.assertNotIn("fixture-only", raw)
             receipt = json.loads(raw)
+            self.assertEqual(receipt["schema"], 2)
             self.assertEqual(receipt["head_sha"], self.pr["head"]["sha"])
             self.assertEqual(receipt["base_ref"], self.pr["base"]["ref"])
             self.assertEqual(receipt["membership_checks"], checks)

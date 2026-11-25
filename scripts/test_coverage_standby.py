@@ -87,26 +87,32 @@ class ParentAdmission(unittest.TestCase):
                           name=s.title(t, pool)+s.IDENTITY_SUFFIX)
             env = dict(TICKET=json.dumps(t), GROUP=str(t["group"]), HEAD=self.sha, SOURCE=self.src,
                        POOL=pool, GITHUB_RUN_ATTEMPT="1", GITHUB_RUN_ID="51")
-            for authorized, live, expected in (("4.2-dev", "4.2-dev", True),
-                                                ("4.2-dev", "main", False),
-                                                ("main", "4.2-dev", False),
-                                                ("4.1-dev", "4.1-dev", False),
-                                                (None, "main", True),
-                                                (None, "4.2-dev", False)):
-                proof = dict(allowed="true", verified_membership_http_status=204, pr_number="32922",
+            for schema, authorized, live, member, labels, expected in (
+                    (2, "4.2-dev", "4.2-dev", 204, ["kind/refactor"], True),
+                    (2, "main", "main", 204, [], True),
+                    (2, "main", "main", 404, ["kind/test-ci"], False),
+                    (2, "4.2-dev", "main", 204, [], False),
+                    (2, "main", "4.2-dev", 204, [], False),
+                    (2, "4.1-dev", "4.1-dev", 204, [], False),
+                    (2, None, "main", 204, [], False),
+                    (1, None, "main", 204, ["kind/test-ci"], True),
+                    (1, None, "main", 204, [], False),
+                    (1, None, "4.2-dev", 204, ["kind/test-ci"], False)):
+                proof = dict(schema=schema, allowed="true", verified_membership_http_status=member, pr_number="32922",
                              author="dev", head_repository=self.src, head_sha=self.sha)
                 if authorized is not None:
                     proof["base_ref"] = authorized
                 pr = dict(number=32922, user={"login": "dev"},
                           head={"repo": {"full_name": self.src, "archived": False}, "sha": self.sha},
                           state="open", draft=False, base={"repo": {"full_name": s.REPO}, "ref": live},
-                          labels=[{"name": "kind/test-ci"}])
+                          labels=[{"name": label} for label in labels])
                 def read_run(run_id):
                     return {42: dict(self.p, run_attempt=attempt), 51: child}[run_id]
                 def read(path):
                     return {"/actions/runs/51/attempts/1/jobs?per_page=100": {"total_count": 1, "jobs": [marker]},
                             "/pulls/32922": pr}[path]
-                with self.subTest(attempt=attempt, pool=pool, authorized=authorized, live=live), \
+                with self.subTest(attempt=attempt, pool=pool, schema=schema, authorized=authorized,
+                                  live=live, member=member, labels=labels), \
                      patch.dict(os.environ, env), patch.object(s, "run", side_effect=read_run), \
                      patch.object(s, "one", side_effect=read), \
                      patch.object(s, "artifact", side_effect=[grant, proof]) as artifact:

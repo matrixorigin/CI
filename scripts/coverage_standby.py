@@ -428,17 +428,19 @@ def admit():
     proof = artifact(t["parent"], proof_name(t),
                      "real-pr-authorization.json")
     pr = one(f"/pulls/{int(t['pr'])}")
-    # In-flight receipts from before the rollout could only authorize main.
-    # New receipts bind the exact base, including across allowed branches.
-    base = proof.get("base_ref", "main") if proof else None
-    check(proof and proof["allowed"] == "true" and proof["verified_membership_http_status"] == 204
+    # In-flight receipts from the old entrypoint retain their original
+    # eligibility. New receipts bind the exact base and do not use type labels.
+    schema = proof.get("schema", 1) if proof else None
+    base = proof.get("base_ref", "main" if schema == 1 else None) if proof else None
+    check(proof and schema in (1, 2) and proof["allowed"] == "true" and proof["verified_membership_http_status"] == 204
           and int(proof["pr_number"]) == pr["number"] and proof["author"] == pr["user"]["login"]
           and proof["head_repository"] == source == pr["head"]["repo"]["full_name"]
           and proof["head_sha"] == head == pr["head"]["sha"] and pr["state"] == "open"
           and not pr["draft"] and not pr["head"]["repo"]["archived"]
           and pr["base"]["repo"]["full_name"] == REPO
           and pr["base"]["ref"] == base and base in CACHE_BASE_REFS
-          and "kind/test-ci" in {v["name"] for v in pr["labels"]}, "PR no longer matches authorization")
+          and (schema == 2 or "kind/test-ci" in {v["name"] for v in pr["labels"]}),
+          "PR no longer matches authorization")
     parent_meta(t)  # Reconfirm after checking the grant and live PR, before returning to checkout.
 
 
