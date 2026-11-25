@@ -114,18 +114,54 @@ def parent_identity(t, p):
         check(actual == value, f"parent {t['parent']} identity mismatch: {field}")
 
 
+def parent_status(t, p):
+    parent_identity(t, p)
+    status, conclusion = p.get("status"), p.get("conclusion")
+    check("conclusion" in p and conclusion is None,
+          f"parent {t['parent']} not active: conclusion={conclusion!r}")
+    check(status in ("in_progress", "queued", "pending", "requested", "waiting"),
+          f"parent {t['parent']} not active: status={status!r}")
+    return status
+
+
+def active_selector(t):
+    # An aggregate run can stay queued while its hosted selector is already
+    # running. Only the exact selector for this group and attempt is evidence.
+    # Do not accept a sibling, a worker job, or an arbitrary name suffix.
+    group = t["group"]
+    check(type(group) is int and group in (0, 1), "invalid selector group")
+    prefix = f"Matrixone UT Coverage execution / Route Coverage group {group} / "
+    names = {prefix + "select", prefix + short_title(t)}
+    data = one(f"/actions/runs/{int(t['parent'])}/attempts/{int(t['attempt'])}/jobs?per_page=100")
+    check(len(data["jobs"]) == data["total_count"], "incomplete parent jobs response")
+    matched = [job for job in data["jobs"] if job["name"] in names]
+    check(len(matched) <= 1, "ambiguous parent selector")
+    if not matched:
+        return False
+    job = matched[0]
+    check(job.get("run_id") == t["parent"] and job.get("run_attempt") == t["attempt"]
+          and job.get("head_sha") == t["head"] and job.get("labels") == ["ubuntu-latest"],
+          "parent selector identity mismatch")
+    return (job.get("status") == "in_progress" and "conclusion" in job
+            and job["conclusion"] is None and type(job.get("id")) is int and job["id"] > 0
+            and type(job.get("runner_id")) is int and job["runner_id"] > 0
+            and job.get("runner_group_name") == "GitHub Actions")
+
+
 def parent_meta(t):
-    """Retry only a known, nonterminal state of the same parent attempt."""
+    """Require the same active parent attempt, even when its aggregate status lags."""
     for poll in range(PARENT_POLLS):
         p = run(t["parent"])
-        parent_identity(t, p)
-        status, conclusion = p.get("status"), p.get("conclusion")
-        check("conclusion" in p and conclusion is None,
-              f"parent {t['parent']} not active: conclusion={conclusion!r}")
+        status = parent_status(t, p)
         if status == "in_progress":
             return p
-        check(status in ("queued", "pending", "requested", "waiting"),
-              f"parent {t['parent']} not active: status={status!r}")
+        if status == "queued" and active_selector(t):
+            # Refuse cancellation, completion or a new attempt if GitHub
+            # changed the parent while we were checking the selector.
+            p = run(t["parent"])
+            status = parent_status(t, p)
+            if status in ("queued", "in_progress"):
+                return p
         if poll == 0:
             print(f"parent {t['parent']} status={status}; waiting without admitting", flush=True)
         if poll + 1 < PARENT_POLLS:

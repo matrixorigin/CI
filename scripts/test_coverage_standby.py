@@ -16,6 +16,14 @@ class ParentAdmission(unittest.TestCase):
                       event='pull_request_target', head_repository={'full_name':self.src},
                       head_sha=self.sha, status='in_progress', conclusion=None)
 
+    def selector(self, **fields):
+        return dict(dict(id=138967933698, run_id=self.t['parent'], run_attempt=self.t['attempt'],
+                         head_sha=self.sha, labels=['ubuntu-latest'], runner_id=1000740838,
+                         runner_group_name='GitHub Actions', status='in_progress',
+                         conclusion=None,
+                         name='Matrixone UT Coverage execution / Route Coverage group 0 / GROUP0'),
+                    **fields)
+
     def test_rerun_parent_identity_is_attempt_bound(self):
         rerun = dict(self.t,attempt=2)
         s.parent_identity(rerun,dict(self.p,run_attempt=2))
@@ -24,7 +32,8 @@ class ParentAdmission(unittest.TestCase):
 
     def test_only_active_parent_returns(self):
         with patch.object(s,'run',side_effect=[dict(self.p,status=v) for v in
-                          ('queued','waiting','in_progress')]) as read, patch.object(s.time,'sleep') as sleep:
+                          ('queued','waiting','in_progress')]) as read, \
+             patch.object(s,'active_selector',return_value=False), patch.object(s.time,'sleep') as sleep:
             self.assertEqual(s.parent_meta(self.t)['id'],42)
             self.assertEqual((read.call_count,sleep.call_count),(3,2))
 
@@ -33,7 +42,8 @@ class ParentAdmission(unittest.TestCase):
                           ('path','wrong-workflow'),('event','workflow_dispatch'),
                           ('head_repository',None),('head_sha','c'*40)]:
             with self.subTest(field=field), patch.object(s,'run',side_effect=[
-                    dict(self.p,status='queued'),{**self.p,field:bad}]), patch.object(s.time,'sleep') as sleep:
+                    dict(self.p,status='queued'),{**self.p,field:bad}]), \
+                 patch.object(s,'active_selector',return_value=False), patch.object(s.time,'sleep') as sleep:
                 with self.assertRaisesRegex(ValueError,'identity mismatch: '+field):
                     s.parent_meta(self.t)
                 self.assertEqual(sleep.call_count,1)
@@ -48,11 +58,60 @@ class ParentAdmission(unittest.TestCase):
 
     def test_queued_is_bounded_and_never_grants(self):
         with patch.object(s,'run',return_value=dict(self.p,status='queued')) as read, \
+             patch.object(s,'one',return_value={'total_count':0,'jobs':[]}) as jobs, \
              patch.object(s.time,'sleep') as sleep, patch.object(s,'artifact') as artifact:
             with self.assertRaisesRegex(ValueError,'still not active'):
                 s.parent_meta(self.t)
             self.assertEqual((read.call_count,sleep.call_count),(s.PARENT_POLLS,s.PARENT_POLLS-1))
+            self.assertEqual(jobs.call_count,s.PARENT_POLLS)
             artifact.assert_not_called()
+
+    def test_queued_run_with_same_group_selector_in_progress(self):
+        for group, attempt, label in ((0, 1, 'GROUP0'), (1, 2, 'select')):
+            p = dict(self.p, status='queued', run_attempt=attempt)
+            t = dict(self.t, group=group, attempt=attempt)
+            own = self.selector(name=f'Matrixone UT Coverage execution / Route Coverage group {group} / {label}',
+                                run_attempt=attempt)
+            other = self.selector(name='Matrixone CI execution / UT Test on Ubuntu/x86', status='queued')
+            with self.subTest(group=group,attempt=attempt), patch.object(s,'run',return_value=p) as run, \
+                 patch.object(s,'one',return_value={'total_count':2,'jobs':[own,other]}) as jobs, \
+                 patch.object(s.time,'sleep') as sleep:
+                self.assertEqual(s.parent_meta(t),p)
+                self.assertEqual(run.call_count,2)
+                jobs.assert_called_once_with(f'/actions/runs/42/attempts/{attempt}/jobs?per_page=100')
+                sleep.assert_not_called()
+
+    def test_unrelated_inactive_or_not_hosted_selector_is_not_evidence(self):
+        cases = ({'name':'Matrixone UT Coverage execution / Route Coverage group 1 / GROUP1'},
+                 {'name':'Unrelated workflow / Route Coverage group 0 / GROUP0'},
+                 {'name':'Matrixone UT Coverage execution / Route Coverage group 0 / collect'},
+                 {'status':'queued'}, {'status':'completed','conclusion':'cancelled'}, {'runner_id':0},
+                 {'runner_group_name':'Self-hosted'}, {'conclusion':'cancelled'})
+        for fields in cases:
+            with self.subTest(fields=fields), patch.object(s,'one',return_value={
+                    'total_count':1,'jobs':[self.selector(**fields)]}):
+                self.assertFalse(s.active_selector(self.t))
+
+    def test_wrong_or_ambiguous_selector_identity_is_rejected(self):
+        for fields in ({'run_id':43},{'run_attempt':2},{'head_sha':'a'*40},{'labels':['self-hosted']}):
+            with self.subTest(fields=fields), patch.object(s,'one',return_value={
+                    'total_count':1,'jobs':[self.selector(**fields)]}):
+                with self.assertRaisesRegex(ValueError,'selector identity mismatch'):
+                    s.active_selector(self.t)
+        for total, jobs, reason in (
+                (2,[self.selector()],'incomplete parent jobs'),
+                (2,[self.selector(),self.selector(id=999)],'ambiguous parent selector')):
+            with patch.object(s,'one',return_value={'total_count':total,'jobs':jobs}):
+                with self.assertRaisesRegex(ValueError,reason):
+                    s.active_selector(self.t)
+
+    def test_terminal_or_new_attempt_after_checking_selector_is_rejected(self):
+        p = dict(self.p,status='queued')
+        for latest in (dict(p,status='completed',conclusion='cancelled'), dict(p,run_attempt=2)):
+            with self.subTest(latest=latest), patch.object(s,'run',side_effect=[p,latest]), \
+                 patch.object(s,'one',return_value={'total_count':1,'jobs':[self.selector()]}):
+                with self.assertRaisesRegex(ValueError,'cancelled|run_attempt'):
+                    s.parent_meta(self.t)
 
     def test_real_grant_path_and_terminal_change_before_checkout(self):
         grant=dict(child=51,ticket=self.t,pool='cs',nonce='test-nonce')
@@ -68,12 +127,47 @@ class ParentAdmission(unittest.TestCase):
                    dict(self.p,status='completed',conclusion='cancelled') if cancel else self.p]
             with self.subTest(cancel=cancel), patch.dict(os.environ,env), patch.object(s,'run',side_effect=reads), \
                  patch.object(s,'child_meta'), patch.object(s.time,'sleep'), patch.object(s,'one',return_value=pr), \
+                 patch.object(s,'active_selector',return_value=False), \
                  patch.object(s,'artifact',side_effect=[grant,proof]):
                 if cancel:
                     with self.assertRaisesRegex(ValueError,'cancelled'):
                         s.admit()
                 else:
                     s.admit()
+
+    def test_worker_admission_requires_live_selector_until_checkout_when_parent_is_queued(self):
+        p = dict(self.p,status='queued')
+        grant = dict(child=51,ticket=self.t,pool='cs',nonce='test-nonce')
+        proof = dict(schema=2,allowed='true',verified_membership_http_status=204,pr_number='32922',
+                     author='dev',head_repository=self.src,head_sha=self.sha,base_ref='main')
+        pr = dict(number=32922,user={'login':'dev'},
+                  head={'repo':{'full_name':self.src,'archived':False},'sha':self.sha},
+                  state='open',draft=False,base={'repo':{'full_name':s.REPO},'ref':'main'},labels=[])
+        env = dict(TICKET=json.dumps(self.t),GROUP='0',HEAD=self.sha,SOURCE=self.src,POOL='cs',
+                   GITHUB_RUN_ATTEMPT='1',GITHUB_RUN_ID='51')
+        for cancel in (False,True):
+            def read_parent(_):
+                # The live PR check happens immediately before the final
+                # parent/selector check. Simulate cancellation at that point.
+                return dict(p,status='completed',conclusion='cancelled') if cancel and checked else p
+
+            def read(path):
+                if path == '/actions/runs/42/attempts/1/jobs?per_page=100':
+                    return {'total_count':1,'jobs':[self.selector()]}
+                self.assertEqual(path,'/pulls/32922')
+                checked.append(path)
+                return pr
+
+            checked = []
+            with self.subTest(cancel=cancel), patch.dict(os.environ,env), patch.object(s,'run',side_effect=read_parent), \
+                 patch.object(s,'child_meta'), patch.object(s,'one',side_effect=read), \
+                 patch.object(s,'artifact',side_effect=[grant,proof]):
+                if cancel:
+                    with self.assertRaisesRegex(ValueError,'cancelled'):
+                        s.admit()
+                else:
+                    s.admit()
+                self.assertEqual(checked,['/pulls/32922'])
 
     def test_receipt_base_is_pinned_for_both_pools_and_retry(self):
         self.assertEqual(s.CACHE_BASE_REFS, CACHE_BASE_REFS)
