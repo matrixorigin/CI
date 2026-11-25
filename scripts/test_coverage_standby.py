@@ -78,9 +78,14 @@ class ParentAdmission(unittest.TestCase):
     def test_receipt_base_is_pinned_for_both_pools_and_retry(self):
         self.assertEqual(s.CACHE_BASE_REFS, CACHE_BASE_REFS)
         for attempt, pool in ((1, "cs"), (2, "idc")):
-            t = dict(self.t, attempt=attempt)
+            t = dict(self.t, attempt=attempt, group=attempt-1, title_version=2)
             grant = dict(child=51, ticket=t, pool=pool, nonce="test-nonce")
-            env = dict(TICKET=json.dumps(t), GROUP="0", HEAD=self.sha, SOURCE=self.src,
+            child = dict(id=51, repository={"full_name": s.REPO}, run_attempt=1,
+                         path=".github/workflows/"+s.WORKER, event="workflow_dispatch",
+                         head_branch=s.WORKER_REF, head_sha=t["revision"], display_title=s.short_title(t))
+            marker = dict(run_id=51, run_attempt=1, status="completed", conclusion="skipped",
+                          name=s.title(t, pool)+s.IDENTITY_SUFFIX)
+            env = dict(TICKET=json.dumps(t), GROUP=str(t["group"]), HEAD=self.sha, SOURCE=self.src,
                        POOL=pool, GITHUB_RUN_ATTEMPT="1", GITHUB_RUN_ID="51")
             for authorized, live, expected in (("4.2-dev", "4.2-dev", True),
                                                 ("4.2-dev", "main", False),
@@ -96,9 +101,14 @@ class ParentAdmission(unittest.TestCase):
                           head={"repo": {"full_name": self.src, "archived": False}, "sha": self.sha},
                           state="open", draft=False, base={"repo": {"full_name": s.REPO}, "ref": live},
                           labels=[{"name": "kind/test-ci"}])
+                def read_run(run_id):
+                    return {42: dict(self.p, run_attempt=attempt), 51: child}[run_id]
+                def read(path):
+                    return {"/actions/runs/51/attempts/1/jobs?per_page=100": {"total_count": 1, "jobs": [marker]},
+                            "/pulls/32922": pr}[path]
                 with self.subTest(attempt=attempt, pool=pool, authorized=authorized, live=live), \
-                     patch.dict(os.environ, env), patch.object(s, "run", return_value=dict(self.p, run_attempt=attempt)), \
-                     patch.object(s, "child_meta"), patch.object(s, "one", return_value=pr), \
+                     patch.dict(os.environ, env), patch.object(s, "run", side_effect=read_run), \
+                     patch.object(s, "one", side_effect=read), \
                      patch.object(s, "artifact", side_effect=[grant, proof]) as artifact:
                     if expected:
                         s.admit()
