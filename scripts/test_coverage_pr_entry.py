@@ -10,8 +10,9 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
+from urllib.error import HTTPError
 from unittest import mock
-from scripts.coverage_pr_entry import ENTRY, PROJECT, main, route
+from scripts.coverage_pr_entry import ENTRY, PROJECT, S3_FIXTURE_BLOBS, has_s3_fixture, main, route
 
 ROOT = Path(__file__).resolve().parents[1]
 PIN = "48edf24e44a888c1c4d57318c4eca7cbb310c6e7"
@@ -21,6 +22,7 @@ CALLER = (PROJECT, "pull_request_target", ENTRY)
 
 class EntryTest(unittest.TestCase):
     def setUp(self):
+        self.verify_fixture = mock.Mock(return_value=True)
         self.pr = {"number": 32871, "state": "open", "draft": False, "labels": [{"name": "size/XL"}],
                    "base": {"repo": {"full_name": PROJECT}, "ref": "main"},
                    "head": {"repo": {"full_name": "example/matrixone", "archived": False}, "sha": "a"*40},
@@ -28,7 +30,7 @@ class EntryTest(unittest.TestCase):
         self.event = {"number": 32871, "action": "synchronize", "pull_request": copy.deepcopy(self.pr)}
 
     def test_fork_and_source_are_bound_to_the_event(self):
-        out = route(CALLER, self.event, self.pr, 204)
+        out = route(CALLER, self.event, self.pr, 204, self.verify_fixture)
         self.assertEqual((out["head_sha"], out["head_repository"], out["route"]),
                          ("a"*40, "example/matrixone", "cache"))
         for target, key, value in [(self.pr["head"], "sha", "b"*40),
@@ -36,22 +38,22 @@ class EntryTest(unittest.TestCase):
                                    (self.pr, "state", "closed"), (self.pr, "number", 1)]:
             old = target[key]; target[key] = value
             with self.assertRaises(ValueError):
-                route(CALLER, self.event, self.pr, 204)
+                route(CALLER, self.event, self.pr, 204, self.verify_fixture)
             target[key] = old
 
     def test_unverified_requests_cannot_get_cache_runners(self):
         for status in (403, 401, 500):
             with self.assertRaises(ValueError):
-                route(CALLER, self.event, self.pr, status)
-        self.assertEqual(route(CALLER, self.event, self.pr, 404)["route"], "legacy")
-        self.assertEqual(route(CALLER, self.event, self.pr, 302)["route"], "legacy")
+                route(CALLER, self.event, self.pr, status, self.verify_fixture)
+        self.assertEqual(route(CALLER, self.event, self.pr, 404, self.verify_fixture)["route"], "legacy")
+        self.assertEqual(route(CALLER, self.event, self.pr, 302, self.verify_fixture)["route"], "legacy")
         for label in ("safe-to-test", "kind/test-ci"):
             self.pr["labels"] = [{"name": label}]
-            self.assertEqual(route(CALLER, self.event, self.pr, 404)["route"], "legacy")
+            self.assertEqual(route(CALLER, self.event, self.pr, 404, self.verify_fixture)["route"], "legacy")
         for ctx in [(PROJECT, "workflow_dispatch", ENTRY), (PROJECT, "pull_request", ENTRY),
                     ("example/matrixone", CALLER[1], ENTRY), (*CALLER[:2], ENTRY+"x")]:
             with self.assertRaises(ValueError):
-                route(ctx, self.event, self.pr, 204)
+                route(ctx, self.event, self.pr, 204, self.verify_fixture)
 
     def test_only_main_is_an_eligible_target(self):
         for base, expected in (("main", "cache"), ("4.2-dev", "legacy"),
@@ -59,19 +61,19 @@ class EntryTest(unittest.TestCase):
                                ("v4.2.8-hotfix", "legacy"), ("3.0-dev", "legacy")):
             with self.subTest(base=base):
                 self.event["pull_request"]["base"]["ref"] = self.pr["base"]["ref"] = base
-                self.assertEqual(route(CALLER, self.event, self.pr, 204)["route"], expected)
+                self.assertEqual(route(CALLER, self.event, self.pr, 204, self.verify_fixture)["route"], expected)
         self.event["pull_request"]["base"]["ref"] = self.pr["base"]["ref"] = "4.2-dev"
-        self.assertEqual(route(CALLER, self.event, self.pr, 404)["route"], "legacy")
+        self.assertEqual(route(CALLER, self.event, self.pr, 404, self.verify_fixture)["route"], "legacy")
         self.event["pull_request"]["base"]["ref"] = self.pr["base"]["ref"] = "main"
         for labels in ([], [{"name": "kind/refactor"}]):
             self.pr["labels"] = labels
-            self.assertEqual(route(CALLER, self.event, self.pr, 204)["route"], "cache")
+            self.assertEqual(route(CALLER, self.event, self.pr, 204, self.verify_fixture)["route"], "cache")
         self.pr["head"]["repo"]["archived"] = True
-        self.assertEqual(route(CALLER, self.event, self.pr, 204)["route"], "legacy")
+        self.assertEqual(route(CALLER, self.event, self.pr, 204, self.verify_fixture)["route"], "legacy")
         self.pr["head"]["repo"]["archived"] = False
         self.pr["base"]["ref"] = "4.2-dev"
         with self.assertRaisesRegex(ValueError, "stale or invalid PR identity"):
-            route(CALLER, self.event, self.pr, 204)
+            route(CALLER, self.event, self.pr, 204, self.verify_fixture)
 
     def test_drafts_use_the_same_routing_and_identity_checks(self):
         self.pr["draft"] = self.event["pull_request"]["draft"] = True
@@ -84,19 +86,37 @@ class EntryTest(unittest.TestCase):
                         self.event["action"] = action
                         self.event["pull_request"]["base"]["ref"] = self.pr["base"]["ref"] = base
                         self.pr["labels"] = labels
-                        self.assertEqual(route(CALLER, self.event, self.pr, member)["route"], expected)
+                        self.assertEqual(route(CALLER, self.event, self.pr, member, self.verify_fixture)["route"], expected)
         self.pr["base"]["ref"] = self.event["pull_request"]["base"]["ref"] = "main"
         self.pr["head"]["repo"]["archived"] = True
-        self.assertEqual(route(CALLER, self.event, self.pr, 204)["route"], "legacy")
+        self.assertEqual(route(CALLER, self.event, self.pr, 204, self.verify_fixture)["route"], "legacy")
         self.pr["head"]["repo"]["archived"] = False
         self.pr["head"]["sha"] = "b"*40
         with self.assertRaisesRegex(ValueError, "stale or invalid PR identity"):
-            route(CALLER, self.event, self.pr, 204)
+            route(CALLER, self.event, self.pr, 204, self.verify_fixture)
+
+    def test_unlabelled_main_head_requires_reviewed_s3_fixture(self):
+        self.pr["labels"] = self.event["pull_request"]["labels"] = []
+        files = [{"type": "file", "name": name, "sha": sorted(shas)[0]}
+                 for name, shas in S3_FIXTURE_BLOBS.items()]
+        verify = lambda source, sha: has_s3_fixture(source, sha, "fixture-only")
+        for listing, expected in ((files[1:], "legacy"), (files, "cache"),
+                                  ([dict(files[0], sha="b"*40), *files[1:]], "legacy")):
+            with self.subTest(expected=expected), mock.patch("scripts.coverage_pr_entry.build_opener") as opener:
+                response = opener.return_value.open.return_value.__enter__.return_value
+                response.read.return_value = json.dumps(listing).encode()
+                self.assertEqual(route(CALLER, self.event, self.pr, 204, verify)["route"], expected)
+                request = opener.return_value.open.call_args.args[0]
+                self.assertEqual(request.full_url,
+                                 "https://api.github.com/repos/example/matrixone/contents/pkg/fileservice?ref=" + "a"*40)
+        with mock.patch("scripts.coverage_pr_entry.build_opener") as opener:
+            opener.return_value.open.side_effect = HTTPError("https://api.github.com", 404, "missing", {}, None)
+            self.assertEqual(route(CALLER, self.event, self.pr, 204, verify)["route"], "legacy")
 
     def test_pr_number_does_not_pin_either_group(self):
         for i in range(1, 9):
             self.pr["number"] = self.event["number"] = self.event["pull_request"]["number"] = i
-            self.assertEqual(route(CALLER, self.event, self.pr, 204), {
+            self.assertEqual(route(CALLER, self.event, self.pr, 204, self.verify_fixture), {
                 "route":"cache", "allowed":"true", "head_sha":"a"*40, "head_repository":"example/matrixone"})
         wf = (ROOT/".github/workflows/coverage-ut.yaml").read_text()
         self.assertIn("      max-parallel: 2\n      matrix:\n        group:\n        - 0\n        - 1\n", wf)
@@ -132,8 +152,10 @@ class EntryTest(unittest.TestCase):
             env = dict(zip(("GITHUB_REPOSITORY", "GITHUB_EVENT_NAME", "GITHUB_WORKFLOW_REF"), CALLER))
             env.update(GITHUB_EVENT_PATH=str(root/"event"), GITHUB_OUTPUT=str(root/"outputs"), RUNNER_TEMP=tmp,
                        CS_PR_METADATA_TOKEN="fixture-only", CS_CACHE_READ_TOKEN="fixture-only")
-            with mock.patch.dict(os.environ, env, clear=True), mock.patch.dict(sys.modules, node_cache_real_pr_gate=client):
+            with mock.patch.dict(os.environ, env, clear=True), mock.patch.dict(sys.modules, node_cache_real_pr_gate=client), \
+                 mock.patch("scripts.coverage_pr_entry.has_s3_fixture", self.verify_fixture):
                 main()
+            self.verify_fixture.assert_called_once_with("example/matrixone", "a"*40, "fixture-only")
             self.assertIn("route=cache\n", (root/"outputs").read_text())
             raw = (root/"real-pr-authorization.json").read_text()
             self.assertNotIn("fixture-only", raw)

@@ -4,11 +4,47 @@ import json
 import os
 import re
 from pathlib import Path
+from urllib.error import URLError
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 PROJECT = "matrixorigin/matrixone"
 ENTRY = PROJECT + "/.github/workflows/entrypoint.yaml@refs/heads/main"
 # Keep 4.2-dev on legacy until admission can verify the S3 fixtures at the PR head.
 CACHE_BASE_REFS = frozenset({"main"})
+# Reviewed fixture blobs from MatrixOne #32590 and the current main variant
+# of s3_fs_test.go. Unknown variants stay on legacy until reviewed.
+S3_FIXTURE_BLOBS = {
+    "cs_s3_fixture_test.go": {"250da6016644c44c6d8750b160e7391f5944fe02"},
+    "object_storage_arguments_test.go": {"24c979e693c1456ef9d82e6eb96da7f5de355347"},
+    "object_storage_test.go": {"27664e29685578d5947e466dcbb6a882d1327ea9"},
+    "s3_fs_test.go": {"99e213a8b103ac9e06d583d81ebcc9000f3006bf",
+                      "dad119552630af938c2b964edda003c5e7558bbb"},
+}
+
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def has_s3_fixture(source, sha, token):
+    request = Request(f"https://api.github.com/repos/{source}/contents/pkg/fileservice?ref={sha}",
+                      headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"})
+    try:
+        with build_opener(NoRedirect).open(request, timeout=10) as response:
+            limit = 512 * 1024
+            raw = response.read(limit + 1)
+            if len(raw) > limit:
+                return False
+            entries = json.loads(raw)
+    except (URLError, TimeoutError, ValueError):
+        return False
+    if not isinstance(entries, list):
+        return False
+    blobs = {item.get("name"): item.get("sha") for item in entries
+             if isinstance(item, dict) and item.get("type") == "file"
+             and isinstance(item.get("name"), str) and isinstance(item.get("sha"), str)}
+    return all(blobs.get(name) in approved for name, approved in S3_FIXTURE_BLOBS.items())
 
 
 def require(ok, reason):
@@ -16,7 +52,7 @@ def require(ok, reason):
         raise ValueError(reason)
 
 
-def route(ctx, event, live, member_status):
+def route(ctx, event, live, member_status, verify_s3_fixture):
     require(ctx == (PROJECT, "pull_request_target", ENTRY), "unexpected caller")
     require(event["action"] in {"opened", "synchronize", "reopened", "ready_for_review"},
             "unexpected event action")
@@ -40,6 +76,8 @@ def route(ctx, event, live, member_status):
     # still enforces its own org/safe-to-test eligibility.
     if base not in CACHE_BASE_REFS or live["head"]["repo"]["archived"] or member_status != 204:
         return {"route": "legacy", "allowed": "false"}
+    if not verify_s3_fixture(source, sha):
+        return {"route": "legacy", "allowed": "false"}
     return {"route": "cache", "allowed": "true", "head_sha": sha, "head_repository": source}
 
 
@@ -54,7 +92,7 @@ def main():
     status, pr = approved.read(f"repos/{PROJECT}/pulls/{number}", token)
     require(status == 200, "PR metadata unavailable")
     status, checks = approved.membership(pr["user"]["login"], os.environ["CS_CACHE_READ_TOKEN"], token)
-    result = route(ctx, event, pr, status)
+    result = route(ctx, event, pr, status, lambda source, sha: has_s3_fixture(source, sha, token))
     if result["route"] == "cache":
         # Preserve the validation workflow's allowlisted, independently auditable
         # authorization receipt; neither tokens nor the complete API payload are logged.

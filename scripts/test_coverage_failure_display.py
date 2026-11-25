@@ -55,6 +55,29 @@ class CoverageFailureDisplayTest(unittest.TestCase):
         self.assertIn("panic: test timed out after 1s", result.stdout)
         self.assertNotIn("\x1b", result.stdout)
 
+    def test_red_step_preserves_named_failure_and_separate_package_panic(self):
+        package = "example/pkg"
+        events = [
+            {"Action": "output", "Package": package, "Test": "TestAssert",
+             "Output": "a_test.go:56: Expected: committed\n"},
+            {"Action": "fail", "Package": package, "Test": "TestAssert"},
+            {"Action": "output", "Package": package, "Output": "panic: teardown failed\n"},
+            {"Action": "fail", "Package": package},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            temp = Path(directory)
+            report = temp / "report.json"
+            report.write_text("\n".join(map(json.dumps, events)) + "\n")
+            subprocess.run([sys.executable, str(ROOT / "scripts/summarize_ut_report.py"), str(report),
+                            "--compact-output", str(temp / "ut-failure-compact.txt")],
+                           check=True, capture_output=True, text=True)
+            result = self.run_failure_step(temp)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(f"FAILED {package} / TestAssert", result.stdout)
+        self.assertIn("Expected: committed", result.stdout)
+        self.assertIn(f"FAILED {package} / <package>", result.stdout)
+        self.assertIn("panic: teardown failed", result.stdout)
+
     def test_red_step_reports_a_preparation_failure_without_a_test_report(self):
         with tempfile.TemporaryDirectory() as directory:
             temp = Path(directory)

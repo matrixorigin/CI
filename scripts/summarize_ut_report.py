@@ -39,10 +39,10 @@ def compact_failure_log(build_failures, test_failures, build_outputs, test_outpu
     entries = [(package, "build failed", build_outputs.get(package, [])) for _, package in build_failures]
     entries.extend((package, test, lines) for (package, test), lines in unmatched_panics.items())
     for _, package, test, _ in test_failures:
-        if not test and package in named_packages:
+        panic = [line for _, pkg, case, line in panic_like if (pkg, case) == (package, test)]
+        if not test and package in named_packages and not panic:
             continue  # the named tests already explain this package's failure
         outputs = test_outputs.get((package, test), []) if test else package_outputs.get(package, [])
-        panic = [line for _, pkg, case, line in panic_like if (pkg, case) == (package, test)]
         entries.append((package, test or "<package>", [*panic, *outputs]))
     lines = []
     for package, name, outputs in entries[:5]:
