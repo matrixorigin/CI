@@ -2,6 +2,8 @@ import argparse
 import collections
 import json
 from pathlib import Path
+import re
+import unicodedata
 
 
 def is_panic_like(output):
@@ -20,7 +22,37 @@ def append_tail(buffers, key, value, limit):
     buffers[key].append(value)
 
 
-def summarize(report_path, max_output_lines, max_build_failures, max_test_failures, max_panic_lines):
+def clean_log_line(value):
+    text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", str(value)[:1024])
+    return " ".join("".join(c if not unicodedata.category(c).startswith("C") else " "
+                            for c in text).split())[:260]
+
+
+def compact_failure_log(build_failures, test_failures, build_outputs, test_outputs, package_outputs, panic_like):
+    named_packages = {package for _, package, test, _ in test_failures if test}
+    entries = [(package, "build failed", build_outputs.get(package, [])) for _, package in build_failures]
+    for _, package, test, _ in test_failures:
+        if not test and package in named_packages:
+            continue  # the named tests already explain this package's failure
+        outputs = test_outputs.get((package, test), []) if test else package_outputs.get(package, [])
+        panic = [line for _, pkg, case, line in panic_like if (pkg, case) == (package, test)]
+        entries.append((package, test or "<package>", [*panic, *outputs]))
+    lines = []
+    for package, name, outputs in entries[:5]:
+        lines.append(f"FAILED {clean_log_line(package)} / {clean_log_line(name)}")
+        candidates = (clean_log_line(line) for output in outputs for line in output[:2048].splitlines())
+        interesting = dict.fromkeys(line for line in candidates if (
+            is_panic_like(line) or re.search(r"\.go:\d+(?::\d+)?:|\b(?:Error|Expected|Actual):", line)
+        ))
+        # Panic headlines are more useful here than repeated stack frames.
+        ordered = sorted(interesting, key=lambda line: not is_panic_like(line))
+        lines.extend(f"Reason: {line}" for line in ordered[:2])
+    if len(entries) > 5:
+        lines.append(f"{len(entries) - 5} more failure entries omitted.")
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def summarize(report_path, max_output_lines, max_build_failures, max_test_failures, max_panic_lines, compact_output=None):
     actions = collections.Counter()
     build_failures = []
     test_failures = []
@@ -83,6 +115,14 @@ def summarize(report_path, max_output_lines, max_build_failures, max_test_failur
                 if is_panic_like(output) and (not failed_packages or package in failed_packages):
                     if len(panic_like) < max_panic_lines:
                         panic_like.append((line_no, package, test, output))
+
+    if compact_output is not None:
+        try:
+            compact_output.write_text(compact_failure_log(
+                build_failures, test_failures, build_outputs, test_outputs, package_outputs, panic_like
+            ), encoding="utf-8")
+        except OSError:
+            print("Compact log summary could not be saved.")
 
     print("# Unit Test Failure Summary")
     print()
@@ -161,6 +201,7 @@ def main():
     parser.add_argument("--max-build-failures", type=int, default=10)
     parser.add_argument("--max-test-failures", type=int, default=10)
     parser.add_argument("--max-panic-lines", type=int, default=20)
+    parser.add_argument("--compact-output", type=Path)
     args = parser.parse_args()
 
     summarize(
@@ -169,6 +210,7 @@ def main():
         args.max_build_failures,
         args.max_test_failures,
         args.max_panic_lines,
+        args.compact_output,
     )
 
 

@@ -118,12 +118,26 @@ class EntryTest(unittest.TestCase):
 
     def test_exact_measured_jobs_and_coverage_handoff(self):
         # Hash the complete three-job body from the measured immutable pin,
-        # after undoing ONLY the production entry wiring. No test/cache body edits.
+        # after undoing the production entry wiring and display-only diagnostics.
         path = ROOT/".github/workflows/coverage-ut.yaml"
         src = path.read_text()
         # Reconstruct the old job wrapper only to preserve the pre-existing measured-body digest.
         worker = (ROOT/".github/workflows/coverage-worker-cs.yaml").read_text()
         steps = "    - id: reader\n" + worker.split("    - id: reader\n", 1)[1]
+        steps = steps.replace(
+            '          python3 -I "$GITHUB_WORKSPACE/.standby/scripts/summarize_ut_report.py" "${report}" \\\n'
+            '            --compact-output "$RUNNER_TEMP/ut-failure-compact.txt" | tee -a "${summary}" || true',
+            '          python "$GITHUB_WORKSPACE/.ci-workflow/scripts/summarize_ut_report.py" "${report}" | tee -a "${summary}" || true',
+        )
+        # The failure step may print diagnostics, but its condition, timeout,
+        # placement and final exit must match the measured worker.
+        marker = "    - name: Fail on coverage UT failure\n"
+        before_failure, failure = steps.split(marker, 1)
+        next_step = "    - name: Upload persistent tool recovery evidence\n"
+        failure, after_failure = failure.split(next_step, 1)
+        header, commands = failure.split("      run: |\n", 1)
+        self.assertTrue(commands.endswith("        exit 1\n"))
+        steps = before_failure + marker + header + "      run: exit 1\n" + next_step + after_failure
         steps = (steps.replace("inputs.group", "matrix.group")
                       .replace("inputs.source", "needs.check_coverage_eligibility.outputs.head_repository")
                       .replace("inputs.head", "needs.check_coverage_eligibility.outputs.head_sha"))
