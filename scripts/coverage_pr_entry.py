@@ -94,7 +94,19 @@ def main():
     status, pr = approved.read(f"repos/{PROJECT}/pulls/{number}", token)
     require(status == 200, "PR metadata unavailable")
     status, checks = approved.membership(pr["user"]["login"], os.environ["CS_CACHE_READ_TOKEN"], token)
-    result = route(ctx, event, pr, status, lambda source, sha: has_s3_fixture(source, sha, token))
+    admitted_source = os.environ.get("COVERAGE_ADMITTED_SOURCE")
+    admitted_head = os.environ.get("COVERAGE_ADMITTED_HEAD")
+
+    def verify_fixture(source, sha):
+        if admitted_source is not None or admitted_head is not None:
+            # The trusted retry selector receives these exact values from the
+            # parent eligibility job after its fixture verification succeeds.
+            attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "")
+            return (attempt.isascii() and attempt.isdecimal() and int(attempt) > 1
+                    and (source, sha) == (admitted_source, admitted_head))
+        return has_s3_fixture(source, sha, token)
+
+    result = route(ctx, event, pr, status, verify_fixture)
     if result["route"] == "cache":
         # Preserve the validation workflow's allowlisted, independently auditable
         # authorization receipt; neither tokens nor the complete API payload are logged.

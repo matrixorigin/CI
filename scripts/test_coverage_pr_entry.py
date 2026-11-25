@@ -195,6 +195,64 @@ class EntryTest(unittest.TestCase):
             self.assertEqual(receipt["base_ref"], self.pr["base"]["ref"])
             self.assertEqual(receipt["membership_checks"], checks)
 
+    def test_group_retry_uses_verified_head_and_rechecks_live_authorization(self):
+        workflows = ROOT / ".github/workflows"
+        parent = (workflows / "coverage-ut-standby.yaml").read_text()
+        handoff = (workflows / "coverage-queue-handoff.yaml").read_text()
+        self.assertIn("source: ${{ needs.check_coverage_eligibility.outputs.head_repository }}", parent)
+        self.assertIn("head: ${{ needs.check_coverage_eligibility.outputs.head_sha }}", parent)
+        self.assertIn("COVERAGE_ADMITTED_SOURCE: ${{ inputs.source }}", handoff)
+        self.assertIn("COVERAGE_ADMITTED_HEAD: ${{ inputs.head }}", handoff)
+        gate = handoff.split("name: Verify retry eligibility and pinned source", 1)[1]
+        gate = gate.split("      run: ", 1)[1].splitlines()[0]
+        source = self.pr["head"]["repo"]["full_name"]
+        head = self.pr["head"]["sha"]
+        for label, attempt, admitted_source, admitted_head, member, stale, allowed in (
+                ("same verified head", "2", source, head, 204, False, True),
+                ("different verified head", "2", source, "b"*40, 204, False, False),
+                ("different verified source", "2", "another/matrixone", head, 204, False, False),
+                ("missing verified source", "2", "", head, 204, False, False),
+                ("unverified membership", "2", source, head, 404, False, False),
+                ("first attempt", "1", source, head, 204, False, False),
+                ("stale event", "2", source, head, 204, True, False)):
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / "event").write_text(json.dumps(self.event))
+                live = copy.deepcopy(self.pr)
+                if stale:
+                    live["head"]["sha"] = "c"*40
+                client = SimpleNamespace(
+                    read=mock.Mock(return_value=(200, live)),
+                    membership=mock.Mock(return_value=(member, [])),
+                    c=SimpleNamespace(atomic_json=lambda path, obj: path.write_text(json.dumps(obj))),
+                )
+                env = dict(zip(("GITHUB_REPOSITORY", "GITHUB_EVENT_NAME", "GITHUB_WORKFLOW_REF"), CALLER))
+                env.update(GITHUB_EVENT_PATH=str(root / "event"), GITHUB_OUTPUT=str(root / "outputs"),
+                           RUNNER_TEMP=tmp, GITHUB_RUN_ATTEMPT=attempt, CS_PR_METADATA_TOKEN="fixture-only",
+                           CS_CACHE_READ_TOKEN="fixture-only", COVERAGE_ADMITTED_SOURCE=admitted_source,
+                           COVERAGE_ADMITTED_HEAD=admitted_head)
+                with mock.patch.dict(os.environ, env, clear=True), \
+                     mock.patch.dict(sys.modules, node_cache_real_pr_gate=client), \
+                     mock.patch("scripts.coverage_pr_entry.has_s3_fixture", return_value=False) as lookup:
+                    if stale:
+                        with self.assertRaisesRegex(ValueError, "stale or invalid PR identity"):
+                            main()
+                    else:
+                        main()
+                    lookup.assert_not_called()
+                client.read.assert_called_once()
+                client.membership.assert_called_once()
+                self.assertEqual((root / "real-pr-authorization.json").exists(), allowed)
+                if stale:
+                    self.assertFalse((root / "outputs").exists())
+                    continue
+                outputs = dict(line.split("=", 1) for line in (root / "outputs").read_text().splitlines())
+                gate_env = dict(os.environ, ALLOWED=outputs["allowed"], LIVE_HEAD=outputs.get("head_sha", ""),
+                                LIVE_SOURCE=outputs.get("head_repository", ""), HEAD=admitted_head,
+                                SOURCE=admitted_source)
+                self.assertEqual(subprocess.run(["bash", "-c", gate], env=gate_env).returncode,
+                                 0 if allowed else 1)
+
     def test_exact_measured_jobs_and_coverage_handoff(self):
         # Hash the complete three-job body from the measured immutable pin,
         # after undoing the production entry wiring and display-only diagnostics.

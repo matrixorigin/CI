@@ -48,6 +48,8 @@ jobs:
       env:
         CS_PR_METADATA_TOKEN: ${{ secrets.TOKEN_ACTION }}
         CS_CACHE_READ_TOKEN: ${{ secrets.CS_COVERAGE_CACHE_READ_TOKEN || github.token }}
+        COVERAGE_ADMITTED_SOURCE: ${{ inputs.source }}
+        COVERAGE_ADMITTED_HEAD: ${{ inputs.head }}
       run: PYTHONPATH="$GITHUB_WORKSPACE/reviewed/scripts" python3 scripts/coverage_pr_entry.py
     - if: github.run_attempt > 1
       name: Verify retry eligibility and pinned source
