@@ -9,8 +9,8 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 PROJECT = "matrixorigin/matrixone"
 ENTRY = PROJECT + "/.github/workflows/entrypoint.yaml@refs/heads/main"
-# Keep 4.2-dev on legacy until admission can verify the S3 fixtures at the PR head.
-CACHE_BASE_REFS = frozenset({"main"})
+RELEASE_BASE = "4.2-dev"
+RELEASE_ENTRY = PROJECT + f"/.github/workflows/entrypoint.yaml@refs/heads/{RELEASE_BASE}"
 # Reviewed fixture blobs from MatrixOne #32590 and the current main variant
 # of s3_fs_test.go. Unknown variants stay on legacy until reviewed.
 S3_FIXTURE_BLOBS = {
@@ -20,6 +20,14 @@ S3_FIXTURE_BLOBS = {
     "s3_fs_test.go": {"99e213a8b103ac9e06d583d81ebcc9000f3006bf",
                       "dad119552630af938c2b964edda003c5e7558bbb"},
 }
+# Fixture backport from MatrixOne #33247. Keep these scoped to 4.2-dev; the
+# approved fixture variants for main are unchanged.
+RELEASE_S3_FIXTURE_BLOBS = {
+    "cs_s3_fixture_test.go": {"250da6016644c44c6d8750b160e7391f5944fe02"},
+    "object_storage_arguments_test.go": {"48fc11a973b74f782cc4fc8cc3bcf2fe32ac9cce"},
+    "object_storage_test.go": {"adcfe576026497a469b25de7ed64aa1e54f85455"},
+    "s3_fs_test.go": {"6f720e654ef6b0a3271d844c4eca85c9eec8065f"},
+}
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -27,7 +35,10 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def has_s3_fixture(source, sha, token):
+def has_s3_fixture(source, sha, token, *, base="main"):
+    approved_blobs = {"main": S3_FIXTURE_BLOBS, RELEASE_BASE: RELEASE_S3_FIXTURE_BLOBS}.get(base)
+    if approved_blobs is None:
+        return False
     request = Request(f"https://api.github.com/repos/{source}/contents/pkg/fileservice?ref={sha}",
                       headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"})
     try:
@@ -46,7 +57,7 @@ def has_s3_fixture(source, sha, token):
     blobs = {item.get("name"): item.get("sha") for item in entries
              if isinstance(item, dict) and item.get("type") == "file"
              and isinstance(item.get("name"), str) and isinstance(item.get("sha"), str)}
-    return all(blobs.get(name) in approved for name, approved in S3_FIXTURE_BLOBS.items())
+    return all(blobs.get(name) in approved for name, approved in approved_blobs.items())
 
 
 def require(ok, reason):
@@ -54,8 +65,13 @@ def require(ok, reason):
         raise ValueError(reason)
 
 
-def route(ctx, event, live, member_status, verify_s3_fixture):
-    require(ctx == (PROJECT, "pull_request_target", ENTRY), "unexpected caller")
+def require_caller(ctx):
+    require(ctx in ((PROJECT, "pull_request_target", ENTRY),
+                    (PROJECT, "pull_request_target", RELEASE_ENTRY)), "unexpected caller")
+
+
+def route(ctx, event, live, member_status, verify_s3_fixture, *, enable_4_2_dev=False):
+    require_caller(ctx)
     require(event["action"] in {"opened", "synchronize", "reopened", "ready_for_review"},
             "unexpected event action")
     pr = event["pull_request"]
@@ -70,13 +86,17 @@ def route(ctx, event, live, member_status, verify_s3_fixture):
             and live["state"] == "open" and re.fullmatch(r"[0-9a-f]{40}", sha)
             and re.fullmatch(r"[\w.-]+/[\w.-]+", source, re.ASCII)
             and re.fullmatch(r"[\w-]+", author, re.ASCII), "stale or invalid PR identity")
+    require(ctx[2] != RELEASE_ENTRY or base == RELEASE_BASE, "unexpected base for release caller")
     # The approved client never follows membership redirects. A 302 is not
     # proof of membership; like a 404 it must never grant access to cache runners.
     require(member_status in (204, 302, 404), "membership could not be verified")
     # Never use an arbitrary caller-selected head, runner label or environment.
     # Draft and PR type labels do not alter CS eligibility. The old path
     # still enforces its own org/safe-to-test eligibility.
-    if base not in CACHE_BASE_REFS or live["head"]["repo"]["archived"] or member_status != 204:
+    # Only the standby entry accepts an explicit rollout input. The old
+    # coverage-ut.yaml@main caller does not opt in, even after this change merges.
+    cache_base = base == "main" or (base == RELEASE_BASE and enable_4_2_dev)
+    if not cache_base or live["head"]["repo"]["archived"] or member_status != 204:
         return {"route": "legacy", "allowed": "false"}
     if not verify_s3_fixture(source, sha):
         return {"route": "legacy", "allowed": "false"}
@@ -86,7 +106,7 @@ def route(ctx, event, live, member_status, verify_s3_fixture):
 def main():
     import node_cache_real_pr_gate as approved  # immutable reviewed helper checkout
     ctx = tuple(os.environ[k] for k in ("GITHUB_REPOSITORY", "GITHUB_EVENT_NAME", "GITHUB_WORKFLOW_REF"))
-    require(ctx == (PROJECT, "pull_request_target", ENTRY), "unexpected caller")
+    require_caller(ctx)
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
     number = event["number"]
     require(type(number) is int and 0 < number < 10_000_000, "invalid PR number")
@@ -96,17 +116,24 @@ def main():
     status, checks = approved.membership(pr["user"]["login"], os.environ["CS_CACHE_READ_TOKEN"], token)
     admitted_source = os.environ.get("COVERAGE_ADMITTED_SOURCE")
     admitted_head = os.environ.get("COVERAGE_ADMITTED_HEAD")
+    base = pr["base"]["ref"]
 
     def verify_fixture(source, sha):
         if admitted_source is not None or admitted_head is not None:
             # The trusted retry selector receives these exact values from the
             # parent eligibility job after its fixture verification succeeds.
             attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "")
-            return (attempt.isascii() and attempt.isdecimal() and int(attempt) > 1
-                    and (source, sha) == (admitted_source, admitted_head))
+            if not (attempt.isascii() and attempt.isdecimal() and int(attempt) > 1
+                    and (source, sha) == (admitted_source, admitted_head)):
+                return False
+            if base == "main":
+                return True
+        if base == RELEASE_BASE:
+            return has_s3_fixture(source, sha, token, base=base)
         return has_s3_fixture(source, sha, token)
 
-    result = route(ctx, event, pr, status, verify_fixture)
+    result = route(ctx, event, pr, status, verify_fixture,
+                   enable_4_2_dev=os.environ.get("COVERAGE_ENABLE_4_2_DEV") == "true")
     if result["route"] == "cache":
         # Preserve the validation workflow's allowlisted, independently auditable
         # authorization receipt; neither tokens nor the complete API payload are logged.

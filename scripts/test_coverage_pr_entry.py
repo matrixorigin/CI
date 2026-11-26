@@ -13,12 +13,16 @@ from types import SimpleNamespace
 import unittest
 from urllib.error import HTTPError
 from unittest import mock
-from scripts.coverage_pr_entry import ENTRY, PROJECT, S3_FIXTURE_BLOBS, has_s3_fixture, main, route
+from scripts.coverage_pr_entry import (
+    ENTRY, PROJECT, RELEASE_BASE, RELEASE_ENTRY, RELEASE_S3_FIXTURE_BLOBS,
+    S3_FIXTURE_BLOBS, has_s3_fixture, main, route,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 PIN = "48edf24e44a888c1c4d57318c4eca7cbb310c6e7"
 LEGACY_HELPER_SHA = "96874e708fa46db2af5a6f833b64bbd448b2d4d8"
 CALLER = (PROJECT, "pull_request_target", ENTRY)
+RELEASE_CALLER = (PROJECT, "pull_request_target", RELEASE_ENTRY)
 
 
 class EntryTest(unittest.TestCase):
@@ -56,7 +60,7 @@ class EntryTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 route(ctx, self.event, self.pr, 204, self.verify_fixture)
 
-    def test_only_main_is_an_eligible_target(self):
+    def test_only_main_is_enabled_without_rollout_opt_in(self):
         for base, expected in (("main", "cache"), ("4.2-dev", "legacy"),
                                ("4.1-dev", "legacy"), ("4.2-dev-other", "legacy"),
                                ("v4.2.8-hotfix", "legacy"), ("3.0-dev", "legacy")):
@@ -75,6 +79,50 @@ class EntryTest(unittest.TestCase):
         self.pr["base"]["ref"] = "4.2-dev"
         with self.assertRaisesRegex(ValueError, "stale or invalid PR identity"):
             route(CALLER, self.event, self.pr, 204, self.verify_fixture)
+
+    def test_release_requires_opt_in_membership_and_exact_fixture(self):
+        self.event["pull_request"]["base"]["ref"] = self.pr["base"]["ref"] = RELEASE_BASE
+        self.pr["draft"] = self.event["pull_request"]["draft"] = True
+        self.pr["labels"] = self.event["pull_request"]["labels"] = []
+        for caller in (RELEASE_CALLER, CALLER):
+            for enabled, member, valid, expected in (
+                    (False, 204, True, "legacy"), (True, 204, True, "cache"),
+                    (True, 204, False, "legacy"), (True, 302, True, "legacy"),
+                    (True, 404, True, "legacy")):
+                with self.subTest(caller=caller, enabled=enabled, member=member, valid=valid):
+                    fixture = mock.Mock(return_value=valid)
+                    result = route(caller, self.event, self.pr, member, fixture, enable_4_2_dev=enabled)
+                    self.assertEqual(result["route"], expected)
+                    if enabled and member == 204:
+                        fixture.assert_called_once_with("example/matrixone", "a"*40)
+                    else:
+                        fixture.assert_not_called()
+        self.pr["head"]["sha"] = "b"*40
+        with self.assertRaisesRegex(ValueError, "stale or invalid PR identity"):
+            route(RELEASE_CALLER, self.event, self.pr, 204, self.verify_fixture, enable_4_2_dev=True)
+        self.pr["head"]["sha"] = "a"*40
+        self.event["pull_request"]["base"]["ref"] = self.pr["base"]["ref"] = "4.1-dev"
+        with self.assertRaisesRegex(ValueError, "unexpected base"):
+            route(RELEASE_CALLER, self.event, self.pr, 204, self.verify_fixture, enable_4_2_dev=True)
+        self.assertEqual(route(CALLER, self.event, self.pr, 204, self.verify_fixture,
+                               enable_4_2_dev=True)["route"], "legacy")
+
+    def test_release_fixture_blobs_are_not_approved_for_main(self):
+        for blobs, base, expected in (
+                (RELEASE_S3_FIXTURE_BLOBS, RELEASE_BASE, True),
+                (RELEASE_S3_FIXTURE_BLOBS, "main", False),
+                (S3_FIXTURE_BLOBS, RELEASE_BASE, False),
+                ({k: v for k, v in RELEASE_S3_FIXTURE_BLOBS.items() if k != "s3_fs_test.go"},
+                 RELEASE_BASE, False)):
+            with self.subTest(base=base, expected=expected), \
+                 mock.patch("scripts.coverage_pr_entry.build_opener") as opener:
+                files = [{"type": "file", "name": name, "sha": sorted(shas)[0]} for name, shas in blobs.items()]
+                response = opener.return_value.open.return_value.__enter__.return_value
+                response.getheader.return_value = None
+                response.read.return_value = json.dumps(files).encode()
+                self.assertEqual(has_s3_fixture("example/matrixone", "a"*40, "fixture-only", base=base), expected)
+                request = opener.return_value.open.call_args.args[0]
+                self.assertTrue(request.full_url.endswith("?ref=" + "a"*40))
 
     def test_drafts_use_the_same_routing_and_identity_checks(self):
         self.pr["draft"] = self.event["pull_request"]["draft"] = True
@@ -252,6 +300,51 @@ class EntryTest(unittest.TestCase):
                                 SOURCE=admitted_source)
                 self.assertEqual(subprocess.run(["bash", "-c", gate], env=gate_env).returncode,
                                  0 if allowed else 1)
+
+    def test_release_rollout_opt_in_is_not_available_in_the_legacy_workflow(self):
+        workflows = ROOT / ".github/workflows"
+        standby = (workflows / "coverage-ut-standby.yaml").read_text()
+        handoff = (workflows / "coverage-queue-handoff.yaml").read_text()
+        self.assertNotIn("COVERAGE_ENABLE_4_2_DEV", (workflows / "coverage-ut.yaml").read_text())
+        self.assertIn("COVERAGE_ENABLE_4_2_DEV: ${{ inputs.enable_4_2_dev }}", standby)
+        self.assertIn("enable_4_2_dev: ${{ inputs.enable_4_2_dev }}", standby)
+        self.assertIn("COVERAGE_ENABLE_4_2_DEV: ${{ inputs.enable_4_2_dev }}", handoff)
+        self.assertIn(RELEASE_ENTRY, handoff)
+
+    def test_release_retry_checks_fixture_again_and_emits_exact_base(self):
+        self.event["pull_request"]["base"]["ref"] = self.pr["base"]["ref"] = RELEASE_BASE
+        client = SimpleNamespace(
+            read=lambda *_: (200, self.pr), membership=lambda *_: (204, []),
+            c=SimpleNamespace(atomic_json=lambda path, obj: path.write_text(json.dumps(obj))),
+        )
+        for enabled, verified, admitted_head, expected in (
+                ("true", True, "a"*40, "cache"), ("true", False, "a"*40, "legacy"),
+                ("true", True, "b"*40, "legacy"), ("false", True, "a"*40, "legacy")):
+            with self.subTest(enabled=enabled, verified=verified, admitted_head=admitted_head), \
+                 tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / "event").write_text(json.dumps(self.event))
+                env = dict(zip(("GITHUB_REPOSITORY", "GITHUB_EVENT_NAME", "GITHUB_WORKFLOW_REF"), RELEASE_CALLER))
+                env.update(GITHUB_EVENT_PATH=str(root / "event"), GITHUB_OUTPUT=str(root / "outputs"),
+                           RUNNER_TEMP=tmp, GITHUB_RUN_ATTEMPT="2", CS_PR_METADATA_TOKEN="fixture-only",
+                           CS_CACHE_READ_TOKEN="fixture-only", COVERAGE_ENABLE_4_2_DEV=enabled,
+                           COVERAGE_ADMITTED_SOURCE="example/matrixone", COVERAGE_ADMITTED_HEAD=admitted_head)
+                with mock.patch.dict(os.environ, env, clear=True), \
+                     mock.patch.dict(sys.modules, node_cache_real_pr_gate=client), \
+                     mock.patch("scripts.coverage_pr_entry.has_s3_fixture", return_value=verified) as fixture:
+                    main()
+                if enabled == "true" and admitted_head == "a"*40:
+                    fixture.assert_called_once_with("example/matrixone", "a"*40, "fixture-only", base=RELEASE_BASE)
+                else:
+                    fixture.assert_not_called()
+                self.assertIn(f"route={expected}\n", (root / "outputs").read_text())
+                receipt = root / "real-pr-authorization.json"
+                if expected == "cache":
+                    proof = json.loads(receipt.read_text())
+                    self.assertEqual((proof["schema"], proof["base_ref"], proof["head_sha"]),
+                                     (2, RELEASE_BASE, "a"*40))
+                else:
+                    self.assertFalse(receipt.exists())
 
     def test_exact_measured_jobs_and_coverage_handoff(self):
         # Hash the complete three-job body from the measured immutable pin,

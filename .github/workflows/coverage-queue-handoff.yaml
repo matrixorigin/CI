@@ -5,6 +5,7 @@ on:
       group: {type: number, required: true}
       head: {type: string, required: true}
       source: {type: string, required: true}
+      enable_4_2_dev: {type: boolean, required: false, default: false}
     secrets:
       TOKEN_ACTION: {required: false}
       CS_COVERAGE_CACHE_READ_TOKEN: {required: false}
@@ -13,7 +14,13 @@ permissions:
 jobs:
   select:
     name: GROUP${{ inputs.group }}
-    if: github.workflow_ref == 'matrixorigin/matrixone/.github/workflows/entrypoint.yaml@refs/heads/main' && github.event_name == 'pull_request_target'
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      (github.workflow_ref == 'matrixorigin/matrixone/.github/workflows/entrypoint.yaml@refs/heads/main' ||
+      (inputs.enable_4_2_dev && github.event.pull_request.base.ref == '4.2-dev' &&
+      github.workflow_ref == 'matrixorigin/matrixone/.github/workflows/entrypoint.yaml@refs/heads/4.2-dev')) &&
+      (github.event.pull_request.base.ref == 'main' ||
+      (inputs.enable_4_2_dev && github.event.pull_request.base.ref == '4.2-dev'))
     runs-on: ubuntu-latest
     timeout-minutes: 360
     environment: ci
@@ -50,6 +57,7 @@ jobs:
         CS_CACHE_READ_TOKEN: ${{ secrets.CS_COVERAGE_CACHE_READ_TOKEN || github.token }}
         COVERAGE_ADMITTED_SOURCE: ${{ inputs.source }}
         COVERAGE_ADMITTED_HEAD: ${{ inputs.head }}
+        COVERAGE_ENABLE_4_2_DEV: ${{ inputs.enable_4_2_dev }}
       run: PYTHONPATH="$GITHUB_WORKSPACE/reviewed/scripts" python3 scripts/coverage_pr_entry.py
     - if: github.run_attempt > 1
       name: Verify retry eligibility and pinned source
