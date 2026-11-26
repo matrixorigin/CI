@@ -20,8 +20,9 @@ API = "https://api.github.com/repos/" + REPO
 WORKER = "coverage-standby-worker.yaml"
 WORKER_REF = "main"
 ENTRY = ".github/workflows/entrypoint.yaml"
-# Kept in sync with coverage_pr_entry.py by the admission contract tests.
-CACHE_BASE_REFS = frozenset({"main"})
+# 4.2-dev must come from a fresh exact-base receipt from the opted-in caller.
+# Schema 1 receipts still default to main and are not valid for 4.2-dev.
+RECEIPT_BASE_REFS = frozenset({"main", "4.2-dev"})
 POOLS = {"cs": "cs-node-cache-7c14g", "idc": "amd64-mo-shanghai-ut-safe"}
 CS_SITES = ("mty", "jed", "mnl2", "ruh")
 CS_SITE_RETRY_AFTER = 300
@@ -605,7 +606,8 @@ def admit():
           and proof["head_sha"] == head == pr["head"]["sha"] and pr["state"] == "open"
           and not pr["head"]["repo"]["archived"]
           and pr["base"]["repo"]["full_name"] == REPO
-          and pr["base"]["ref"] == base and base in CACHE_BASE_REFS
+          and pr["base"]["ref"] == base and base in RECEIPT_BASE_REFS
+          and (base == "main" or schema == 2)
           and (schema == 2 or (not pr["draft"] and "kind/test-ci" in {v["name"] for v in pr["labels"]})),
           "PR no longer matches authorization")
     # The selector can fail while the parent run remains active. Check the

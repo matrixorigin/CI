@@ -17,6 +17,11 @@ on:
         description: "Try individual CS sites when the shared queue stalls; requires matching worker pin"
         type: boolean
         default: false
+      enable_4_2_dev:
+        description: "Opt the trusted 4.2-dev caller into Coverage standby after fixture backport"
+        required: false
+        type: boolean
+        default: false
     outputs:
       coverage_ready:
         description: "Whether the UT coverage profile was eligible to run"
@@ -100,6 +105,7 @@ jobs:
         env:
           CS_PR_METADATA_TOKEN: ${{ secrets.TOKEN_ACTION }}
           CS_CACHE_READ_TOKEN: ${{ secrets.CS_COVERAGE_CACHE_READ_TOKEN || github.token }}
+          COVERAGE_ENABLE_4_2_DEV: ${{ inputs.enable_4_2_dev }}
         run: PYTHONPATH="$GITHUB_WORKSPACE/reviewed/scripts" python3 entry/scripts/coverage_pr_entry.py
       - id: check_coverage_secrets
         if: steps.entry.outputs.route == 'cache'
@@ -178,6 +184,7 @@ jobs:
       source: ${{ needs.check_coverage_eligibility.outputs.head_repository }}
       head: ${{ needs.check_coverage_eligibility.outputs.head_sha }}
       enable_cs_site_retry: ${{ inputs.enable_cs_site_retry }}
+      enable_4_2_dev: ${{ inputs.enable_4_2_dev }}
   merge-coverage-groups:
     needs:
     - check_coverage_eligibility

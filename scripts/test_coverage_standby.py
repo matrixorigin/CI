@@ -6,7 +6,7 @@ import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 from scripts import coverage_standby as s
-from scripts.coverage_pr_entry import CACHE_BASE_REFS
+from scripts.coverage_pr_entry import RELEASE_BASE
 
 
 class ParentAdmission(unittest.TestCase):
@@ -397,9 +397,11 @@ class ParentAdmission(unittest.TestCase):
 
 
     def test_receipt_base_is_pinned_for_both_pools_and_retry(self):
-        self.assertEqual(s.CACHE_BASE_REFS, CACHE_BASE_REFS)
-        for attempt, pool in ((1, "cs"), (2, "idc")):
+        self.assertEqual(s.RECEIPT_BASE_REFS, {"main", RELEASE_BASE})
+        for attempt, pool, site in ((1, "cs", None), (2, "cs", "ruh"), (2, "idc", None)):
             t = dict(self.t, attempt=attempt, group=attempt-1, title_version=2)
+            if site:
+                t["site"] = site
             grant = dict(child=51, ticket=t, pool=pool, nonce="test-nonce")
             child = dict(id=51, repository={"full_name": s.REPO}, run_attempt=1,
                          path=".github/workflows/"+s.WORKER, event="workflow_dispatch",
@@ -408,9 +410,12 @@ class ParentAdmission(unittest.TestCase):
                           name=s.title(t, pool)+s.IDENTITY_SUFFIX)
             env = dict(TICKET=json.dumps(t), GROUP=str(t["group"]), HEAD=self.sha, SOURCE=self.src,
                        POOL=pool, GITHUB_RUN_ATTEMPT="1", GITHUB_RUN_ID="51")
+            if site:
+                env["RUNNER_NAME"] = f"cs-{site}-nc-n0-pr-v1-abc-runner-def"
             for schema, authorized, live, member, labels, draft, expected in (
-                    (2, "4.2-dev", "4.2-dev", 204, ["kind/refactor"], False, False),
-                    (2, "4.2-dev", "4.2-dev", 204, [], True, False),
+                    (2, RELEASE_BASE, RELEASE_BASE, 204, ["kind/refactor"], False, True),
+                    (2, RELEASE_BASE, RELEASE_BASE, 204, [], True, True),
+                    (2, RELEASE_BASE, RELEASE_BASE, 404, ["kind/test-ci"], False, False),
                     (2, "main", "main", 204, [], False, True),
                     (2, "main", "main", 204, [], True, True),
                     (2, "main", "main", 404, ["kind/test-ci"], True, False),
@@ -421,7 +426,8 @@ class ParentAdmission(unittest.TestCase):
                     (1, None, "main", 204, ["kind/test-ci"], False, True),
                     (1, None, "main", 204, ["kind/test-ci"], True, False),
                     (1, None, "main", 204, [], False, False),
-                    (1, None, "4.2-dev", 204, ["kind/test-ci"], False, False)):
+                    (1, None, RELEASE_BASE, 204, ["kind/test-ci"], False, False),
+                    (1, RELEASE_BASE, RELEASE_BASE, 204, ["kind/test-ci"], False, False)):
                 proof = dict(schema=schema, allowed="true", verified_membership_http_status=member, pr_number="32922",
                              author="dev", head_repository=self.src, head_sha=self.sha)
                 if authorized is not None:
@@ -438,7 +444,7 @@ class ParentAdmission(unittest.TestCase):
                     return {f"/actions/runs/42/attempts/{attempt}/jobs?per_page=100&page=1": {"jobs": [selector]},
                             "/actions/runs/51/attempts/1/jobs?per_page=100": {"total_count": 1, "jobs": [marker]},
                             "/pulls/32922": pr}[path]
-                with self.subTest(attempt=attempt, pool=pool, schema=schema, authorized=authorized,
+                with self.subTest(attempt=attempt, pool=pool, site=site, schema=schema, authorized=authorized,
                                   live=live, member=member, labels=labels, draft=draft), \
                      patch.dict(os.environ, env), patch.object(s, "run", side_effect=read_run), \
                      patch.object(s, "one", side_effect=read), \
