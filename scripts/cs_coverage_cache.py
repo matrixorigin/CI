@@ -131,9 +131,19 @@ def native_allowed(name):
                 and (p.suffix in ('.o', '.so', '.a') or p.name == '.mo-native-provenance')))
 
 
+def native_index(source):
+    raw = subprocess.check_output(
+        ['git', 'ls-files', '--stage', '-z', '--', 'Makefile', 'cgo', 'thirdparties'], cwd=source)
+    for entry in raw.split(b'\0'):
+        if entry:
+            metadata, name = entry.split(b'\t', 1)
+            mode, oid, stage = metadata.split()
+            require(stage == b'0', 'unmerged native input')
+            yield name.decode(), mode, oid.decode('ascii')
+
+
 def native_inputs(source):
-    raw = subprocess.check_output(['git', 'ls-files', '-z', '--', 'Makefile', 'cgo', 'thirdparties'], cwd=source)
-    return [n.decode() for n in raw.split(b'\0') if n]
+    return [name for name, _, _ in native_index(source)]
 
 
 def check_native_inputs(source, recorded):

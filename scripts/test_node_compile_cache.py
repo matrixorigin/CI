@@ -122,13 +122,35 @@ class NodeCacheTests(unittest.TestCase):
         (source/'Makefile').write_text('all:\n')
         (source/'cgo/lib.c').write_text('int value=1;')
         (source/'main.go').write_text('package main')
-        with patch.object(n.legacy,'native_inputs',return_value=['Makefile','cgo/lib.c']):
-            first=n.native_key(source,self.runtime)[0]
-            (source/'main.go').write_text('package main // new SHA')
-            self.assertEqual(n.native_key(source,self.runtime)[0],first)
-            (source/'cgo/lib.c').write_text('int value=2;')
-            second=n.native_key(source,self.runtime)[0];self.assertNotEqual(first,second)
-            with patch.dict(os.environ,{'CFLAGS':'-O0'}):self.assertNotEqual(n.native_key(source,self.runtime)[0],second)
+        subprocess.run(['git', 'init', '-q'], cwd=source, check=True)
+        subprocess.run(['git', 'add', '.'], cwd=source, check=True)
+        first=n.native_key(source,self.runtime)[0]
+        (source/'main.go').write_text('package main // new SHA')
+        self.assertEqual(n.native_key(source,self.runtime)[0],first)
+        (source/'cgo/lib.c').write_text('int value=2;')
+        second=n.native_key(source,self.runtime)[0];self.assertNotEqual(first,second)
+        with patch.dict(os.environ,{'CFLAGS':'-O0'}):self.assertNotEqual(n.native_key(source,self.runtime)[0],second)
+
+    def test_native_key_tracks_gitlink_without_reading_submodule(self):
+        source = self.root
+        (source / 'Makefile').write_text('all:\n')
+        subprocess.run(['git', 'init', '-q'], cwd=source, check=True)
+        subprocess.run(['git', 'add', 'Makefile'], cwd=source, check=True)
+        initial, files = n.native_key(source, self.runtime)
+        name = 'thirdparties/sirius'
+        def pin(oid):
+            subprocess.run(['git', 'update-index', '--add', '--cacheinfo', '160000', oid, name],
+                           cwd=source, check=True)
+
+        pin('a' * 40)
+        first, recorded = n.native_key(source, self.runtime)
+        self.assertNotEqual(initial, first)
+        self.assertEqual(recorded, files)
+        (source / name).mkdir(parents=True)
+        (source / name / 'source.cpp').touch()
+        self.assertEqual(n.native_key(source, self.runtime), (first, files))
+        pin('b' * 40)
+        self.assertNotEqual(n.native_key(source, self.runtime)[0], first)
 
     def test_error_marker_overrides_apparent_test_success(self):
         local=self.root/'private';local.mkdir()
