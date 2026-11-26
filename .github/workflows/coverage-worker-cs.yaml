@@ -84,7 +84,7 @@ jobs:
     - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
       with:
         repository: matrixorigin/CI
-        ref: 48edf24e44a888c1c4d57318c4eca7cbb310c6e7
+        ref: 7a8cf1854da5ca4cc5ffb5a1f2cbc454162ad589
         persist-credentials: false
         path: .ci-toolchain
         sparse-checkout: |-
@@ -110,7 +110,7 @@ jobs:
       with:
         token: ${{ secrets.TOKEN_ACTION }}
         repository: matrixorigin/CI
-        ref: 48edf24e44a888c1c4d57318c4eca7cbb310c6e7
+        ref: 7a8cf1854da5ca4cc5ffb5a1f2cbc454162ad589
         persist-credentials: false
         sparse-checkout: |
           scripts

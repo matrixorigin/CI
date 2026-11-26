@@ -19,7 +19,7 @@ from scripts.coverage_pr_entry import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-PIN = "48edf24e44a888c1c4d57318c4eca7cbb310c6e7"
+PIN = "7a8cf1854da5ca4cc5ffb5a1f2cbc454162ad589"
 LEGACY_HELPER_SHA = "96874e708fa46db2af5a6f833b64bbd448b2d4d8"
 CALLER = (PROJECT, "pull_request_target", ENTRY)
 RELEASE_CALLER = (PROJECT, "pull_request_target", RELEASE_ENTRY)
