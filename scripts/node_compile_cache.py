@@ -56,11 +56,21 @@ def runtime(source, environment, repository):
 
 
 def native_key(source, current):
-    inputs={name:c.digest(source/name) for name in legacy.native_inputs(source)}
+    inputs = {}
+    gitlinks = {}
+    for name, mode, oid in legacy.native_index(source):
+        if mode == b'160000':
+            gitlinks[name] = oid
+        else:
+            inputs[name] = c.digest(source / name)
     c.require(inputs and 'Makefile' in inputs, 'native inputs missing')
     c.require(os.environ.get('MO_CL_CUDA','') in ('','0'), 'GPU native profile is not enabled')
-    return hash_value({'schema':2,'runtime':current,'inputs':inputs,
-                       'build_environment':{k:os.environ.get(k,'') for k in NATIVE_ENV}}),inputs
+    identity = {'schema': 2, 'runtime': current, 'inputs': inputs,
+                'build_environment': {k: os.environ.get(k, '') for k in NATIVE_ENV}}
+    # Only regular files participate in manifest capture and timestamp restore.
+    if gitlinks:
+        identity['gitlinks'] = gitlinks
+    return hash_value(identity), inputs
 
 
 def readonly_mount(shared):
