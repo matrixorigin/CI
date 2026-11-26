@@ -20,8 +20,12 @@ jobs:
     name: Coverage reservation CS group ${{ inputs.group }}
     if: >-
       github.repository == 'matrixorigin/matrixone' && (inputs.group == 0 || inputs.group == 1) &&
-      ((github.event_name == 'workflow_dispatch' && github.workflow_ref == 'matrixorigin/matrixone/.github/workflows/coverage-standby-worker.yaml@refs/heads/main' && inputs.ticket != '') || (github.event_name == 'pull_request_target' && github.workflow_ref == 'matrixorigin/matrixone/.github/workflows/entrypoint.yaml@refs/heads/main' && inputs.ticket == ''))
-    runs-on: cs-node-cache-7c14g
+      ((github.event_name == 'workflow_dispatch' && github.workflow_ref == 'matrixorigin/matrixone/.github/workflows/coverage-standby-worker.yaml@refs/heads/main' && inputs.ticket != '') || (github.event_name == 'pull_request_target' && github.workflow_ref == 'matrixorigin/matrixone/.github/workflows/entrypoint.yaml@refs/heads/main' && inputs.ticket == '')) &&
+      (!fromJSON(inputs.ticket || '{}').site || contains(fromJSON('["mty","jed","mnl2","ruh"]'), fromJSON(inputs.ticket || '{}').site))
+    runs-on: >-
+      ${{ fromJSON(fromJSON(inputs.ticket || '{}').site &&
+      format('["cs-node-cache-7c14g","cs-{0}-node-cache-all"]', fromJSON(inputs.ticket || '{}').site) ||
+      '["cs-node-cache-7c14g"]') }}
     environment: ci
     timeout-minutes: 320
     steps:

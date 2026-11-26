@@ -13,6 +13,10 @@ on:
         required: false
         type: string
         default: ""
+      enable_cs_site_retry:
+        description: "Try individual CS sites when the shared queue stalls; requires matching worker pin"
+        type: boolean
+        default: false
     outputs:
       coverage_ready:
         description: "Whether the UT coverage profile was eligible to run"
@@ -173,6 +177,7 @@ jobs:
       group: ${{ matrix.group }}
       source: ${{ needs.check_coverage_eligibility.outputs.head_repository }}
       head: ${{ needs.check_coverage_eligibility.outputs.head_sha }}
+      enable_cs_site_retry: ${{ inputs.enable_cs_site_retry }}
   merge-coverage-groups:
     needs:
     - check_coverage_eligibility

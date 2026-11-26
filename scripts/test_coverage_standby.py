@@ -593,6 +593,101 @@ class Queue(unittest.TestCase):
     def test_immediate_assignment(self):
         self.scenario([(self.active,2)],False,1,('cs',111))
 
+    def run_site_sweep(self, observations, *, fail_cancel=False, enabled=True):
+        events = []
+        withdrawn = set()
+        rev = "b" * 40
+
+        def reserve(ticket, pool):
+            run_id = 1 + sum(event[0] == "reserve" for event in events)
+            events.append(("reserve", run_id, pool, ticket.get("site")))
+            ticket.update(revision=rev, key=s.digest(f"test-nonce-{run_id}"))
+            return run_id, rev, f"test-nonce-{run_id}"
+
+        def cancel(path, data):
+            run_id = int(path.split("/")[-2])
+            self.assertEqual(data, {})
+            events.append(("cancel", run_id))
+            withdrawn.add(run_id)
+
+        def metadata(run_id, ticket, pool, revision):
+            self.assertEqual(pool, "cs")
+            self.assertEqual(revision, rev)
+            if run_id in withdrawn:
+                events.append(("confirm", run_id))
+                return dict(status="completed", conclusion="failure" if fail_cancel else "cancelled")
+            return dict(status="queued")
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {
+                **self.env, "RUNNER_TEMP": tmp, "COVERAGE_CS_SITE_RETRY": "true" if enabled else "false",
+        }), patch.object(s, "reserve", side_effect=reserve), patch.object(s, "observe", side_effect=observations), \
+             patch.object(s, "parent_meta"), patch.object(s, "child_meta", side_effect=metadata), \
+             patch.object(s, "api", side_effect=cancel), patch.object(s, "output"), patch.object(s.time, "sleep"):
+            if fail_cancel:
+                with self.assertRaisesRegex(ValueError, "did not acknowledge withdrawal"):
+                    s.choose()
+                self.assertFalse(Path(tmp, "grant.json").exists())
+                return None, events
+            s.choose()
+            return json.loads(Path(tmp, "grant.json").read_text()), events
+
+    def test_stalled_shared_queue_tries_one_site_after_confirmed_cancellation(self):
+        grant, events = self.run_site_sweep([(self.q, 1), (self.q, 301), (self.q, 302), (self.active, 321)])
+        self.assertEqual(events, [("reserve", 1, "cs", None), ("cancel", 1), ("confirm", 1),
+                                  ("reserve", 2, "cs", "mnl2")])
+        self.assertEqual((grant["child"], grant["ticket"]["site"], grant["pool"]), (2, "mnl2", "cs"))
+
+    def test_site_retry_does_not_cancel_when_runner_appears_in_final_read(self):
+        for tail in ([(self.active, 302)],
+                     [(dict(self.q, runner_id=2), 302), (self.active, 333)]):
+            with self.subTest(tail=tail):
+                grant, events = self.run_site_sweep([(self.q, 1), (self.q, 301), *tail])
+                self.assertEqual(events, [("reserve", 1, "cs", None)])
+                self.assertEqual(grant["child"], 1)
+
+    def test_site_retry_does_not_replace_unconfirmed_cancellation(self):
+        grant, events = self.run_site_sweep([(self.q, 1), (self.q, 301), (self.q, 302)], fail_cancel=True)
+        self.assertEqual(events, [("reserve", 1, "cs", None), ("cancel", 1), ("confirm", 1)])
+        self.assertIsNone(grant)
+
+    def test_unsuccessful_site_sweep_returns_to_shared_queue_and_keeps_shanghai_deadline(self):
+        observations = [(self.q, 1), (self.q, 301), (self.q, 302)]
+        for queued in (310, 410, 510, 610):
+            observations.extend((self.q, now) for now in (queued, queued + 90, queued + 91))
+        observations.extend((self.q, now) for now in (710, 3600, 3601, 3602))
+        grant, events = self.run_site_sweep(observations)
+        expected = [("reserve", 1, "cs", None)]
+        for run_id, site in enumerate(("mnl2", "ruh", "mty", "jed", None), 2):
+            expected += [("cancel", run_id-1), ("confirm", run_id-1), ("reserve", run_id, "cs", site)]
+        expected += [("cancel", 6), ("confirm", 6), ("reserve", 7, "idc", None)]
+        self.assertEqual(events, expected)
+        self.assertEqual((grant["child"], grant["pool"]), (7, "idc"))
+        self.assertNotIn("site", grant["ticket"])
+
+    def test_default_off_does_not_retry_other_sites(self):
+        grant, events = self.run_site_sweep([(self.q, 1), (self.q, 301), (self.active, 322)], enabled=False)
+        self.assertEqual(events, [("reserve", 1, "cs", None)])
+        self.assertEqual(grant["child"], 1)
+
+    def test_targeted_placement_requires_both_labels_and_the_matching_site(self):
+        ticket = {"group": 0, "site": "ruh"}
+        row = dict(self.active, name="cs / Coverage reservation CS group 0", run_id=12, run_attempt=1,
+                   labels=["cs-ruh-node-cache-all", s.POOLS["cs"]])
+        for changes, match in (
+                (dict(runner_name="cs-ruh-nc-n0-pr-v1-abc-runner-def"), True),
+                ({}, False),
+                (dict(labels=[s.POOLS["cs"]]), False)):
+            worker = dict(row, **changes)
+            with self.subTest(changes=changes), patch.object(s, "api", return_value=(
+                    {"total_count": 1, "jobs": [worker]}, 2)):
+                if match:
+                    self.assertEqual(s.observe(12, ticket, "cs"), (worker, 2))
+                else:
+                    with self.assertRaisesRegex(ValueError, "outside requested CS site|wrong worker label"):
+                        s.observe(12, ticket, "cs")
+        with self.assertRaisesRegex(ValueError, "invalid CS site"):
+            s.worker_labels("cs", "other")
+
     def test_empty_dispatch_response_reconciles_on_same_worker_ref_without_second_post(self):
         t = dict(parent=1, attempt=1, group=1, head='a'*40, key='b'*64)
         with patch.object(s, 'WORKER_REF', 'staging'), patch.object(s, 'parent_meta'), \

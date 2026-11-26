@@ -59,7 +59,8 @@ class CSS3CoverageTest(unittest.TestCase):
                 self.assertEqual(output.read_text(), f"allowed={str(allowed).lower()}\n")
 
     def test_shared_pool_and_pr_source_without_experiment_inputs(self):
-        self.assertIn("    runs-on: cs-node-cache-7c14g\n", WORKFLOW)
+        self.assertIn("""'["cs-node-cache-7c14g"]'""", WORKFLOW)
+        self.assertIn("""'["cs-node-cache-7c14g","cs-{0}-node-cache-all"]'""", WORKFLOW)
         self.assertIn("source: ${{ needs.check_coverage_eligibility.outputs.head_repository }}", ENTRY)
         self.assertIn("repository: ${{ inputs.source }}", WORKFLOW)
         self.assertIn("head: ${{ needs.check_coverage_eligibility.outputs.head_sha }}", ENTRY)

@@ -151,7 +151,9 @@ class EntryTest(unittest.TestCase):
         wf = (ROOT/".github/workflows/coverage-ut.yaml").read_text()
         self.assertIn("      max-parallel: 2\n      matrix:\n        group:\n        - 0\n        - 1\n", wf)
         self.assertIn("uses: ./.github/workflows/coverage-worker-cs.yaml", wf)
-        self.assertIn("runs-on: cs-node-cache-7c14g", (ROOT/".github/workflows/coverage-worker-cs.yaml").read_text())
+        worker = (ROOT/".github/workflows/coverage-worker-cs.yaml").read_text()
+        self.assertIn("""'["cs-node-cache-7c14g"]'""", worker)
+        self.assertIn("cs-{0}-node-cache-all", worker)
         self.assertNotIn("outputs.node_pair", wf)
 
     def test_actual_placement_guard(self):

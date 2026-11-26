@@ -23,6 +23,9 @@ ENTRY = ".github/workflows/entrypoint.yaml"
 # Kept in sync with coverage_pr_entry.py by the admission contract tests.
 CACHE_BASE_REFS = frozenset({"main"})
 POOLS = {"cs": "cs-node-cache-7c14g", "idc": "amd64-mo-shanghai-ut-safe"}
+CS_SITES = ("mty", "jed", "mnl2", "ruh")
+CS_SITE_RETRY_AFTER = 300
+CS_SITE_PROBE_WAIT = 90
 WAIT = 3600
 PROGRESS_INTERVAL = 300
 JOB_DETAIL_INTERVAL = 120
@@ -260,6 +263,18 @@ def assigned(job, pool):
                 and not (job.get("runner_name") or "").startswith("cs-mty-nc-n2-"))
 
 
+def worker_labels(pool, site=None):
+    labels = [POOLS[pool]]
+    if site is not None:
+        check(pool == "cs" and site in CS_SITES, "invalid CS site")
+        labels.append(f"cs-{site}-node-cache-all")
+    return labels
+
+
+def unassigned(job):
+    return job is not None and job["status"] == "queued" and not (job.get("runner_id") or job.get("runner_name"))
+
+
 def observe(r, t, pool):
     data, now = api(f"/actions/runs/{r}/attempts/1/jobs?per_page=100")
     check(len(data["jobs"]) == data["total_count"], "incomplete jobs response")
@@ -267,7 +282,10 @@ def observe(r, t, pool):
     for j in data["jobs"]:
         check(j["run_id"] == r and j["run_attempt"] == 1, "wrong job identity")
         if j["name"].split(" / ")[-1] == f"Coverage reservation {pool.upper()} group {t['group']}":
-            check(j["labels"] == [POOLS[pool]], "wrong worker label")
+            site = t.get("site")
+            check(sorted(j["labels"]) == sorted(worker_labels(pool, site)), "wrong worker label")
+            if site is not None and j["status"] == "in_progress":
+                check((j.get("runner_name") or "").startswith(f"cs-{site}-"), "runner is outside requested CS site")
             target.append(j)
         else:
             # The dispatcher has two mutually exclusive reusable calls. GitHub can
@@ -378,6 +396,67 @@ def reserve(t, pool):
     raise ValueError("workflow revision kept changing; no worker granted")
 
 
+def withdraw_cs(r, t, rev):
+    # Only used before publishing any grant. If GitHub assigns the runner
+    # between the final read and cancellation, that runner cannot run PR code.
+    api(f"/actions/runs/{r}/cancel", {})
+    for _ in range(60):
+        m = child_meta(r, t, "cs", rev)
+        if m["status"] == "completed":
+            check(m["conclusion"] == "cancelled", "CS did not acknowledge withdrawal")
+            return
+        time.sleep(5)
+    raise ValueError("CS cancellation not confirmed; replacement not dispatched")
+
+
+def select_cs(t, enable_site_retry):
+    # Rotate the first choice on retries, without pinning normal work to any
+    # site. A queued reservation is not proof that a site is out of capacity.
+    offset = (t["parent"] + t["group"]) % len(CS_SITES)
+    remaining_sites = [*CS_SITES[offset:], *CS_SITES[:offset], None] if enable_site_retry else []
+    first_queued = queued_here = last_queue_report = None
+    r, rev, nonce = reserve(t, "cs")
+    print(f"Group {t['group']}: requesting a CS runner — {run_url(r)}", flush=True)
+    while True:
+        j, now = observe(r, t, "cs")
+        route, queued_here = decide(j, now, queued_here)
+        if first_queued is None:
+            first_queued = queued_here
+        if unassigned(j) and now - first_queued >= WAIT:
+            route = "idc"
+        if route:
+            print(f"group={t['group']} CS_job={j['id']} first_queued_utc={first_queued} decision_utc={now} route={route}", flush=True)
+            return r, rev, nonce, route, first_queued
+        threshold = CS_SITE_PROBE_WAIT if "site" in t else CS_SITE_RETRY_AFTER
+        if remaining_sites and unassigned(j) and now - queued_here >= threshold:
+            parent_meta(t)
+            child_meta(r, t, "cs", rev)
+            j, now = observe(r, t, "cs")
+            route, queued_here = decide(j, now, queued_here)
+            if route == "cs":
+                return r, rev, nonce, route, first_queued
+            if unassigned(j):
+                if now - first_queued >= WAIT:
+                    return r, rev, nonce, "idc", first_queued
+                withdraw_cs(r, t, rev)
+                next_site = remaining_sites.pop(0)
+                if next_site is None:
+                    del t["site"]
+                    notice = "no CS site picked up the reservation in time; returning to the shared CS queue"
+                else:
+                    t["site"] = next_site
+                    notice = f"trying CS {next_site.upper()}"
+                # Keep first_queued across the entire sweep and the shared wait.
+                queued_here = None
+                r, rev, nonce = reserve(t, "cs")
+                print(f"Group {t['group']}: {notice} — {run_url(r)}", flush=True)
+                continue
+        if first_queued is not None and (last_queue_report is None or now - last_queue_report >= PROGRESS_INTERVAL):
+            print(f"Group {t['group']}: queued for a CS runner ({int(max(0, now - first_queued))}s) — {run_url(r)}", flush=True)
+            last_queue_report = now
+        time.sleep(30)
+
+
 def choose():
     attempt = int(os.environ["GITHUB_RUN_ATTEMPT"])
     check(0 < attempt < 1_000_000, "invalid parent attempt")
@@ -393,20 +472,7 @@ def choose():
     # A pull_request_target run reports the PR head; a workflow_dispatch run
     # reports the workflow branch head. These are not the same commit.
     pool = "cs"
-    r, rev, nonce = reserve(t, pool)
-    print(f"Group {t['group']}: requesting a CS runner — {run_url(r)}", flush=True)
-    since = None
-    last_queue_report = None
-    while True:
-        j, now = observe(r, t, "cs")
-        route, since = decide(j, now, since)
-        if route:
-            print(f"group={t['group']} CS_job={j['id']} first_queued_utc={since} decision_utc={now} route={route}", flush=True)
-            break
-        if since is not None and (last_queue_report is None or now - last_queue_report >= PROGRESS_INTERVAL):
-            print(f"Group {t['group']}: queued for a CS runner ({int(max(0, now - since))}s) — {run_url(r)}", flush=True)
-            last_queue_report = now
-        time.sleep(30)
+    r, rev, nonce, route, since = select_cs(t, os.environ.get("COVERAGE_CS_SITE_RETRY") == "true")
     if route == "idc":
         # A concurrently assigned CS worker is still blocked at admit: its nonce
         # was never published. Confirm identity again and cancel ONLY its own run.
@@ -424,15 +490,8 @@ def choose():
         else:
             raise ValueError("CS assignment did not settle at handoff; no worker granted")
         if route == "idc":
-            api(f"/actions/runs/{r}/cancel", {})
-            for _ in range(60):
-                m = child_meta(r, t, "cs", rev)
-                if m["status"] == "completed":
-                    check(m["conclusion"] == "cancelled", "CS did not acknowledge withdrawal")
-                    break
-                time.sleep(5)
-            else:
-                raise ValueError("CS cancellation not confirmed; IDC not dispatched")
+            withdraw_cs(r, t, rev)
+            t.pop("site", None)
             pool = "idc"
             r, rev, nonce = reserve(t, pool)
             print(f"Group {t['group']}: switched to Shanghai standby — {run_url(r)}", flush=True)
@@ -441,7 +500,7 @@ def choose():
     parent_meta(t)
     Path(os.environ["RUNNER_TEMP"], "grant.json").write_text(json.dumps(
         dict(ticket=t, child=r, pool=pool, nonce=nonce)))
-    output(child=r, pool=pool)
+    output(child=r, pool=pool, site=t.get("site", ""))
 
 
 def artifact(parent, name, filename):
@@ -507,6 +566,10 @@ def admit():
           and type(t["attempt"]) is int and 0 < t["attempt"] < 1_000_000
           and type(t["parent"]) is int and type(t["pr"]) is int and re.fullmatch("[a-f0-9]{64}", t["key"]),
           "invalid worker ticket")
+    site = t.get("site")
+    if site is not None:
+        worker_labels(pool, site)
+        check((os.environ.get("RUNNER_NAME") or "").startswith(f"cs-{site}-"), "runner is outside requested CS site")
     parent_meta(t)
     check(re.fullmatch("[a-f0-9]{40}", t["revision"]), "invalid dispatch revision")
     for _ in range(12):
@@ -588,7 +651,10 @@ def run_url(r):
 
 
 def worker_progress(r, group, pool):
-    target, _ = observe(r, {"group": group}, pool)
+    t = {"group": group}
+    if site := os.environ.get("COVERAGE_CS_SITE"):
+        t["site"] = site
+    target, _ = observe(r, t, pool)
     if not target:
         return "waiting for the worker job", run_url(r)
     # Print only known phase text and canonical numeric URLs. Never relay output
