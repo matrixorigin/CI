@@ -360,6 +360,20 @@ class EntryTest(unittest.TestCase):
         # Reconstruct the old job wrapper only to preserve the pre-existing measured-body digest.
         worker = (ROOT/".github/workflows/coverage-worker-cs.yaml").read_text()
         steps = "    - id: reader\n" + worker.split("    - id: reader\n", 1)[1]
+        # The bootstrap is exercised separately. Restore its measured version
+        # here so the digest still guards every UT and artifact step.
+        bootstrap = "      run: bash .standby/scripts/coverage_cs_build_tools.sh\n"
+        self.assertEqual(steps.count(bootstrap), 1)
+        steps = steps.replace(bootstrap, (
+            "      run: |\n"
+            "        set -euo pipefail\n"
+            "        if command -v gcc && command -v g++ && command -v make && command -v pkg-config && command -v cmake && command -v python; then\n"
+            "          echo 'Build dependencies are already available.'\n"
+            "        else\n"
+            "          sudo apt-get -o Acquire::ForceIPv4=true update\n"
+            "          sudo apt-get -o Acquire::ForceIPv4=true install -y build-essential cmake pkg-config python3 python-is-python3\n"
+            "        fi\n"
+        ))
         # Undo only the review-time diagnostic reordering for the digest;
         # production writes the compact summary before optional analysis.
         marker_summary = (
