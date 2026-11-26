@@ -108,21 +108,27 @@ class EntryTest(unittest.TestCase):
                                enable_4_2_dev=True)["route"], "legacy")
 
     def test_release_fixture_blobs_are_not_approved_for_main(self):
-        for blobs, base, expected in (
-                (RELEASE_S3_FIXTURE_BLOBS, RELEASE_BASE, True),
-                (RELEASE_S3_FIXTURE_BLOBS, "main", False),
-                (S3_FIXTURE_BLOBS, RELEASE_BASE, False),
-                ({k: v for k, v in RELEASE_S3_FIXTURE_BLOBS.items() if k != "s3_fs_test.go"},
-                 RELEASE_BASE, False)):
+        # Snapshot from the pinned MatrixOne tree, independently checked by CI.
+        snapshot = json.loads((ROOT / "scripts/testdata/coverage_4_2_fixture.json").read_text())
+        release = {name: {sha} for name, sha in snapshot["files"].items()}
+        self.assertEqual(RELEASE_S3_FIXTURE_BLOBS, release)
+        cases = [(release, RELEASE_BASE, True), (release, "main", False),
+                 (S3_FIXTURE_BLOBS, RELEASE_BASE, False)]
+        for name in release:
+            missing = release.copy()
+            del missing[name]
+            cases.append((missing, RELEASE_BASE, False))
+            cases.append(({**release, name: {"b"*40}}, RELEASE_BASE, False))
+        for blobs, base, expected in cases:
             with self.subTest(base=base, expected=expected), \
                  mock.patch("scripts.coverage_pr_entry.build_opener") as opener:
                 files = [{"type": "file", "name": name, "sha": sorted(shas)[0]} for name, shas in blobs.items()]
                 response = opener.return_value.open.return_value.__enter__.return_value
                 response.getheader.return_value = None
                 response.read.return_value = json.dumps(files).encode()
-                self.assertEqual(has_s3_fixture("example/matrixone", "a"*40, "fixture-only", base=base), expected)
+                self.assertEqual(has_s3_fixture(PROJECT, snapshot["commit"], "fixture-only", base=base), expected)
                 request = opener.return_value.open.call_args.args[0]
-                self.assertTrue(request.full_url.endswith("?ref=" + "a"*40))
+                self.assertTrue(request.full_url.endswith("?ref=" + snapshot["commit"]))
 
     def test_drafts_use_the_same_routing_and_identity_checks(self):
         self.pr["draft"] = self.event["pull_request"]["draft"] = True

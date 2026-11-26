@@ -27,6 +27,7 @@ on:
       - 'scripts/test_coverage_standby.py'
       - 'scripts/coverage_pr_entry.py'
       - 'scripts/test_coverage_pr_entry.py'
+      - 'scripts/testdata/coverage_4_2_fixture.json'
       - 'scripts/coverage_cache_preflight.py'
       - 'scripts/test_coverage_cache_preflight.py'
       - 'scripts/summarize_ut_report.py'
@@ -117,6 +118,22 @@ jobs:
         run: python3 scripts/test_select_coverage_artifacts.py -v
       - name: Test coverage native runtime paths
         run: python3 scripts/test_coverage_native_runtime.py -v
+      - name: Verify release fixture snapshot against the pinned MatrixOne tree
+        timeout-minutes: 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          snapshot=scripts/testdata/coverage_4_2_fixture.json
+          ref=$(jq -er '.commit | select(test("^[a-f0-9]{40}$"))' "$snapshot")
+          curl --fail --silent --show-error --retry 2 --max-time 25 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/matrixorigin/matrixone/contents/pkg/fileservice?ref=$ref" |
+            jq -e --slurpfile snapshot "$snapshot" '
+              $snapshot[0].files as $expected |
+              ($expected | length) == 4 and
+              (map(select(.type == "file" and (.name as $n | $expected | has($n))) |
+                   {key: .name, value: .sha}) | from_entries) == $expected'
       - name: Test CS S3 routing and PR entry / two-group handoff
         timeout-minutes: 3
         run: python3 -m unittest scripts.test_cs_s3_coverage scripts.test_coverage_cs_build_tools scripts.test_coverage_pr_entry scripts.test_coverage_standby scripts.test_coverage_cache_preflight -v

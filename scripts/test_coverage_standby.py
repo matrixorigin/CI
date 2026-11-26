@@ -599,7 +599,8 @@ class Queue(unittest.TestCase):
     def test_immediate_assignment(self):
         self.scenario([(self.active,2)],False,1,('cs',111))
 
-    def run_site_sweep(self, observations, *, fail_cancel=False, enabled=True):
+    def run_site_sweep(self, observations, *, cancel_code=None, after_cancel="cancelled",
+                       expected_error=None, enabled=True):
         events = []
         withdrawn = set()
         rev = "b" * 40
@@ -615,13 +616,20 @@ class Queue(unittest.TestCase):
             self.assertEqual(data, {})
             events.append(("cancel", run_id))
             withdrawn.add(run_id)
+            if cancel_code is not None:
+                raise urllib.error.HTTPError(path, cancel_code, "injected", {}, None)
 
         def metadata(run_id, ticket, pool, revision):
             self.assertEqual(pool, "cs")
             self.assertEqual(revision, rev)
+            self.assertEqual(ticket["key"], s.digest(f"test-nonce-{run_id}"))
             if run_id in withdrawn:
                 events.append(("confirm", run_id))
-                return dict(status="completed", conclusion="failure" if fail_cancel else "cancelled")
+                if isinstance(after_cancel, Exception):
+                    raise after_cancel
+                if after_cancel == "in_progress":
+                    return dict(status="in_progress", conclusion=None)
+                return dict(status="completed", conclusion=after_cancel)
             return dict(status="queued")
 
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {
@@ -629,8 +637,8 @@ class Queue(unittest.TestCase):
         }), patch.object(s, "reserve", side_effect=reserve), patch.object(s, "observe", side_effect=observations), \
              patch.object(s, "parent_meta"), patch.object(s, "child_meta", side_effect=metadata), \
              patch.object(s, "api", side_effect=cancel), patch.object(s, "output"), patch.object(s.time, "sleep"):
-            if fail_cancel:
-                with self.assertRaisesRegex(ValueError, "did not acknowledge withdrawal"):
+            if expected_error is not None:
+                with self.assertRaisesRegex(*expected_error):
                     s.choose()
                 self.assertFalse(Path(tmp, "grant.json").exists())
                 return None, events
@@ -652,9 +660,30 @@ class Queue(unittest.TestCase):
                 self.assertEqual(grant["child"], 1)
 
     def test_site_retry_does_not_replace_unconfirmed_cancellation(self):
-        grant, events = self.run_site_sweep([(self.q, 1), (self.q, 301), (self.q, 302)], fail_cancel=True)
+        grant, events = self.run_site_sweep([(self.q, 1), (self.q, 301), (self.q, 302)],
+                                            after_cancel="failure",
+                                            expected_error=(ValueError, "did not acknowledge withdrawal"))
         self.assertEqual(events, [("reserve", 1, "cs", None), ("cancel", 1), ("confirm", 1)])
         self.assertIsNone(grant)
+
+    def test_site_sweep_reconciles_cancel_conflict_before_replacement(self):
+        queue = [(self.q, 1), (self.q, 301), (self.q, 302)]
+        grant, events = self.run_site_sweep([*queue, (self.active, 321)], cancel_code=409)
+        self.assertEqual(events, [("reserve", 1, "cs", None), ("cancel", 1), ("confirm", 1),
+                                  ("reserve", 2, "cs", "mnl2")])
+        self.assertEqual(grant["child"], 2)
+        for code, status, error in (
+                (409, "in_progress", (ValueError, "cancellation not confirmed")),
+                (409, "success", (ValueError, "did not acknowledge withdrawal")),
+                (409, ValueError("identity mismatch"), (ValueError, "identity mismatch")),
+                (403, "cancelled", (urllib.error.HTTPError, "403"))):
+            with self.subTest(code=code, status=status):
+                grant, events = self.run_site_sweep(queue, cancel_code=code,
+                                                    after_cancel=status, expected_error=error)
+                self.assertIsNone(grant)
+                self.assertEqual([e for e in events if e[0] != "confirm"],
+                                 [("reserve", 1, "cs", None), ("cancel", 1)])
+                self.assertEqual(("confirm", 1) in events, code == 409)
 
     def test_unsuccessful_site_sweep_returns_to_shared_queue_and_keeps_shanghai_deadline(self):
         observations = [(self.q, 1), (self.q, 301), (self.q, 302)]

@@ -20,13 +20,13 @@ S3_FIXTURE_BLOBS = {
     "s3_fs_test.go": {"99e213a8b103ac9e06d583d81ebcc9000f3006bf",
                       "dad119552630af938c2b964edda003c5e7558bbb"},
 }
-# Fixture backport from MatrixOne #33247. Keep these scoped to 4.2-dev; the
-# approved fixture variants for main are unchanged.
+# MatrixOne #33247 at fa81ff496a; update with the pinned-tree regression if
+# review changes the fixture again. The release caller remains opt-in.
 RELEASE_S3_FIXTURE_BLOBS = {
-    "cs_s3_fixture_test.go": {"250da6016644c44c6d8750b160e7391f5944fe02"},
-    "object_storage_arguments_test.go": {"48fc11a973b74f782cc4fc8cc3bcf2fe32ac9cce"},
-    "object_storage_test.go": {"adcfe576026497a469b25de7ed64aa1e54f85455"},
-    "s3_fs_test.go": {"6f720e654ef6b0a3271d844c4eca85c9eec8065f"},
+    "cs_s3_fixture_test.go": {"a91374a7d7e0077d14358abe8f6038dd5b076833"},
+    "object_storage_arguments_test.go": {"711879784db29ccd0f218523b3d9e631d6f43833"},
+    "object_storage_test.go": {"3021f8e44f2ee81754d57da3736ab1bde8f138da"},
+    "s3_fs_test.go": {"d42bfde82fe2c4c1000949ee64955354781254e6"},
 }
 
 

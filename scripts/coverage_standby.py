@@ -400,7 +400,14 @@ def reserve(t, pool):
 def withdraw_cs(r, t, rev):
     # Only used before publishing any grant. If GitHub assigns the runner
     # between the final read and cancellation, that runner cannot run PR code.
-    api(f"/actions/runs/{r}/cancel", {})
+    try:
+        api(f"/actions/runs/{r}/cancel", {})
+    except urllib.error.HTTPError as exc:
+        if exc.code != 409:
+            raise
+        # A concurrent cancellation can return 409. The conflict itself is
+        # not an acknowledgement: verify this exact child in the loop below.
+        exc.close()
     for _ in range(60):
         m = child_meta(r, t, "cs", rev)
         if m["status"] == "completed":
