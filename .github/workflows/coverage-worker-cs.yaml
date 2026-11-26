@@ -34,6 +34,7 @@ jobs:
         sparse-checkout: |
           scripts/coverage_standby.py
           scripts/summarize_ut_report.py
+          scripts/coverage_cs_build_tools.sh
         sparse-checkout-cone-mode: false
         persist-credentials: false
     - name: Wait for an exclusive grant for this exact run before PR checkout
@@ -63,14 +64,7 @@ jobs:
         echo "site=$site" >> "$GITHUB_OUTPUT"
     - name: Install CS runner build dependencies
       timeout-minutes: 10
-      run: |
-        set -euo pipefail
-        if command -v gcc && command -v g++ && command -v make && command -v pkg-config && command -v cmake && command -v python; then
-          echo 'Build dependencies are already available.'
-        else
-          sudo apt-get -o Acquire::ForceIPv4=true update
-          sudo apt-get -o Acquire::ForceIPv4=true install -y build-essential cmake pkg-config python3 python-is-python3
-        fi
+      run: bash .standby/scripts/coverage_cs_build_tools.sh
     - name: Checkout MatrixOne source
       timeout-minutes: 10
       uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
