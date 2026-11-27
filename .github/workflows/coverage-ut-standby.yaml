@@ -357,6 +357,7 @@ jobs:
       with:
         artifact-ids: ${{ needs.release-storage-coverage.outputs.profile }}
         path: raw/release-storage
+        merge-multiple: true
     - id: merge_profiles
       name: Validate complete package evidence and merge profiles
       env:

@@ -178,6 +178,11 @@ class CSS3CoverageTest(unittest.TestCase):
                                         env=dict(PATH=os.environ["PATH"], STORAGE_RESULT=status, STORAGE_PROFILE=profile))
                 self.assertEqual(result.returncode == 0, expected)
 
+        download = STANDBY.split("    - name: Download the selected release provider profile\n", 1)[1]
+        download = download.split("    - id: merge_profiles\n", 1)[0]
+        # The pinned action nests downloads by artifact ID unless flattening is enabled.
+        self.assertRegex(download, r"(?m)^        merge-multiple: true$")
+        storage_dir = re.search(r"(?m)^        path: (.+)$", download)[1]
         merge = step_script("merge_profiles", STANDBY)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -189,7 +194,7 @@ class CSS3CoverageTest(unittest.TestCase):
             go.write_text("#!/bin/bash\nexit 0\n")
             go.chmod(0o755)
             for folder, name in (("selected/profiles/0", "group0"), ("selected/profiles/1", "group1"),
-                                 ("raw/release-storage", "oss-cos")):
+                                 (storage_dir, "oss-cos")):
                 profile = root / folder / "ut-coverage.out"
                 profile.parent.mkdir(parents=True)
                 profile.write_text(f"mode: set\n{name}:1.1,1.2 1 1\n")
@@ -205,7 +210,7 @@ class CSS3CoverageTest(unittest.TestCase):
                     self.assertIn("group0:", contents)
                     self.assertIn("group1:", contents)
                     self.assertEqual("oss-cos:" in contents, required == "true")
-            (root / "raw/release-storage/ut-coverage.out").unlink()
+            (root / storage_dir / "ut-coverage.out").unlink()
             result = subprocess.run(["bash", "-c", merge], cwd=tmp, capture_output=True,
                                     env={**env, "RELEASE_STORAGE_REQUIRED": "true"})
             self.assertNotEqual(result.returncode, 0)
