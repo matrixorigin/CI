@@ -478,9 +478,10 @@ def decide(job, now, since):
     return None, since
 
 
-def dispatch(t, pool, revision):
+def dispatch(t, pool, revision, deadline):
     """Return the exact dispatched ID and its first CS observation (IDC: None)."""
     parent_meta(t)
+    check(time.monotonic() < deadline, "selection deadline exceeded before dispatch")
     # At most one POST. If the response is lost, fail closed; no blind retries.
     body, dispatched_at = api(f"/actions/workflows/{WORKER}/dispatches", {
         "ref": WORKER_REF, "return_run_details": True,
@@ -490,7 +491,8 @@ def dispatch(t, pool, revision):
     # A plain GROUP0/GROUP1 is shared across PRs. The dispatch time bound is
     # just a discovery filter; always compare the full identity below.
     recent = datetime.fromtimestamp(dispatched_at - 60, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    deadline = time.monotonic() + DISPATCH_METADATA_POLLS * WORKER_METADATA_POLL_SECONDS
+    deadline = min(deadline, time.monotonic() + DISPATCH_METADATA_POLLS * WORKER_METADATA_POLL_SECONDS)
+    check(time.monotonic() < deadline, "dispatch metadata window elapsed; no worker granted")
     pending = None
     reported = set()
     for poll in range(DISPATCH_METADATA_POLLS):
@@ -545,6 +547,8 @@ def dispatch(t, pool, revision):
         if poll + 1 == DISPATCH_METADATA_POLLS or time.monotonic() + delay >= deadline:
             break
         time.sleep(delay)
+        if time.monotonic() >= deadline:
+            break
         parent_meta(t)
         if time.monotonic() >= deadline:
             break
@@ -560,16 +564,17 @@ def output(**fields):
             print(f"{k}={v}", file=f)
 
 
-def reserve(t, pool):
+def reserve(t, pool, deadline):
     # Retry ONLY a positively identified, ungranted child resolved at the
     # wrong revision. Never retry an ambiguous dispatch or a lost response.
     for attempt in range(3):
+        check(time.monotonic() < deadline, "selection deadline exceeded before reservation")
         rev = t["revision"] = one("/git/ref/heads/" + WORKER_REF)["object"]["sha"]
         check(re.fullmatch("[a-f0-9]{40}", rev), "invalid branch revision")
         nonce = secrets.token_hex(32)
         t["key"] = digest(nonce)
         try:
-            r, first_observation = dispatch(t, pool, rev)
+            r, first_observation = dispatch(t, pool, rev, deadline)
             return r, rev, nonce, first_observation
         except DispatchRevisionChanged as changed:
             r = changed.child
@@ -655,7 +660,7 @@ def select_cs(t, enable_site_retry, deadline):
     offset = (t["parent"] + t["group"]) % len(CS_SITES)
     remaining_sites = [*CS_SITES[offset:], *CS_SITES[:offset], None] if enable_site_retry else []
     first_queued = queued_here = last_queue_report = None
-    r, rev, nonce, (j, now) = reserve(t, "cs")
+    r, rev, nonce, (j, now) = reserve(t, "cs", deadline)
     print(f"Group {t['group']}: requesting a CS runner — {run_url(r)}", flush=True)
     while time.monotonic() < deadline:
         route, queued_here = decide(j, now, queued_here)
@@ -686,7 +691,7 @@ def select_cs(t, enable_site_retry, deadline):
                     notice = f"trying CS {next_site.upper()}"
                 # Keep first_queued across the entire sweep and the shared wait.
                 queued_here = None
-                r, rev, nonce, (j, now) = reserve(t, "cs")
+                r, rev, nonce, (j, now) = reserve(t, "cs", deadline)
                 print(f"Group {t['group']}: {notice} — {run_url(r)}", flush=True)
                 continue
         if first_queued is not None and (last_queue_report is None or now - last_queue_report >= PROGRESS_INTERVAL):
@@ -743,7 +748,7 @@ def choose():
             check(time.monotonic() < deadline, "selection deadline exceeded before Shanghai reservation")
             t.pop("site", None)
             pool = "idc"
-            r, rev, nonce, _ = reserve(t, pool)
+            r, rev, nonce, _ = reserve(t, pool, deadline)
             print(f"Group {t['group']}: switched to Shanghai standby — {run_url(r)}", flush=True)
     # Grant is immutable and costs no extra control token on the worker. Until
     # this point neither pool has been authorized to check out or run PR code.
