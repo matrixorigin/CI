@@ -1271,13 +1271,24 @@ class Queue(unittest.TestCase):
         old = dict(id=81, run_attempt=1, display_title=s.title(dict(t,attempt=1,key='a'*64), 'cs'),
                    path='.github/workflows/'+s.WORKER, event='workflow_dispatch',
                    repository={'full_name':s.REPO},head_branch=s.WORKER_REF,status='in_progress')
-        with patch.object(s,'one',return_value={'artifacts':[{'name':'coverage-admit-81'}]}), \
-             patch.object(s,'run',return_value=old):
+        def read(path):
+            if path == '/actions/runs/81/attempts/1':
+                return old
+            self.assertEqual(path, '/actions/runs/42/artifacts?per_page=100&page=1')
+            return {'artifacts': [{'name': 'coverage-admit-81'}]}
+
+        with patch.object(s, 'one', side_effect=read), \
+             patch.object(s, 'run', return_value=dict(old, run_attempt=2, status='completed')) as latest:
             with self.assertRaisesRegex(ValueError,'still active'):
                 s.require_previous_grants_terminal(t)
             s.require_previous_grants_terminal(dict(t,group=1))
             old['status'] = 'completed'
             s.require_previous_grants_terminal(t)
+            latest.assert_not_called()
+
+            old['run_attempt'] = 2
+            with self.assertRaisesRegex(ValueError, 'unrecognized previous grant'):
+                s.require_previous_grants_terminal(t)
 
     def test_previous_short_title_grant_retries_only_pending_identity(self):
         t = dict(parent=42, group=0, attempt=2, head='a'*40)
@@ -1304,21 +1315,26 @@ class Queue(unittest.TestCase):
             def one(path):
                 if '/artifacts?' in path:
                     return {'artifacts': [{'name': 'coverage-admit-81'}]}
+                if path == '/actions/runs/81/attempts/1':
+                    return old
                 self.assertEqual(path, jobs)
                 result = next(results)
                 if isinstance(result, Exception):
                     raise result
                 return {'jobs': result, 'total_count': len(result)}
 
-            with self.subTest(name=name), patch.object(s, 'one', side_effect=one), \
-                 patch.object(s, 'run', return_value=old) as read, patch.object(s, 'PARENT_POLLS', 2), \
+            with self.subTest(name=name), patch.object(s, 'one', side_effect=one) as read, \
+                 patch.object(s, 'run', return_value=dict(old, run_attempt=2)), patch.object(s, 'PARENT_POLLS', 2), \
                  patch.object(s.time, 'sleep') as sleep:
                 if expected_error is None:
                     s.require_previous_grants_terminal(t)
                 else:
                     with self.assertRaisesRegex(*expected_error):
                         s.require_previous_grants_terminal(t)
-                self.assertEqual([c.args for c in read.call_args_list], [(81,)] * len(responses))
+                self.assertEqual([c.args[0] for c in read.call_args_list], [
+                    '/actions/runs/42/artifacts?per_page=100&page=1',
+                    *['/actions/runs/81/attempts/1', jobs] * len(responses),
+                ])
                 self.assertEqual(sleep.call_count, len(responses) - 1)
 
     def test_failed_only_job_boundary(self):
@@ -1553,13 +1569,14 @@ class ShortWorkerTitle(unittest.TestCase):
 
     def test_204_dispatch_ignores_unindexed_same_title_but_rejects_verified_duplicates(self):
         other = dict(self.meta, id=52)
-        for state in ("missing", "queued", "vanished", "duplicate"):
+        for state in ("missing", "queued", "vanished", "service unavailable", "forbidden", "duplicate"):
             def read(path):
                 if "/actions/workflows/" in path:
                     return {"workflow_runs": [other, self.meta]}
                 if "/52/" in path:
-                    if state == "vanished":
-                        raise urllib.error.HTTPError(path, 404, "not found", None, None)
+                    errors = {"vanished": 404, "service unavailable": 503, "forbidden": 403}
+                    if state in errors:
+                        raise urllib.error.HTTPError(path, errors[state], state, None, None)
                     if state == "missing":
                         return {"total_count": 0, "jobs": []}
                     marker = dict(self.marker, run_id=52)
@@ -1573,6 +1590,10 @@ class ShortWorkerTitle(unittest.TestCase):
                  patch.object(s, "run", return_value=self.meta) as metadata, patch.object(s.time, "sleep") as sleep:
                 if state == "duplicate":
                     with self.assertRaisesRegex(ValueError, "duplicate dispatch"):
+                        s.dispatch(self.ticket, "cs", "b"*40)
+                    metadata.assert_not_called()
+                elif state == "forbidden":
+                    with self.assertRaisesRegex(urllib.error.HTTPError, "403"):
                         s.dispatch(self.ticket, "cs", "b"*40)
                     metadata.assert_not_called()
                 else:

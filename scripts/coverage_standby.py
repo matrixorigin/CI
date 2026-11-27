@@ -502,8 +502,10 @@ def dispatch(t, pool, revision):
                         if identity_title(candidate["id"], candidate) == title(t, pool):
                             ids.append(candidate["id"])
                     except urllib.error.HTTPError as error:
-                        if error.code != 404:
+                        if error.code not in (404, 408) and not 500 <= error.code <= 599:
                             raise
+                        # This candidate may be another parent's worker. Only
+                        # an exact ticket match can move discovery forward.
                         error.close()
                     except WorkerIdentityPending:
                         # A display name cannot identify a worker. Ignore an
@@ -777,7 +779,9 @@ def read_previous_grant(r, deadline):
     """Resolve a receipt's worker before deciding whether its group can rerun."""
     for poll in range(PARENT_POLLS):
         try:
-            m = run(r)
+            # Only the worker's first attempt can admit a grant. A later
+            # GitHub rerun changes the latest run without changing that receipt.
+            m = one(f"/actions/runs/{r}/attempts/1")
             check(is_worker_run(r, m), "unrecognized previous grant; no redispatch")
             return m, identity_title(r, m)
         except WorkerIdentityPending as error:
@@ -786,7 +790,7 @@ def read_previous_grant(r, deadline):
             if error.code != 404:
                 raise
             error.close()
-            reason = "worker run or attempt jobs returned HTTP 404"
+            reason = "worker attempt or its jobs returned HTTP 404"
         if poll + 1 == PARENT_POLLS or time.monotonic() + PARENT_POLL_SECONDS >= deadline:
             break
         time.sleep(PARENT_POLL_SECONDS)
