@@ -209,15 +209,14 @@ jobs:
             exit 1
           fi
         done
-    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+    - if: github.run_attempt > 1
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
       timeout-minutes: 5
       with:
         repository: matrixorigin/CI
         ref: ${{ job.workflow_sha }}
         path: coverage-tools
-        sparse-checkout: |
-          scripts/coverage_pr_entry.py
-          scripts/prepare_coverage_cgo.sh
+        sparse-checkout: scripts/coverage_pr_entry.py
         sparse-checkout-cone-mode: false
         persist-credentials: false
     - if: github.run_attempt > 1
@@ -252,7 +251,7 @@ jobs:
         ref: ${{ needs.check_coverage_eligibility.outputs.head_sha }}
         path: matrixone
         persist-credentials: false
-    - uses: matrixorigin/CI/actions/setup-env@main
+    - uses: matrixorigin/CI/actions/setup-env@5fc75d89bc2841e50ae1557d28ebd9aaec6ec3e2
       timeout-minutes: 10
       with:
         setup-java: false
@@ -260,13 +259,13 @@ jobs:
     - name: Prepare Coverage CGo libraries
       timeout-minutes: 30
       working-directory: matrixone
-      run: bash "$GITHUB_WORKSPACE/coverage-tools/scripts/prepare_coverage_cgo.sh"
+      run: make cgo
     - id: test_storage_providers
       name: Test OSS and COS
       timeout-minutes: 22
       working-directory: matrixone
       env:
-        GOPROXY: http://goproxy.goproxy.svc.cluster.local,https://goproxy.cn,https://proxy.golang.org
+        GOPROXY: http://goproxy.goproxy.svc.cluster.local|https://goproxy.cn|direct
         TEST_S3FS_ALIYUN: ${{ secrets.TEST_S3FS_ALIYUN }}
         TEST_S3FS_QCLOUD: ${{ secrets.TEST_S3FS_QCLOUD }}
       run: |
@@ -276,10 +275,27 @@ jobs:
           exit 1
         fi
         unset endpoint region apikey apisecret bucket TEST_S3FS_CS
+        # The Go fixture parser uses the last name field. Give each configured
+        # spec a stable test identity for the required-case checks below.
+        export TEST_S3FS_ALIYUN="${TEST_S3FS_ALIYUN},name=ci-release-oss"
+        export TEST_S3FS_QCLOUD="${TEST_S3FS_QCLOUD},name=ci-release-cos"
         export CGO_CFLAGS="-I$PWD/cgo -I$PWD/thirdparties/install/include"
         export CGO_LDFLAGS="-L$PWD/cgo -lmo -Wl,-rpath,$PWD/cgo -L$PWD/thirdparties/install/lib -lusearch_c -Wl,-rpath,$PWD/thirdparties/install/lib -lm"
-        go test -mod=readonly -count=1 -short -v -tags matrixone_test -timeout=20m \
-          -covermode=set -coverprofile="$RUNNER_TEMP/ut-coverage.out" ./pkg/fileservice
+        report="$RUNNER_TEMP/release-storage-test.json"
+        go test -mod=readonly -count=1 -short -json -tags matrixone_test -timeout=20m \
+          -covermode=set -coverprofile="$RUNNER_TEMP/ut-coverage.out" ./pkg/fileservice > "$report" || {
+          status=$?
+          jq -r '.Output // empty' "$report" >&2 || true
+          exit "$status"
+        }
+        for required in 'TestObjectStorages/ci-release-oss/aliyun/basic' 'TestObjectStorages/ci-release-cos/qcloud/basic' \
+                        'TestS3FSFromSpecs/ci-release-oss/streaming_write' 'TestS3FSFromSpecs/ci-release-cos/streaming_write'; do
+          jq -e --arg test_name "$required" 'select(.Action == "pass" and .Package == "github.com/matrixorigin/matrixone/pkg/fileservice" and .Test == $test_name)' "$report" >/dev/null || {
+            echo "::error::Required release storage test did not pass: $required"
+            exit 1
+          }
+        done
+        echo 'OSS and COS basic and streaming write tests passed.'
     - id: profile
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       timeout-minutes: 5

@@ -1461,13 +1461,13 @@ class Queue(unittest.TestCase):
         def http(code):
             return urllib.error.HTTPError(jobs, code, 'unavailable', None, None)
 
-        for name, responses, expected_error in (
-            ('404 then ready', [http(404), [marker]], None),
-            ('503 then ready', [http(503), [marker]], None),
-            ('not indexed then ready', [[], [marker]], None),
-            ('persistent 404', [http(404), http(404)], (TimeoutError, 'previous grant.*retry budget')),
-            ('permission denied', [http(403)], (urllib.error.HTTPError, '403')),
-            ('wrong attempt', [[dict(marker, run_attempt=2)]], (ValueError, 'invalid worker identity marker')),
+        for name, responses, polls, expected_error in (
+            ('404 recovers at 40s', [http(404) for _ in range(8)] + [[marker]], s.PARENT_POLLS, None),
+            ('identity indexes at 60s', [[]] * 12 + [[marker]], s.PARENT_POLLS, None),
+            ('503 then ready', [http(503), [marker]], 2, None),
+            ('persistent 404', [http(404), http(404)], 2, (TimeoutError, 'previous grant.*retry budget')),
+            ('permission denied', [http(403)], 2, (urllib.error.HTTPError, '403')),
+            ('wrong attempt', [[dict(marker, run_attempt=2)]], 2, (ValueError, 'invalid worker identity marker')),
         ):
             results = iter(responses)
             now = 0
@@ -1488,7 +1488,7 @@ class Queue(unittest.TestCase):
                 return {'jobs': result, 'total_count': len(result)}
 
             with self.subTest(name=name), patch.object(s, 'one', side_effect=one) as read, \
-                 patch.object(s, 'run', return_value=dict(old, run_attempt=2)), patch.object(s, 'PARENT_POLLS', 2), \
+                 patch.object(s, 'run', return_value=dict(old, run_attempt=2)), patch.object(s, 'PARENT_POLLS', polls), \
                  patch.object(s.time, 'monotonic', side_effect=lambda: now), \
                  patch.object(s.time, 'sleep', side_effect=sleep_for) as sleep:
                 if expected_error is None:
@@ -1500,7 +1500,8 @@ class Queue(unittest.TestCase):
                     '/actions/runs/42/artifacts?per_page=100&page=1',
                     *['/actions/runs/81/attempts/1', jobs] * len(responses),
                 ])
-                self.assertEqual(sleep.call_count, len(responses) - 1)
+                self.assertEqual([c.args[0] for c in sleep.call_args_list],
+                                 [s.PARENT_POLL_SECONDS] * (len(responses) - 1))
 
     def test_failed_only_job_boundary(self):
         from pathlib import Path

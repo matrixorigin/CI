@@ -118,27 +118,46 @@ class CSS3CoverageTest(unittest.TestCase):
         self.assertIn("profile: ${{ steps.profile.outputs.artifact-id }}", job)
         self.assertIn("artifact-ids: ${{ needs.release-storage-coverage.outputs.profile }}", STANDBY)
 
-    def test_release_provider_test_uses_both_specs_and_surfaces_failure(self):
+    def test_release_provider_coverage_requires_actual_provider_passes(self):
         script = step_script("test_storage_providers", STANDBY)
-        for aliyun, qcloud, test_exit, expected in (
-                ("oss-spec", "cos-spec", 0, 0), ("", "cos-spec", 0, 1),
-                ("oss-spec", "", 0, 1), ("oss-spec", "cos-spec", 7, 7)):
-            with self.subTest(aliyun=bool(aliyun), qcloud=bool(qcloud), test_exit=test_exit), \
+        package = "github.com/matrixorigin/matrixone/pkg/fileservice"
+        passed = [dict(Action="pass", Package=package, Test=name) for name in (
+            "TestObjectStorages/ci-release-oss/aliyun/basic",
+            "TestObjectStorages/ci-release-cos/qcloud/basic",
+            "TestS3FSFromSpecs/ci-release-oss/streaming_write",
+            "TestS3FSFromSpecs/ci-release-cos/streaming_write",
+        )]
+        disk_only = [dict(Action="pass", Package=package, Test="TestObjectStorages/test/disk/basic")]
+        cos_skipped = passed[:-1] + [dict(passed[-1], Action="skip")]
+        for name, missing, test_exit, events, expected in (
+                ("both providers passed", None, 0, passed, 0),
+                ("missing OSS config", "TEST_S3FS_ALIYUN", 0, passed, 1),
+                ("missing COS config", "TEST_S3FS_QCLOUD", 0, passed, 1),
+                ("Go test failed", None, 7, passed, 7),
+                ("disk only", None, 0, disk_only, 1),
+                ("only COS passed", None, 0, passed[1::2], 1),
+                ("COS streaming skipped", None, 0, cos_skipped, 1)):
+            with self.subTest(name=name), \
                  tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
+                (root / "events").write_text("\n".join(json.dumps(event) for event in events))
                 go = root / "go"
                 go.write_text("#!/bin/bash\n"
-                              '[[ "${TEST_S3FS_ALIYUN}" == oss-spec && "${TEST_S3FS_QCLOUD}" == cos-spec ]] || exit 8\n'
+                              '[[ "$TEST_S3FS_ALIYUN" == oss-spec,name=ci-release-oss ]] || exit 8\n'
+                              '[[ "$TEST_S3FS_QCLOUD" == cos-spec,name=ci-release-cos ]] || exit 8\n'
                               '[[ -z "${TEST_S3FS_CS+x}${endpoint+x}" ]] || exit 9\n'
                               'printf "%s\\n" "$@" > "$RUNNER_TEMP/args"\n'
+                              'cat "$RUNNER_TEMP/events"\n'
                               'exit "$TEST_EXIT"\n')
                 go.chmod(0o755)
                 env = dict(PATH=f"{root}:{os.environ['PATH']}", RUNNER_TEMP=tmp,
-                           TEST_S3FS_ALIYUN=aliyun, TEST_S3FS_QCLOUD=qcloud, TEST_EXIT=str(test_exit),
+                           TEST_S3FS_ALIYUN="oss-spec", TEST_S3FS_QCLOUD="cos-spec", TEST_EXIT=str(test_exit),
                            TEST_S3FS_CS="unexpected", endpoint="unexpected")
+                if missing:
+                    env[missing] = ""
                 result = subprocess.run(["bash", "-c", script], cwd=tmp, env=env, capture_output=True)
-                self.assertEqual(result.returncode, expected, result.stderr)
-                if aliyun and qcloud:
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                if not missing:
                     args = (root / "args").read_text().splitlines()
                     self.assertEqual(args[-1], "./pkg/fileservice")
                     self.assertIn("-covermode=set", args)

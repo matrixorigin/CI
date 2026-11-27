@@ -623,8 +623,15 @@ def read_worker(phase, read, *args, deadline=float("inf"), retry_pending=True):
         try:
             result = read(*args)
         except retryable as error:
-            delay = max(backoff, metadata_read_delay(error))
-            backoff = min(30, delay * 2)
+            delay = metadata_read_delay(error)
+            # Indexing lag is expected after dispatch. Poll through the
+            # recovery window without backing off as if the API were down.
+            if isinstance(error, WorkerIdentityPending) or (
+                    isinstance(error, urllib.error.HTTPError) and error.code == 404):
+                backoff = 0
+            else:
+                delay = max(backoff, delay)
+                backoff = min(30, delay * 2)
             now = time.monotonic()
             if retry_until is None:
                 retry_until = min(deadline, now + WORKER_READ_RECOVERY_SECONDS)
