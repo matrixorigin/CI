@@ -122,13 +122,16 @@ class CSS3CoverageTest(unittest.TestCase):
         script = step_script("test_storage_providers", STANDBY)
         package = "github.com/matrixorigin/matrixone/pkg/fileservice"
         passed = [dict(Action="pass", Package=package, Test=name) for name in (
-            "TestObjectStorages/ci-release-oss/aliyun/basic",
-            "TestObjectStorages/ci-release-cos/qcloud/basic",
-            "TestS3FSFromSpecs/ci-release-oss/streaming_write",
-            "TestS3FSFromSpecs/ci-release-cos/streaming_write",
+            "TestObjectStorages/oss_eu/storage/aliyun/basic",
+            "TestObjectStorages/TencentCOS/qcloud/basic",
+            "TestS3FSFromSpecs/oss_eu/storage/streaming_write",
+            "TestS3FSFromSpecs/TencentCOS/streaming_write",
         )]
+        oss_spec = "name=oss eu/storage,endpoint=https://oss.aliyuncs.invalid,bucket=fixture\r\n"
+        cos_spec = "name=TencentCOS,endpoint=https://cos.myqcloud.invalid,bucket=fixture"
         disk_only = [dict(Action="pass", Package=package, Test="TestObjectStorages/test/disk/basic")]
         cos_skipped = passed[:-1] + [dict(passed[-1], Action="skip")]
+        wrong_fixture = passed[:-1] + [dict(passed[-1], Test="TestS3FSFromSpecs/test/streaming_write")]
         for name, missing, test_exit, events, expected in (
                 ("both providers passed", None, 0, passed, 0),
                 ("missing OSS config", "TEST_S3FS_ALIYUN", 0, passed, 1),
@@ -136,6 +139,7 @@ class CSS3CoverageTest(unittest.TestCase):
                 ("Go test failed", None, 7, passed, 7),
                 ("disk only", None, 0, disk_only, 1),
                 ("only COS passed", None, 0, passed[1::2], 1),
+                ("unrelated streaming fixture passed", None, 0, wrong_fixture, 1),
                 ("COS streaming skipped", None, 0, cos_skipped, 1)):
             with self.subTest(name=name), \
                  tempfile.TemporaryDirectory() as tmp:
@@ -143,15 +147,15 @@ class CSS3CoverageTest(unittest.TestCase):
                 (root / "events").write_text("\n".join(json.dumps(event) for event in events))
                 go = root / "go"
                 go.write_text("#!/bin/bash\n"
-                              '[[ "$TEST_S3FS_ALIYUN" == oss-spec,name=ci-release-oss ]] || exit 8\n'
-                              '[[ "$TEST_S3FS_QCLOUD" == cos-spec,name=ci-release-cos ]] || exit 8\n'
+                              '[[ "$TEST_S3FS_ALIYUN" == "$OSS_SPEC" && "$TEST_S3FS_QCLOUD" == "$COS_SPEC" ]] || exit 8\n'
                               '[[ -z "${TEST_S3FS_CS+x}${endpoint+x}" ]] || exit 9\n'
                               'printf "%s\\n" "$@" > "$RUNNER_TEMP/args"\n'
                               'cat "$RUNNER_TEMP/events"\n'
                               'exit "$TEST_EXIT"\n')
                 go.chmod(0o755)
                 env = dict(PATH=f"{root}:{os.environ['PATH']}", RUNNER_TEMP=tmp,
-                           TEST_S3FS_ALIYUN="oss-spec", TEST_S3FS_QCLOUD="cos-spec", TEST_EXIT=str(test_exit),
+                           TEST_S3FS_ALIYUN=oss_spec, TEST_S3FS_QCLOUD=cos_spec,
+                           OSS_SPEC=oss_spec, COS_SPEC=cos_spec, TEST_EXIT=str(test_exit),
                            TEST_S3FS_CS="unexpected", endpoint="unexpected")
                 if missing:
                     env[missing] = ""

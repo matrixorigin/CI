@@ -275,10 +275,6 @@ jobs:
           exit 1
         fi
         unset endpoint region apikey apisecret bucket TEST_S3FS_CS
-        # The Go fixture parser uses the last name field. Give each configured
-        # spec a stable test identity for the required-case checks below.
-        export TEST_S3FS_ALIYUN="${TEST_S3FS_ALIYUN},name=ci-release-oss"
-        export TEST_S3FS_QCLOUD="${TEST_S3FS_QCLOUD},name=ci-release-cos"
         export CGO_CFLAGS="-I$PWD/cgo -I$PWD/thirdparties/install/include"
         export CGO_LDFLAGS="-L$PWD/cgo -lmo -Wl,-rpath,$PWD/cgo -L$PWD/thirdparties/install/lib -lusearch_c -Wl,-rpath,$PWD/thirdparties/install/lib -lm"
         report="$RUNNER_TEMP/release-storage-test.json"
@@ -288,10 +284,17 @@ jobs:
           jq -r '.Output // empty' "$report" >&2 || true
           exit "$status"
         }
-        for required in 'TestObjectStorages/ci-release-oss/aliyun/basic' 'TestObjectStorages/ci-release-cos/qcloud/basic' \
-                        'TestS3FSFromSpecs/ci-release-oss/streaming_write' 'TestS3FSFromSpecs/ci-release-cos/streaming_write'; do
-          jq -e --arg test_name "$required" 'select(.Action == "pass" and .Package == "github.com/matrixorigin/matrixone/pkg/fileservice" and .Test == $test_name)' "$report" >/dev/null || {
-            echo "::error::Required release storage test did not pass: $required"
+        # The SDK pass identifies the provider and the tested fixture name.
+        # Match that same fixture in the S3FS tests regardless of its name.
+        for sdk in aliyun qcloud; do
+          jq -ne --arg sdk "$sdk" '
+            [inputs | select(.Action == "pass" and .Package == "github.com/matrixorigin/matrixone/pkg/fileservice")
+                    | .Test | strings] as $passed
+            | any($passed[] | capture("^TestObjectStorages/(?<fixture>.+)/" + $sdk + "/basic$");
+                  ("TestS3FSFromSpecs/" + .fixture + "/streaming_write") as $stream
+                  | ($passed | index($stream)) != null)
+          ' "$report" >/dev/null || {
+            echo "::error::Missing passing basic and streaming write tests for $sdk"
             exit 1
           }
         done
