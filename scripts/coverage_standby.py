@@ -304,6 +304,12 @@ def required_admission_read(read, *args, **kwargs):
 
 def parent_meta(t, require_selector=False):
     """Validate the identity and liveness of the parent attempt."""
+    # A throttle can interrupt the parent re-read after selector validation.
+    # Retry the whole check so a stale selector cannot authorize checkout.
+    return required_admission_read(_parent_meta, t, require_selector)
+
+
+def _parent_meta(t, require_selector):
     # Polling and transient read failures share one bounded retry budget.
     deadline = time.monotonic() + min(PARENT_POLLS * PARENT_POLL_SECONDS, admission_remaining())
     status = None
@@ -311,7 +317,7 @@ def parent_meta(t, require_selector=False):
         error = None
         delay = PARENT_POLL_SECONDS
         try:
-            p = required_admission_read(run, t["parent"])
+            p = run(t["parent"])
             parent_identity(t, p)
             status, conclusion = p.get("status"), p.get("conclusion")
             check("conclusion" in p and conclusion is None,
@@ -323,14 +329,17 @@ def parent_meta(t, require_selector=False):
             # GitHub can report a queued run while one of its jobs is executing.
             # The selector stays active until its worker finishes, so it proves
             # that this group is still live without trusting another group's job.
-            if required_admission_read(selector_active, t):
-                p = required_admission_read(run, t["parent"])
+            if selector_active(t):
+                p = run(t["parent"])
                 parent_identity(t, p)
                 check("conclusion" in p and p["conclusion"] is None
                       and p.get("status") in ("in_progress", "queued", "pending", "requested", "waiting"),
                       f"parent {t['parent']} not active after selector check")
                 return p
         except OSError as exc:
+            if (ADMISSION_WINDOW.get() is not None and isinstance(exc, urllib.error.HTTPError)
+                    and exc.code in (403, 429)):
+                raise  # The admission window owns worker throttle handling.
             error = exc
             delay = parent_retry_delay(exc)
         if poll == 0:

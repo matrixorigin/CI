@@ -721,6 +721,33 @@ class ParentAdmission(unittest.TestCase):
                 self.assertEqual(late_reads, expected)
                 self.assertEqual(artifact_reads, [0, 1130])
 
+    def test_final_parent_validation_rechecks_selector_after_throttle(self):
+        now = 0
+        selector_reads = []
+
+        def sleep(seconds):
+            nonlocal now
+            now += seconds
+
+        def run(run_id):
+            self.assertEqual(run_id, self.t['parent'])
+            if selector_reads == [0] and now == 0:
+                raise urllib.error.HTTPError('/actions/runs/42', 429, 'throttled', {'Retry-After': '60'}, None)
+            return self.p
+
+        def jobs(path):
+            self.assertEqual(path, '/actions/runs/42/attempts/1/jobs?per_page=100&page=1')
+            selector_reads.append(now)
+            job = self.selector() if now == 0 else self.selector(status='completed', conclusion='failure')
+            return {'jobs': [job]}
+
+        with patch.object(s, 'run', side_effect=run), patch.object(s, 'one', side_effect=jobs), \
+             patch.object(s.time, 'monotonic', side_effect=lambda: now), patch.object(s.time, 'sleep', side_effect=sleep), \
+             s.admission_window():
+            with self.assertRaisesRegex(ValueError, 'still not active'):
+                s.parent_meta(self.t, require_selector=True)
+            self.assertEqual(selector_reads[:2], [0, 60])
+
     def test_late_artifact_redirect_cannot_start_a_signed_download(self):
         now = 0
         name = 'coverage-admit-51'
