@@ -864,6 +864,23 @@ class ShortWorkerTitle(unittest.TestCase):
             self.assertIs(post.call_args.args[1]["return_run_details"], True)
             lookup.assert_called_once_with("/actions/runs/51/attempts/1/jobs?per_page=100")
 
+    def test_dispatch_waits_for_exact_long_title_on_returned_id(self):
+        pending = dict(self.meta, display_title="Coverage standby single-group worker")
+        ready = dict(self.meta, display_title=s.title(self.ticket, "cs"))
+        for resolves in (True, False):
+            reads = [pending, ready] if resolves else [pending] * 24
+            with self.subTest(resolves=resolves), patch.object(s, "parent_meta"), \
+                 patch.object(s, "api", return_value=({"workflow_run_id": 51}, 0)) as post, \
+                 patch.object(s, "run", side_effect=reads) as get, patch.object(s.time, "sleep"):
+                if resolves:
+                    self.assertEqual(s.dispatch(self.ticket, "cs", "b"*40), 51)
+                else:
+                    with self.assertRaisesRegex(s.WorkerTitleMismatch, "worker 51 identity mismatch"):
+                        s.dispatch(self.ticket, "cs", "b"*40)
+                self.assertEqual(get.call_count, len(reads))
+                self.assertTrue(all(call.args == (51,) for call in get.call_args_list))
+                post.assert_called_once()
+
     def test_dispatch_retries_a_queued_marker_for_the_returned_id(self):
         queued = dict(self.marker, status="queued", conclusion=None)
         with patch.object(s, "parent_meta"), patch.object(s, "api", return_value=({"workflow_run_id": 51}, 0)) as post, \

@@ -241,13 +241,20 @@ class DispatchRevisionChanged(ValueError):
         self.child, self.actual = child, actual
 
 
+class WorkerTitleMismatch(ValueError):
+    pass
+
+
 def child_meta(r, t, pool, revision):
     m = run(r)
     check(m["id"] == r and m["repository"]["full_name"] == REPO and m["run_attempt"] == 1
           and m["path"] == ".github/workflows/" + WORKER and m["event"] == "workflow_dispatch"
           and m["head_branch"] == WORKER_REF, "dedicated worker identity mismatch")
     canonical = identity_title(r, m)
-    check(canonical == title(t, pool) and (m["display_title"] == canonical
+    expected = title(t, pool)
+    if canonical != expected and canonical == m["display_title"]:
+        raise WorkerTitleMismatch(f"worker {r} identity mismatch: expected {expected!a}, got {canonical!a}")
+    check(canonical == expected and (m["display_title"] == canonical
           or (t.get("title_version") == 2 and m["display_title"] == short_title(t))),
           "dedicated worker identity mismatch")
     actual = m["head_sha"]
@@ -322,10 +329,12 @@ def dispatch(t, pool, revision):
         "inputs": {"ticket": json.dumps(t, separators=(",", ":")), "pool": pool}})
     r = body.get("workflow_run_id")
     check(r is None or (type(r) is int and r > 0), "invalid dispatch run ID")
+    returned_id = r
     # A plain GROUP0/GROUP1 is shared across PRs. The dispatch time bound is
     # just a discovery filter; always compare the full identity below.
     recent = datetime.fromtimestamp(dispatched_at - 60, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    for _ in range(24):
+    max_reads = 24
+    for poll in range(max_reads):
         if not r:  # also support a legacy 204 response, correlated without guessing
             page = one(f"/actions/workflows/{WORKER}/runs?" + urlencode(
                 dict(event="workflow_dispatch", branch=WORKER_REF, created=f">={recent}", per_page=100)))
@@ -352,6 +361,13 @@ def dispatch(t, pool, revision):
         if r:
             try:
                 child_meta(r, t, pool, revision)
+            except WorkerTitleMismatch as error:
+                # Re-read only the run identified by the dispatch response.
+                # Admission still requires a subsequent exact identity match.
+                if r != returned_id or poll + 1 == max_reads:
+                    raise
+                if poll == 0:
+                    print(str(error), flush=True)
             except WorkerIdentityPending:
                 pass
             else:
