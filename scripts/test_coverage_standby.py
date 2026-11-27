@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import urllib.error
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 from scripts import coverage_standby as s
@@ -500,7 +501,10 @@ class ParentAdmission(unittest.TestCase):
         for observation in (
             {'jobs': [self.selector(group=1, status='completed', conclusion='failure'), self.selector()]},
             {'jobs': [self.selector(status='completed', conclusion=None)]},
+            {'jobs': [self.selector(status='completed', conclusion='failure', run_attempt=2)]},
+            {'jobs': [self.selector(status='completed', conclusion='failure'), self.selector(id=124)]},
             urllib.error.HTTPError('https://api.github.com', 404, 'not yet indexed', None, None),
+            urllib.error.HTTPError('https://api.github.com', 401, 'unreadable', None, None),
         ):
             now = 0
 
@@ -519,6 +523,91 @@ class ParentAdmission(unittest.TestCase):
                 self.assertEqual(artifact.call_count, 2)
                 self.assertEqual(now, 2 * s.GRANT_POLL_SECONDS)
                 one.assert_called_once()
+
+    def test_selector_throttle_pauses_worker_reads_then_requires_the_exact_selector(self):
+        env = dict(TICKET=json.dumps(self.t), GROUP='0', HEAD=self.sha, SOURCE=self.src, POOL='cs',
+                   GITHUB_RUN_ATTEMPT='1', GITHUB_RUN_ID='51')
+        proof = dict(schema=2, allowed='true', verified_membership_http_status=204, pr_number='32922',
+                     author='dev', head_repository=self.src, head_sha=self.sha, base_ref='main')
+        pr = dict(number=32922, user={'login': 'dev'}, state='open', draft=False,
+                  head={'repo': {'full_name': self.src, 'archived': False}, 'sha': self.sha},
+                  base={'repo': {'full_name': s.REPO}, 'ref': 'main'}, labels=[])
+        for code, headers, cooldown, final_forbidden in (
+            (403, {'X-RateLimit-Remaining': '4999'}, 60, False),
+            (429, {'Retry-After': '75'}, 75, False),
+            (403, {'X-RateLimit-Remaining': '4999'}, 60, True),
+        ):
+            now = 0
+            request_times, selector_reads, sleeps = [], [], []
+
+            def sleep(seconds):
+                nonlocal now
+                sleeps.append(seconds)
+                now += seconds
+
+            def run(run_id):
+                request_times.append(now)
+                return {42: self.p, 51: self.worker}[run_id]
+
+            def one(path):
+                request_times.append(now)
+                if path == '/pulls/32922':
+                    return pr
+                self.assertEqual(path, '/actions/runs/42/attempts/1/jobs?per_page=100&page=1')
+                selector_reads.append(now)
+                if now == 0:
+                    raise urllib.error.HTTPError(path, code, 'throttled', headers,
+                        BytesIO(b'{"message":"You have exceeded a secondary rate limit."}'))
+                if final_forbidden:
+                    raise urllib.error.HTTPError(path, 403, 'forbidden', {'X-RateLimit-Remaining': '4998'},
+                        BytesIO(b'{"message":"Resource not accessible by integration"}'))
+                return {'jobs': [self.selector()]}
+
+            def artifact(parent, name, filename):
+                request_times.append(now)
+                self.assertEqual(parent, 42)
+                if name == 'coverage-admit-51':
+                    return self.grant if now >= cooldown else None
+                self.assertEqual((name, filename), (s.proof_name(self.t), 'real-pr-authorization.json'))
+                return proof
+
+            with self.subTest(code=code, cooldown=cooldown, final_forbidden=final_forbidden), \
+                 patch.dict(os.environ, env), patch.object(s, 'run', side_effect=run), \
+                 patch.object(s, 'one', side_effect=one), patch.object(s, 'artifact', side_effect=artifact), \
+                 patch.object(s.time, 'monotonic', side_effect=lambda: now), patch.object(s.time, 'sleep', side_effect=sleep):
+                if final_forbidden:
+                    with self.assertRaisesRegex(urllib.error.HTTPError, '403: forbidden') as exc:
+                        s.admit()
+                    exc.exception.close()
+                else:
+                    s.admit()
+                self.assertEqual(selector_reads, [0, cooldown])
+                self.assertEqual(set(request_times), {0, cooldown})
+                self.assertEqual(sleeps, [cooldown])
+
+    def test_repeated_selector_throttle_backs_off_without_extending_admission_deadline(self):
+        now = 0
+        sleeps, selector_reads = [], []
+
+        def sleep(seconds):
+            nonlocal now
+            sleeps.append(seconds)
+            now += seconds
+
+        def selector(path):
+            selector_reads.append(now)
+            raise urllib.error.HTTPError(path, 429, 'throttled', None, None)
+
+        with patch.object(s, 'WORKER_ADMISSION_SECONDS', 130), patch.object(s, 'parent_meta'), \
+             patch.object(s, 'reconcile_child_meta'), patch.object(s, 'admission_artifact', return_value=None) as grant, \
+             patch.object(s, 'one', side_effect=selector), patch.object(s.time, 'monotonic', side_effect=lambda: now), \
+             patch.object(s.time, 'sleep', side_effect=sleep):
+            with self.assertRaisesRegex(ValueError, '^no grant; no PR code executed$'):
+                s.wait_for_grant(self.t, 51, 'cs')
+            self.assertEqual(selector_reads, [0, 60])
+            self.assertEqual(grant.call_count, 2)
+            self.assertEqual(sleeps, [60, 70])
+            self.assertEqual(now, 130)
 
     def test_admission_artifact_retries_transient_reads_and_checks_parent(self):
         for code in (404, 408, 503):

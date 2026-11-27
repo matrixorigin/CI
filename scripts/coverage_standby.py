@@ -40,6 +40,7 @@ ADMISSION_ARTIFACT_POLLS = 4
 ADMISSION_ARTIFACT_WINDOW_SECONDS = 30
 GRANT_POLL_SECONDS = 10
 GRANT_SELECTOR_POLL_SECONDS = 30
+SELECTOR_RATE_LIMIT_FALLBACK_SECONDS = 60
 
 
 def check(ok, msg):
@@ -635,15 +636,27 @@ def check_grant_selector(t):
     try:
         selector = selector_job(t, include_not_granted=True)
     except OSError as error:
-        # This probe can stop an ungranted worker, never authorize it. If
-        # metadata is lagging, keep checking the grant at its normal cadence.
-        return max(GRANT_SELECTOR_POLL_SECONDS, admission_read_delay(error))
+        # A 403 on this optional lookup can be a secondary rate limit even
+        # without Retry-After or a zero remaining count. Do not let it abort
+        # admission, or keep using the same token during the cooldown. The
+        # mandatory selector check after the grant still fails closed.
+        cooldown = isinstance(error, urllib.error.HTTPError) and error.code in (403, 429)
+        try:
+            delay = admission_read_delay(error)
+        except urllib.error.HTTPError:
+            error.close()
+            delay = SELECTOR_RATE_LIMIT_FALLBACK_SECONDS if cooldown else GRANT_SELECTOR_POLL_SECONDS
+        return delay, cooldown
+    except (AttributeError, KeyError, TypeError, ValueError):
+        # Malformed or ambiguous metadata from a diagnostic probe is not
+        # evidence that this group failed. Required checks still reject it.
+        return GRANT_SELECTOR_POLL_SECONDS, False
     if selector and selector.get("status") == "completed":
         conclusion = selector.get("conclusion")
         if conclusion in ("failure", "cancelled", "timed_out", "skipped", "action_required", "startup_failure", "stale"):
             raise ValueError(f"parent {t['parent']} attempt {t['attempt']} group {t['group']} "
                              f"selector completed ({conclusion}) before worker admission; no PR code executed")
-    return GRANT_SELECTOR_POLL_SECONDS
+    return GRANT_SELECTOR_POLL_SECONDS, False
 
 
 def require_previous_grants_terminal(t):
@@ -681,6 +694,7 @@ def wait_for_grant(t, r, pool):
     deadline = time.monotonic() + WORKER_ADMISSION_SECONDS
     verified = False
     next_selector_check = 0
+    selector_backoff = 0
     while time.monotonic() < deadline:
         parent_meta(t)
         if time.monotonic() >= deadline:
@@ -702,12 +716,19 @@ def wait_for_grant(t, r, pool):
         now = time.monotonic()
         if now >= deadline:
             break
+        interval = GRANT_POLL_SECONDS if verified else WORKER_METADATA_POLL_SECONDS
         if now >= next_selector_check:
-            delay = check_grant_selector(t)
-            next_selector_check = time.monotonic() + delay
+            delay, cooldown = check_grant_selector(t)
+            if cooldown:
+                selector_backoff = max(delay, interval, selector_backoff * 2)
+                interval = delay = selector_backoff
+                print(f"worker {r}: selector lookup returned 403/429; pausing admission reads", flush=True)
+            else:
+                selector_backoff = 0
+            now = time.monotonic()
+            next_selector_check = now + min(max(delay, GRANT_SELECTOR_POLL_SECONDS), deadline - now)
         remaining = deadline - time.monotonic()
         if remaining > 0:
-            interval = GRANT_POLL_SECONDS if verified else WORKER_METADATA_POLL_SECONDS
             time.sleep(min(interval, remaining))
     reason = "no grant" if verified else "worker identity is unavailable"
     raise ValueError(f"{reason}; no PR code executed")
