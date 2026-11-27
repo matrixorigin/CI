@@ -299,6 +299,8 @@ def required_admission_read(read, *args, **kwargs):
             time.sleep(min(backoff, window.remaining()))
         else:
             window.remaining()
+            # A successful read ends the throttle streak across admission calls.
+            window.backoff = 0
             return result
 
 

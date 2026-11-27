@@ -609,7 +609,7 @@ class ParentAdmission(unittest.TestCase):
             self.assertEqual(sleeps, [60, 70])
             self.assertEqual(now, 130)
 
-    def test_secondary_limit_can_persist_from_optional_probe_to_required_parent_read(self):
+    def test_admission_backoff_grows_until_read_succeeds(self):
         env = dict(TICKET=json.dumps(self.t), GROUP='0', HEAD=self.sha, SOURCE=self.src, POOL='cs',
                    GITHUB_RUN_ATTEMPT='1', GITHUB_RUN_ID='51')
         proof = dict(schema=2, allowed='true', verified_membership_http_status=204, pr_number='32922',
@@ -642,6 +642,8 @@ class ParentAdmission(unittest.TestCase):
 
             def one(path):
                 if path == '/pulls/32922':
+                    if now < 240:
+                        raise urllib.error.HTTPError(path, 429, 'throttled', {'Retry-After': '60'}, None)
                     return pr
                 self.assertEqual(path, '/actions/runs/42/attempts/1/jobs?per_page=100&page=1')
                 selector_reads.append(now)
@@ -659,6 +661,7 @@ class ParentAdmission(unittest.TestCase):
             with self.subTest(permission_error=permission_error), patch.dict(os.environ, env), \
                  patch.object(s, 'run', side_effect=run), patch.object(s, 'one', side_effect=one), \
                  patch.object(s, 'artifact', side_effect=artifact), \
+                 patch.object(s, 'WORKER_ADMISSION_SECONDS', 300), \
                  patch.object(s.time, 'monotonic', side_effect=lambda: now), patch.object(s.time, 'sleep', side_effect=sleep):
                 if permission_error:
                     with self.assertRaisesRegex(urllib.error.HTTPError, '403: Forbidden') as denied:
@@ -670,10 +673,10 @@ class ParentAdmission(unittest.TestCase):
                     self.assertEqual(sleeps, [60])
                 else:
                     s.admit()
-                    self.assertEqual(now, 180)
-                    self.assertEqual(parent_reads, [0, 0, 60, 180, 180, 180])
-                    self.assertEqual(selector_reads, [0, 180])
-                    self.assertEqual(sleeps, [60, 120])
+                    self.assertEqual(now, 240)
+                    self.assertEqual(parent_reads, [0, 0, 60, 180, 240, 240])
+                    self.assertEqual(selector_reads, [0, 240])
+                    self.assertEqual(sleeps, [60, 120, 60])
 
     def test_admission_deadline_bounds_parent_and_selector_io_during_artifact_retry(self):
         parent_path = '/actions/runs/42'
