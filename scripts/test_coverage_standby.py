@@ -1068,6 +1068,73 @@ class Queue(unittest.TestCase):
         with self.assertRaises(ValueError):
             s.decide(dict(self.q, status='completed'), 3670, 50)
 
+    def test_first_pool_plan_is_fresh_distinct_and_accounts_for_pending_work(self):
+        now = 1000
+        m0, m1, r0 = ("cs-mnl2-nc-n0-pr-v1", "cs-mnl2-nc-n1-pr-v1", "cs-ruh-nc-n0-pr-v1")
+        rows = [dict(pool=m0, slots=3, pending=1), dict(pool=m1, slots=2, pending=1),
+                dict(pool=r0, slots=1, pending=0)]
+        receipt = lambda choices, captured=now: json.dumps(dict(captured_at=captured, pools=choices))
+        self.assertEqual(s.first_cs_pool_plan(receipt(rows), now), (m0, r0))
+        self.assertEqual(s.first_cs_pool_plan(receipt([dict(rows[0], pending=3), rows[1]]), now), (m1,))
+        for bad in (None, "{}", receipt(rows, captured=now - 181), receipt(rows, captured=now + 1),
+                    receipt(rows + [rows[0]]), receipt([dict(rows[0], slots=True)]),
+                    receipt([dict(rows[0], pool="ubuntu-latest")])):
+            self.assertEqual(s.first_cs_pool_plan(bad, now), ())
+
+    def test_first_pool_is_ignored_without_exact_isolated_pin(self):
+        target = "cs-ruh-nc-n0-pr-v1"
+        ticket = {"pr": 32922, "attempt": 1, "group": 0}
+        env = {"GITHUB_EVENT_NAME": "push", "GITHUB_WORKFLOW_REF":
+               f"{s.REPO}/.github/workflows/coverage-standby-pr32922.yaml@refs/heads/weilu-runner-test"}
+        with patch.dict(os.environ, env), patch.object(s, "first_cs_pool_plan", return_value=(target,)):
+            self.assertEqual(s.choose_initial_scale_set(ticket), target)
+            self.assertIsNone(s.choose_initial_scale_set(dict(ticket, group=1)))
+            self.assertIsNone(s.choose_initial_scale_set(dict(ticket, pr=33401)))
+            self.assertIsNone(s.choose_initial_scale_set(dict(ticket, attempt=2)))
+            with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "pull_request_target"}):
+                self.assertIsNone(s.choose_initial_scale_set(ticket))
+
+    def test_first_pool_requires_exact_label_and_assigned_runner_prefix(self):
+        pool = "cs-mnl2-nc-n2-pr-v1"
+        ticket = {"group": 0, "scale_set": pool}
+        name = "Coverage reservation CS group 0"
+        row = dict(self.active, labels=[pool], runner_name=pool + "-abc-runner-def",
+                   name=name, run_id=12, run_attempt=1)
+        with patch.object(s, "api", return_value=({"total_count": 1, "jobs": [row]}, 2)):
+            self.assertEqual(s.observe(12, ticket, "cs"), (row, 2))
+        for wrong in (dict(row, labels=[s.POOLS["cs"]]),
+                      dict(row, runner_name="cs-mnl2-nc-n0-pr-v1-abc-runner-def")):
+            with patch.object(s, "api", return_value=({"total_count": 1, "jobs": [wrong]}, 2)):
+                with self.assertRaisesRegex(ValueError, "outside requested CS pool|wrong worker label"):
+                    s.observe(12, ticket, "cs")
+        for invalid in ("ubuntu-latest", [], 5):
+            with self.assertRaisesRegex(ValueError, "invalid exact CS pool"):
+                s.worker_labels("cs", scale_set=invalid)
+
+    def test_exact_first_dispatch_does_not_rotate_and_shanghai_deadline_is_unchanged(self):
+        target = "cs-ruh-nc-n0-pr-v1"
+        calls = []
+        def reserve(ticket, pool):
+            calls.append(("reserve", pool, ticket.get("scale_set")))
+            return (111, "b"*40, "a", (self.q, 50)) if pool == "cs" else (222, "c"*40, "b", None)
+        def withdraw(r, ticket, revision):
+            calls.append(("confirmed_cancel", r, ticket["scale_set"]))
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {
+            **self.env, "RUNNER_TEMP": tmp, "COVERAGE_CS_SITE_RETRY": "true",
+        }), patch.object(s, "choose_initial_scale_set", return_value=target), patch.object(s, "parent_meta"), \
+             patch.object(s, "child_meta"), patch.object(s, "reserve", side_effect=reserve), \
+             patch.object(s, "withdraw_cs", side_effect=withdraw), patch.object(s, "output"), \
+             patch.object(s.time, "sleep"), patch.object(s, "observe", side_effect=[
+                 (self.q, 350), (self.q, 3649), (self.q, 3650), (self.q, 3651),
+             ]) as observe:
+            s.choose()
+            self.assertEqual(observe.call_count, 4)
+            grant = json.loads(Path(tmp, "grant.json").read_text())
+        self.assertEqual(calls, [("reserve", "cs", target), ("confirmed_cancel", 111, target),
+                                 ("reserve", "idc", None)])
+        self.assertEqual((grant["child"], grant["pool"]), (222, "idc"))
+        self.assertNotIn("scale_set", grant["ticket"])
+
     def scenario(self, observations, cancellation, count, selected, *, attempt='1', revisions=None):
         import tempfile, os, json
         from pathlib import Path
