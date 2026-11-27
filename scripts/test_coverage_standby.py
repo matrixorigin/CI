@@ -1112,6 +1112,62 @@ class Queue(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "invalid exact CS pool"):
                 s.worker_labels("cs", scale_set=invalid)
 
+    def test_exact_pool_freshness_at_dispatch_matches_receipt_grant_and_output(self):
+        target = "cs-ruh-nc-n0-pr-v1"
+        snapshot = json.dumps(dict(captured_at=1000, pools=[dict(pool=target, slots=1, pending=0)]))
+        for post_age, expected in ((180, target), (183, None)):
+            with self.subTest(post_age=post_age), tempfile.TemporaryDirectory() as tmp:
+                wall = [1179]  # Fresh when choose() starts.
+                sent = []
+
+                def parent_meta(ticket):
+                    if "key" in ticket:  # Last identity read before dispatch, or final grant check.
+                        wall[0] = 1300 if sent else 1000 + post_age
+
+                def post(path, data):
+                    self.assertEqual(path, f"/actions/workflows/{s.WORKER}/dispatches")
+                    self.assertEqual(wall[0], 1000 + post_age)
+                    sent.append(json.loads(data["inputs"]["ticket"]))
+                    return {"workflow_run_id": 111}, wall[0]
+
+                env = dict(self.env, RUNNER_TEMP=tmp, GITHUB_EVENT_NAME="push",
+                           GITHUB_WORKFLOW_REF=f"{s.REPO}/.github/workflows/coverage-standby-pr32922.yaml@refs/heads/weilu-runner-test",
+                           COVERAGE_CS_FIRST_POOL_SNAPSHOT=snapshot)
+                with patch.dict(os.environ, env), patch.object(s.time, "time", side_effect=lambda: wall[0]), \
+                     patch.object(s, "parent_meta", side_effect=parent_meta), patch.object(s, "api", side_effect=post), \
+                     patch.object(s, "one", return_value={"object": {"sha": "b"*40}}), \
+                     patch.object(s, "reconcile_child_meta"), patch.object(s, "output") as output, \
+                     patch.object(s, "observe", return_value=(dict(self.active, runner_name=target+"-abc-runner-def"), 0)):
+                    s.choose()
+                self.assertEqual(len(sent), 1)
+                self.assertEqual(sent[0].get("scale_set"), expected)
+                for filename in ("reservation.json", "grant.json"):
+                    self.assertEqual(json.loads(Path(tmp, filename).read_text())["ticket"], sent[0])
+                placement = {"scale_set": expected} if expected else {}
+                output.assert_called_once_with(child=111, pool="cs", site="", **placement)
+
+    def test_expired_exact_target_restores_shared_queue_site_retry(self):
+        ticket = dict(parent=42, group=0, scale_set="cs-ruh-nc-n0-pr-v1")
+        first_site = s.CS_SITES[ticket["parent"] % len(s.CS_SITES)]
+
+        def reserve(t, pool, deadline):
+            if "site" not in t:
+                del t["scale_set"]  # The receipt expired before the first POST.
+                return 111, "b"*40, "first", (self.q, 50)
+            self.assertNotIn("scale_set", t)
+            self.assertEqual(t["site"], first_site)
+            job = dict(self.active, runner_name=f"cs-{first_site}-nc-n0-pr-v1-abc-runner-def")
+            return 222, "c"*40, "second", (job, 351)
+
+        with patch.object(s, "reserve", side_effect=reserve), patch.object(s.time, "sleep"), \
+             patch.object(s, "observe", side_effect=[(self.q, 350), (self.q, 3650)]), \
+             patch.object(s, "observe_cs_handoff", return_value=(self.q, 350)), \
+             patch.object(s, "withdraw_cs") as withdraw:
+            result = s.select_cs(ticket, True, float("inf"))
+        withdraw.assert_called_once()
+        self.assertEqual(withdraw.call_args.args[0], 111)
+        self.assertEqual(result, (222, "c"*40, "second", "cs", 50))
+
     def test_exact_first_dispatch_does_not_rotate_and_shanghai_deadline_is_unchanged(self):
         target = "cs-ruh-nc-n0-pr-v1"
         deadline = 10 + s.SELECTOR_RESERVATION_SECONDS

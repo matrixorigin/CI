@@ -543,6 +543,10 @@ def dispatch(t, pool, revision, deadline, *, remember):
     """Return the exact dispatched ID and its first CS observation (IDC: None)."""
     parent_meta(t)
     check(time.monotonic() < deadline, "selection deadline exceeded before dispatch")
+    # Worker-ref and parent reads can outlive the capacity receipt. Finalize
+    # the placement before sending the ticket, never after a worker exists.
+    if pool == "cs" and "scale_set" in t and choose_initial_scale_set(t) != t["scale_set"]:
+        del t["scale_set"]
     # At most one POST. If the response is lost, fail closed; no blind retries.
     body, dispatched_at = api(f"/actions/workflows/{WORKER}/dispatches", {
         "ref": WORKER_REF, "return_run_details": True,
@@ -733,10 +737,10 @@ def select_cs(t, enable_site_retry, deadline):
     # Rotate the first choice on retries, without pinning normal work to any
     # site. A queued reservation is not proof that a site is out of capacity.
     offset = (t["parent"] + t["group"]) % len(CS_SITES)
+    r, rev, nonce, (j, now) = reserve(t, "cs", deadline)
     target = t.get("scale_set")
     remaining_sites = [*CS_SITES[offset:], *CS_SITES[:offset], None] if enable_site_retry and not target else []
     first_queued = queued_here = last_queue_report = None
-    r, rev, nonce, (j, now) = reserve(t, "cs", deadline)
     if target:
         print(f"Group {t['group']}: first CS reservation targets {target} — {run_url(r)}", flush=True)
     else:
