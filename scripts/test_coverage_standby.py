@@ -312,19 +312,19 @@ class ParentAdmission(unittest.TestCase):
                   state='open', draft=False, base={'repo': {'full_name': s.REPO}, 'ref': 'main'}, labels=[])
         env = dict(TICKET=json.dumps(self.t), GROUP='0', HEAD=self.sha, SOURCE=self.src, POOL='cs',
                    GITHUB_RUN_ATTEMPT='1', GITHUB_RUN_ID='51')
-        def missing():
-            return urllib.error.HTTPError('/actions/runs/51', 404, 'not found', None, None)
-
-        for resolves in (True, False):
+        for code, resolves in ((404, True), (404, False), (503, True), (503, False)):
             now = 0
             interval = s.WORKER_METADATA_POLL_SECONDS
-            reads = [missing(), self.worker if resolves else missing()]
+            def unavailable():
+                return urllib.error.HTTPError('/actions/runs/51', code, 'temporarily unavailable', None, None)
+
+            reads = [unavailable(), self.worker if resolves else unavailable()]
 
             def sleep(seconds):
                 nonlocal now
                 now += seconds
 
-            with self.subTest(resolves=resolves), patch.dict(os.environ, env), \
+            with self.subTest(code=code, resolves=resolves), patch.dict(os.environ, env), \
                  patch.object(s, 'parent_meta') as parent, patch.object(s, 'run', side_effect=reads) as get, \
                  patch.object(s, 'artifact') as artifact, patch.object(s, 'one', return_value=pr), \
                  patch.object(s, 'selector_job', return_value=None), patch.object(s, 'WORKER_ADMISSION_SECONDS', 2 * interval), \
@@ -340,11 +340,12 @@ class ParentAdmission(unittest.TestCase):
                     self.assertEqual(artifact.call_count, 2)
                     self.assertEqual(parent.call_args.kwargs, {'require_selector': True})
                 else:
-                    with self.assertRaisesRegex(ValueError, 'no PR code executed'):
+                    failure = (ValueError, 'no PR code executed') if code == 404 else (TimeoutError, 'retry budget')
+                    with self.assertRaisesRegex(*failure):
                         s.admit()
                     artifact.assert_not_called()
                 self.assertEqual([call.args[0] for call in get.call_args_list], [51] * len(reads))
-                self.assertEqual(now, interval if resolves else 2 * interval)
+                self.assertEqual(now, 2 * interval if code == 404 and not resolves else interval)
 
     def test_worker_started_first_can_obtain_the_later_selector_grant(self):
         env = dict(TICKET=json.dumps(self.t), GROUP='0', HEAD=self.sha, SOURCE=self.src, POOL='cs',
@@ -824,7 +825,7 @@ class ParentAdmission(unittest.TestCase):
                 self.assertEqual(sleep.call_count, reads - 1)
 
     def test_revoke_only_the_worker_owned_by_the_selector(self):
-        for scenario in ('active', 'completed', 'wrong_child', 'wrong_attempt', 'wrong_nonce',
+        for scenario in ('active', 'completed', 'wrong_child', 'wrong_attempt', 'wrong_revision', 'wrong_nonce',
                          'wrong_worker', 'unexpected_status'):
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as tmp:
                 local_grant = json.loads(json.dumps(self.grant))
@@ -835,6 +836,8 @@ class ParentAdmission(unittest.TestCase):
                     local_grant['child'] = 52
                 elif scenario == 'wrong_attempt':
                     local_grant['ticket']['attempt'] = 2
+                elif scenario == 'wrong_revision':
+                    metadata['head_sha'] = 'c'*40
                 elif scenario == 'wrong_nonce':
                     local_grant['nonce'] = 'wrong'
                 elif scenario == 'wrong_worker':
@@ -1100,7 +1103,8 @@ class Queue(unittest.TestCase):
 
     def test_shanghai_dispatch_recovers_ref_read_and_revokes_a_late_receipt(self):
         deadline = s.SELECTOR_RESERVATION_SECONDS
-        for late in (False, True):
+        for late, branch_moved, matches in (
+                (False, False, True), (True, False, True), (True, True, True), (True, True, False)):
             now = 0
             tickets = {}
             events = []
@@ -1115,8 +1119,9 @@ class Queue(unittest.TestCase):
             def get(path):
                 if path == "/actions/runs/222/attempts/1/jobs?per_page=100":
                     events.append("identity")
+                    ticket = tickets[222] if matches else dict(tickets[222], parent=43)
                     marker = dict(run_id=222, run_attempt=1, status="completed", conclusion="skipped",
-                                  name=s.title(tickets[222], "idc") + s.IDENTITY_SUFFIX)
+                                  name=s.title(ticket, "idc") + s.IDENTITY_SUFFIX)
                     return {"total_count": 1, "jobs": [marker]}
                 self.assertEqual(path, "/git/ref/heads/main")
                 events.append("ref")
@@ -1135,9 +1140,10 @@ class Queue(unittest.TestCase):
                     events.append("verify")
                     if late and events.count("verify") == 1:
                         raise urllib.error.HTTPError("/actions/runs/222", 404, "not indexed", None, None)
+                revision = "d"*40 if run_id == 222 and branch_moved else ticket["revision"]
                 return dict(id=run_id, repository={"full_name": s.REPO}, run_attempt=1,
                             path=".github/workflows/" + s.WORKER, event="workflow_dispatch",
-                            head_branch=s.WORKER_REF, head_sha=ticket["revision"],
+                            head_branch=s.WORKER_REF, head_sha=revision,
                             display_title=s.title(ticket, "cs") if run_id == 111 else s.short_title(ticket),
                             status="completed" if cancelled else "queued", conclusion="cancelled" if cancelled else None)
 
@@ -1158,7 +1164,7 @@ class Queue(unittest.TestCase):
                     now = deadline + 1
                 return {"workflow_run_id": 222}, 0
 
-            with self.subTest(late=late), tempfile.TemporaryDirectory() as tmp:
+            with self.subTest(late=late, branch_moved=branch_moved, matches=matches), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 env = {**self.env, "RUNNER_TEMP": tmp, "GITHUB_OUTPUT": str(root / "outputs"), "CHILD": ""}
                 with patch.dict(os.environ, env), patch.object(s.time, "monotonic", side_effect=lambda: now), \
@@ -1172,8 +1178,14 @@ class Queue(unittest.TestCase):
                         self.assertFalse((root / "grant.json").exists())
                         self.assertFalse((root / "outputs").exists())
                         self.assertEqual(events, ["withdraw", "ref", "dispatch"])
-                        s.revoke()
-                        self.assertEqual(events, ["withdraw", "ref", "dispatch", "verify", "verify", "identity", "revoke"])
+                        expected = ["withdraw", "ref", "dispatch", "verify", "verify", "identity"]
+                        if matches:
+                            s.revoke()
+                            expected.append("revoke")
+                        else:
+                            with self.assertRaisesRegex(ValueError, "dedicated worker identity mismatch"):
+                                s.revoke()
+                        self.assertEqual(events, expected)
                     else:
                         s.choose()
                         grant = json.loads((root / "grant.json").read_text())
@@ -1436,7 +1448,7 @@ class Queue(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'unrecognized previous grant'):
                 s.require_previous_grants_terminal(t)
 
-    def test_previous_short_title_grant_retries_only_pending_identity(self):
+    def test_previous_short_title_grant_retries_transient_metadata(self):
         t = dict(parent=42, group=0, attempt=2, head='a'*40)
         title = s.title(dict(t, attempt=1, key='a'*64), 'cs')
         old = dict(id=81, run_attempt=1, display_title='GROUP0', path='.github/workflows/'+s.WORKER,
@@ -1451,12 +1463,18 @@ class Queue(unittest.TestCase):
 
         for name, responses, expected_error in (
             ('404 then ready', [http(404), [marker]], None),
+            ('503 then ready', [http(503), [marker]], None),
             ('not indexed then ready', [[], [marker]], None),
-            ('persistent 404', [http(404), http(404)], (ValueError, 'previous grant.*not verified')),
+            ('persistent 404', [http(404), http(404)], (TimeoutError, 'previous grant.*retry budget')),
             ('permission denied', [http(403)], (urllib.error.HTTPError, '403')),
             ('wrong attempt', [[dict(marker, run_attempt=2)]], (ValueError, 'invalid worker identity marker')),
         ):
             results = iter(responses)
+            now = 0
+
+            def sleep_for(seconds):
+                nonlocal now
+                now += seconds
 
             def one(path):
                 if '/artifacts?' in path:
@@ -1471,7 +1489,8 @@ class Queue(unittest.TestCase):
 
             with self.subTest(name=name), patch.object(s, 'one', side_effect=one) as read, \
                  patch.object(s, 'run', return_value=dict(old, run_attempt=2)), patch.object(s, 'PARENT_POLLS', 2), \
-                 patch.object(s.time, 'sleep') as sleep:
+                 patch.object(s.time, 'monotonic', side_effect=lambda: now), \
+                 patch.object(s.time, 'sleep', side_effect=sleep_for) as sleep:
                 if expected_error is None:
                     s.require_previous_grants_terminal(t)
                 else:

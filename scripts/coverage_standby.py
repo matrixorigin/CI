@@ -376,6 +376,7 @@ def is_worker_run(r, m):
 
 
 def child_meta(r, t, pool, revision):
+    """Read the exact worker and require its workflow revision when supplied."""
     m = run(r)
     check(is_worker_run(r, m), "dedicated worker identity mismatch")
     display = m.get("display_title")
@@ -391,7 +392,7 @@ def child_meta(r, t, pool, revision):
           "dedicated worker identity mismatch")
     actual = m["head_sha"]
     check(re.fullmatch("[a-f0-9]{40}", actual), "invalid worker revision")
-    if actual != revision:
+    if revision is not None and actual != revision:
         raise DispatchRevisionChanged(r, actual)
     return m
 
@@ -611,8 +612,9 @@ def reserve(t, pool, deadline):
     raise ValueError("workflow revision kept changing; no worker granted")
 
 
-def read_worker(phase, read, *args, deadline=float("inf")):
+def read_worker(phase, read, *args, deadline=float("inf"), retry_pending=True):
     """Retry the same metadata read within one outage and phase budget."""
+    retryable = (OSError, WorkerIdentityPending) if retry_pending else OSError
     retry_until = None
     backoff = 0
     while True:
@@ -620,7 +622,7 @@ def read_worker(phase, read, *args, deadline=float("inf")):
             raise TimeoutError(f"{phase}: phase deadline exceeded")
         try:
             result = read(*args)
-        except (OSError, WorkerIdentityPending) as error:
+        except retryable as error:
             delay = max(backoff, metadata_read_delay(error))
             backoff = min(30, delay * 2)
             now = time.monotonic()
@@ -862,40 +864,25 @@ def worker_attempt(r):
     return one(f"/actions/runs/{r}/attempts/1")
 
 
-def read_previous_grant(r, deadline):
-    """Resolve a receipt's worker before deciding whether its group can rerun."""
-    for poll in range(PARENT_POLLS):
-        try:
-            # Only the worker's first attempt can admit a grant. A later
-            # GitHub rerun changes the latest run without changing that receipt.
-            m = worker_attempt(r)
-            check(is_worker_run(r, m), "unrecognized previous grant; no redispatch")
-            return m, identity_title(r, m)
-        except WorkerIdentityPending as error:
-            reason = str(error)
-        except urllib.error.HTTPError as error:
-            if error.code != 404:
-                raise
-            error.close()
-            reason = "worker attempt or its jobs returned HTTP 404"
-        if poll + 1 == PARENT_POLLS or time.monotonic() + PARENT_POLL_SECONDS >= deadline:
-            break
-        time.sleep(PARENT_POLL_SECONDS)
-        if time.monotonic() >= deadline:
-            break
-    raise ValueError(f"previous grant worker {r} not verified: {reason}; no redispatch")
+def read_previous_grant(r):
+    """Read and verify the worker's first attempt, which owns the grant."""
+    m = worker_attempt(r)
+    check(is_worker_run(r, m), "unrecognized previous grant; no redispatch")
+    return m, identity_title(r, m)
 
 
 def require_previous_grants_terminal(t):
     deadline = time.monotonic() + PARENT_POLLS * PARENT_POLL_SECONDS
     page = 1
     while True:
-        batch = one(f"/actions/runs/{t['parent']}/artifacts?per_page=100&page={page}")["artifacts"]
+        path = f"/actions/runs/{t['parent']}/artifacts?per_page=100&page={page}"
+        batch = read_worker("previous grant artifacts", one, path, deadline=deadline)["artifacts"]
         for item in batch:
             found = re.fullmatch(r"coverage-admit-([1-9][0-9]*)", item["name"])
             if not found:
                 continue
-            m, canonical = read_previous_grant(int(found[1]), deadline)
+            r = int(found[1])
+            m, canonical = read_worker(f"previous grant worker {r}", read_previous_grant, r, deadline=deadline)
             fields = re.fullmatch(r"Coverage standby / ([1-9][0-9]*)/([1-9][0-9]*)/([01])/"
                                   r"([0-9a-f]{40})/(cs|idc)/[0-9a-f]{64}", canonical)
             check(fields and fields[1] == str(t["parent"]) and fields[4] == t["head"],
@@ -923,6 +910,7 @@ def _wait_for_grant(t, r, pool, window):
     # The worker can start before the selector sees the dispatch response.
     # Spending time on identity reconciliation reduces the remaining grant wait.
     deadline = window.deadline
+    identify = partial(reconcile_child_meta, r, t, pool, t["revision"], wait_for_display_title=True)
     verified = False
     next_selector_check = 0
     while time.monotonic() < deadline:
@@ -931,7 +919,9 @@ def _wait_for_grant(t, r, pool, window):
             break
         if not verified:
             try:
-                required_admission_read(reconcile_child_meta, r, t, pool, t["revision"], wait_for_display_title=True)
+                # An unindexed worker goes through the selector liveness check below.
+                read_worker(f"worker {r} identity", required_admission_read, identify,
+                            deadline=deadline, retry_pending=False)
             except WorkerIdentityPending:
                 pass
             else:
@@ -1010,8 +1000,9 @@ def revoke():
     """Stop this selector's worker when selection, grant, or wait fails."""
     temp = Path(os.environ["RUNNER_TEMP"])
     path = temp / "grant.json"
+    granted = path.exists()
     verify = child_meta
-    if not path.exists():
+    if not granted:
         path = temp / "reservation.json"
         if not path.exists():
             return
@@ -1024,10 +1015,13 @@ def revoke():
                     head=os.environ["HEAD"], source=os.environ["SOURCE"])
     check(all(t.get(key) == value for key, value in expected.items())
           and type(child) is int and child > 0 and (not selected or selected == str(child))
+          and isinstance(t.get("revision"), str) and re.fullmatch("[a-f0-9]{40}", t["revision"])
           and pool in POOLS and digest(receipt["nonce"]) == t["key"], "invalid selector receipt")
+    # The exact dispatch ticket owns an ungranted reservation even if main moved.
+    revision = t["revision"] if granted else None
     deadline = time.monotonic() + WORKER_READ_RECOVERY_SECONDS
     for attempt in range(3):
-        meta = read_worker(f"revoking worker {child}", verify, child, t, pool, t["revision"], deadline=deadline)
+        meta = read_worker(f"revoking worker {child}", verify, child, t, pool, revision, deadline=deadline)
         if meta["status"] == "completed":
             print(f"coverage worker {child} is already complete", flush=True)
             return
