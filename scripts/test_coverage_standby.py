@@ -609,6 +609,161 @@ class ParentAdmission(unittest.TestCase):
             self.assertEqual(sleeps, [60, 70])
             self.assertEqual(now, 130)
 
+    def test_secondary_limit_can_persist_from_optional_probe_to_required_parent_read(self):
+        env = dict(TICKET=json.dumps(self.t), GROUP='0', HEAD=self.sha, SOURCE=self.src, POOL='cs',
+                   GITHUB_RUN_ATTEMPT='1', GITHUB_RUN_ID='51')
+        proof = dict(schema=2, allowed='true', verified_membership_http_status=204, pr_number='32922',
+                     author='dev', head_repository=self.src, head_sha=self.sha, base_ref='main')
+        pr = dict(number=32922, user={'login': 'dev'}, state='open', draft=False,
+                  head={'repo': {'full_name': self.src, 'archived': False}, 'sha': self.sha},
+                  base={'repo': {'full_name': s.REPO}, 'ref': 'main'}, labels=[])
+        for permission_error in (False, True):
+            now = 0
+            parent_reads, selector_reads, sleeps = [], [], []
+            throttled = 'You have exceeded a secondary rate limit.'
+
+            def error(path, message):
+                return urllib.error.HTTPError(path, 403, 'Forbidden', {'X-RateLimit-Remaining': '4999'},
+                                              BytesIO(json.dumps({'message': message}).encode()))
+
+            def sleep(seconds):
+                nonlocal now
+                sleeps.append(seconds)
+                now += seconds
+
+            def run(run_id):
+                if run_id == 51:
+                    return self.worker
+                self.assertEqual(run_id, 42)
+                parent_reads.append(now)
+                if 0 < now < 75:
+                    raise error('/actions/runs/42', 'Resource not accessible by integration' if permission_error else throttled)
+                return self.p
+
+            def one(path):
+                if path == '/pulls/32922':
+                    return pr
+                self.assertEqual(path, '/actions/runs/42/attempts/1/jobs?per_page=100&page=1')
+                selector_reads.append(now)
+                if now < 75:
+                    raise error(path, throttled)
+                return {'jobs': [self.selector()]}
+
+            def artifact(parent, name, filename):
+                self.assertEqual(parent, 42)
+                if name == 'coverage-admit-51':
+                    return self.grant if now >= 75 else None
+                self.assertEqual((name, filename), (s.proof_name(self.t), 'real-pr-authorization.json'))
+                return proof
+
+            with self.subTest(permission_error=permission_error), patch.dict(os.environ, env), \
+                 patch.object(s, 'run', side_effect=run), patch.object(s, 'one', side_effect=one), \
+                 patch.object(s, 'artifact', side_effect=artifact), \
+                 patch.object(s.time, 'monotonic', side_effect=lambda: now), patch.object(s.time, 'sleep', side_effect=sleep):
+                if permission_error:
+                    with self.assertRaisesRegex(urllib.error.HTTPError, '403: Forbidden') as denied:
+                        s.admit()
+                    denied.exception.close()
+                    self.assertEqual(now, 60)
+                    self.assertEqual(parent_reads, [0, 0, 60])
+                    self.assertEqual(selector_reads, [0])
+                    self.assertEqual(sleeps, [60])
+                else:
+                    s.admit()
+                    self.assertEqual(now, 180)
+                    self.assertEqual(parent_reads, [0, 0, 60, 180, 180, 180])
+                    self.assertEqual(selector_reads, [0, 180])
+                    self.assertEqual(sleeps, [60, 120])
+
+    def test_admission_deadline_bounds_parent_and_selector_io_during_artifact_retry(self):
+        parent_path = '/actions/runs/42'
+        selector_path = '/actions/runs/42/attempts/1/jobs?per_page=100&page=1'
+        for slow in ('parent', 'selector'):
+            now = 0
+            late_reads, artifact_reads = [], []
+
+            def sleep(seconds):
+                nonlocal now
+                now = 1130 if now == 0 else now + seconds
+
+            def open_request(req, timeout):
+                nonlocal now
+                path = req.full_url.removeprefix(s.API)
+                self.assertIn(path, (parent_path, selector_path))
+                if now >= 1135:
+                    late_reads.append((path, now, timeout))
+                    if len(late_reads) == 1:
+                        now += 25 if slow == 'parent' else 2
+                    else:
+                        now += 25
+                payload = (dict(self.p, status='queued') if now >= 1135 else self.p) if path == parent_path else {
+                    'jobs': [self.selector()]}
+                response = BytesIO(json.dumps(payload).encode())
+                response.headers = {'Date': 'Thu, 01 Jan 1970 00:00:00 GMT'}
+                return response
+
+            def artifact(parent, name, filename):
+                artifact_reads.append(now)
+                if now == 1130:
+                    raise urllib.error.HTTPError('https://api.github.com', 503, 'unavailable', None, None)
+                return None
+
+            with self.subTest(slow=slow), patch.dict(os.environ, {'ACTIONS_TOKEN': 'test-token'}), \
+                 patch.object(s, 'reconcile_child_meta'), patch.object(s, 'artifact', side_effect=artifact), \
+                 patch.object(s.urllib.request, 'build_opener') as opener, \
+                 patch.object(s.time, 'monotonic', side_effect=lambda: now), patch.object(s.time, 'sleep', side_effect=sleep):
+                opener.return_value.open.side_effect = open_request
+                with self.assertRaisesRegex((ValueError, RuntimeError), 'admission deadline exceeded.*no PR code executed'):
+                    s.wait_for_grant(self.t, 51, 'cs')
+                expected = [(parent_path, 1135, 5)]
+                if slow == 'selector':
+                    expected.append((selector_path, 1137, 3))
+                self.assertEqual(late_reads, expected)
+                self.assertEqual(artifact_reads, [0, 1130])
+
+    def test_late_artifact_redirect_cannot_start_a_signed_download(self):
+        now = 0
+        name = 'coverage-admit-51'
+
+        def zip_redirect(path):
+            nonlocal now
+            self.assertEqual(path, '/actions/artifacts/7/zip')
+            now = 10
+            raise urllib.error.HTTPError(path, 302, 'Found', {'Location': 'https://example.invalid/signed'}, None)
+
+        listing = {'artifacts': [{'id': 7, 'name': name, 'expired': False, 'size_in_bytes': 512}]}
+        with patch.object(s, 'WORKER_ADMISSION_SECONDS', 10), patch.object(s.time, 'monotonic', side_effect=lambda: now), \
+             patch.object(s, 'one', return_value=listing), patch.object(s, 'api', side_effect=zip_redirect), \
+             patch.object(s.urllib.request, 'urlopen') as download, s.admission_window():
+            with self.assertRaisesRegex(s.AdmissionDeadlineExceeded, 'no PR code executed'):
+                s.artifact(42, name, 'grant.json')
+            download.assert_not_called()
+
+    def test_grant_does_not_reset_the_deadline_for_final_authorization(self):
+        env = dict(TICKET=json.dumps(self.t), GROUP='0', HEAD=self.sha, SOURCE=self.src, POOL='cs',
+                   GITHUB_RUN_ATTEMPT='1', GITHUB_RUN_ID='51')
+        now = 0
+
+        def grant(*_args):
+            nonlocal now
+            now = 9
+
+        def proof(*_args):
+            nonlocal now
+            self.assertEqual(now, 9)
+            now = 11
+            return {'schema': 2, 'allowed': 'true'}
+
+        with patch.dict(os.environ, env), patch.object(s, 'WORKER_ADMISSION_SECONDS', 10), \
+             patch.object(s.time, 'monotonic', side_effect=lambda: now), patch.object(s, 'wait_for_grant', side_effect=grant), \
+             patch.object(s, 'artifact', side_effect=proof) as read, patch.object(s, 'one') as live_pr, \
+             patch.object(s, 'parent_meta') as final_selector:
+            with self.assertRaisesRegex(s.AdmissionDeadlineExceeded, 'no PR code executed'):
+                s.admit()
+            read.assert_called_once_with(42, s.proof_name(self.t), 'real-pr-authorization.json')
+            live_pr.assert_not_called()
+            final_selector.assert_not_called()
+
     def test_admission_artifact_retries_transient_reads_and_checks_parent(self):
         for code in (404, 408, 503):
             with self.subTest(code=code), patch.object(s, 'parent_meta') as parent, \
