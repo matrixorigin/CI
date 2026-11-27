@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from functools import partial
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
 
@@ -33,6 +34,9 @@ FIRST_CS_POOLS = frozenset(f"cs-{site}-nc-n{node}-pr-v1"
 CS_SITE_RETRY_AFTER = 300
 CS_SITE_PROBE_WAIT = 90
 WAIT = 3600
+# Leave time to report a selection failure before the 85-minute workflow step ends.
+SELECTOR_RESERVATION_SECONDS = 84 * 60
+WORKER_READ_RECOVERY_SECONDS = 90
 PROGRESS_INTERVAL = 300
 JOB_DETAIL_INTERVAL = 120
 HANDOFF_POLLS = 60
@@ -486,7 +490,7 @@ def unassigned(job):
     return job is not None and job["status"] == "queued" and not (job.get("runner_id") or job.get("runner_name"))
 
 
-def observe(r, t, pool):
+def observe(r, t, pool, expect_visible=False):
     try:
         data, now = api(f"/actions/runs/{r}/attempts/1/jobs?per_page=100")
     except urllib.error.HTTPError as error:
@@ -512,6 +516,8 @@ def observe(r, t, pool):
             # surface the non-selected call as a skipped placeholder.
             check(j["conclusion"] == "skipped", "not an exclusive single-group run")
     check(len(target) <= 1, "ambiguous reservation")
+    if expect_visible and not target:
+        raise WorkerIdentityPending("previously seen reservation job is not visible")
     return (target[0] if target else None), now
 
 
@@ -533,22 +539,27 @@ def decide(job, now, since):
     return None, since
 
 
-def dispatch(t, pool, revision):
+def dispatch(t, pool, revision, deadline, *, remember):
     """Return the exact dispatched ID and its first CS observation (IDC: None)."""
     parent_meta(t)
+    check(time.monotonic() < deadline, "selection deadline exceeded before dispatch")
     # At most one POST. If the response is lost, fail closed; no blind retries.
     body, dispatched_at = api(f"/actions/workflows/{WORKER}/dispatches", {
         "ref": WORKER_REF, "return_run_details": True,
         "inputs": {"ticket": json.dumps(t, separators=(",", ":")), "pool": pool}})
     returned_id = r = body.get("workflow_run_id")
     check(r is None or (type(r) is int and r > 0), "invalid dispatch run ID")
+    if r is not None:
+        remember(r)
     # A plain GROUP0/GROUP1 is shared across PRs. The dispatch time bound is
     # just a discovery filter; always compare the full identity below.
     recent = datetime.fromtimestamp(dispatched_at - 60, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    deadline = time.monotonic() + DISPATCH_METADATA_POLLS * WORKER_METADATA_POLL_SECONDS
+    deadline = min(deadline, time.monotonic() + DISPATCH_METADATA_POLLS * WORKER_METADATA_POLL_SECONDS)
+    check(time.monotonic() < deadline, "dispatch metadata window elapsed; no worker granted")
     pending = None
     reported = set()
     for poll in range(DISPATCH_METADATA_POLLS):
+        delay = WORKER_METADATA_POLL_SECONDS
         if not r:  # also support a legacy 204 response, correlated without guessing
             page = one(f"/actions/workflows/{WORKER}/runs?" + urlencode(
                 dict(event="workflow_dispatch", branch=WORKER_REF, created=f">={recent}", per_page=100)))
@@ -574,14 +585,22 @@ def dispatch(t, pool, revision):
                         continue
             check(len(ids) <= 1, "duplicate dispatch; refusing to select")
             r = ids[0] if ids else None
+            if r is not None:
+                remember(r)
         if r:
             try:
                 reconcile_child_meta(r, t, pool, revision, wait_for_display_title=(r == returned_id))
                 # A legacy full title can be indexed before its attempt jobs.
                 # Keep the first CS observation in this same read-only budget.
                 first_observation = observe(r, t, pool) if pool == "cs" else None
-            except WorkerIdentityPending as error:
-                pending = str(error)
+            except (OSError, WorkerIdentityPending) as error:
+                delay = metadata_read_delay(error)
+                if isinstance(error, WorkerIdentityPending):
+                    pending = str(error)
+                elif isinstance(error, urllib.error.HTTPError):
+                    pending = f"worker metadata returned HTTP {error.code}"
+                else:
+                    pending = "worker metadata transport unavailable"
                 if pending not in reported:
                     reported.add(pending)
                     # Do not log the ticket, raw response, or API-supplied title.
@@ -590,9 +609,11 @@ def dispatch(t, pool, revision):
                 check(time.monotonic() < deadline, "dispatch metadata window elapsed; no worker granted")
                 print(f"{pool} group {t['group']}: https://github.com/{REPO}/actions/runs/{r}", flush=True)
                 return r, first_observation
-        if poll + 1 == DISPATCH_METADATA_POLLS or time.monotonic() + WORKER_METADATA_POLL_SECONDS >= deadline:
+        if poll + 1 == DISPATCH_METADATA_POLLS or time.monotonic() + delay >= deadline:
             break
-        time.sleep(WORKER_METADATA_POLL_SECONDS)
+        time.sleep(delay)
+        if time.monotonic() >= deadline:
+            break
         parent_meta(t)
         if time.monotonic() >= deadline:
             break
@@ -608,16 +629,27 @@ def output(**fields):
             print(f"{k}={v}", file=f)
 
 
-def reserve(t, pool):
+def reserve(t, pool, deadline):
     # Retry ONLY a positively identified, ungranted child resolved at the
     # wrong revision. Never retry an ambiguous dispatch or a lost response.
     for attempt in range(3):
-        rev = t["revision"] = one("/git/ref/heads/" + WORKER_REF)["object"]["sha"]
+        check(time.monotonic() < deadline, "selection deadline exceeded before reservation")
+        branch = read_worker(f"{pool} worker ref", one, "/git/ref/heads/" + WORKER_REF, deadline=deadline)
+        rev = t["revision"] = branch["object"]["sha"]
         check(re.fullmatch("[a-f0-9]{40}", rev), "invalid branch revision")
         nonce = secrets.token_hex(32)
         t["key"] = digest(nonce)
+
+        def remember(child):
+            # Keep local cleanup ownership even if selector verification times out.
+            # Only grant.json can be published to authorize a worker.
+            receipt = Path(os.environ["RUNNER_TEMP"], "reservation.json")
+            staged = receipt.with_suffix(".tmp")
+            staged.write_text(json.dumps(dict(ticket=t, child=child, pool=pool, nonce=nonce)))
+            staged.replace(receipt)
+
         try:
-            r, first_observation = dispatch(t, pool, rev)
+            r, first_observation = dispatch(t, pool, rev, deadline, remember=remember)
             return r, rev, nonce, first_observation
         except DispatchRevisionChanged as changed:
             r = changed.child
@@ -639,9 +671,42 @@ def reserve(t, pool):
     raise ValueError("workflow revision kept changing; no worker granted")
 
 
-def withdraw_cs(r, t, rev):
+def read_worker(phase, read, *args, deadline=float("inf")):
+    """Retry the same metadata read within one outage and phase budget."""
+    retry_until = None
+    backoff = 0
+    while True:
+        if deadline != float("inf") and time.monotonic() >= deadline:
+            raise TimeoutError(f"{phase}: phase deadline exceeded")
+        try:
+            result = read(*args)
+        except (OSError, WorkerIdentityPending) as error:
+            delay = max(backoff, metadata_read_delay(error))
+            backoff = min(30, delay * 2)
+            now = time.monotonic()
+            if retry_until is None:
+                retry_until = min(deadline, now + WORKER_READ_RECOVERY_SECONDS)
+                print(f"{phase}: metadata temporarily unavailable; retrying read", flush=True)
+            if now + delay < retry_until:
+                time.sleep(delay)
+                if time.monotonic() < retry_until:
+                    continue
+            raise TimeoutError(f"{phase}: worker metadata did not recover within the retry budget") from error
+        if deadline != float("inf") and time.monotonic() >= deadline:
+            raise TimeoutError(f"{phase}: phase deadline exceeded")
+        return result
+
+
+def observe_cs_handoff(r, t, rev):
+    parent_meta(t)
+    child_meta(r, t, "cs", rev)
+    return observe(r, t, "cs", True)
+
+
+def withdraw_cs(r, t, rev, deadline):
     # Only used before publishing any grant. If GitHub assigns the runner
     # between the final read and cancellation, that runner cannot run PR code.
+    check(time.monotonic() < deadline, "CS withdrawal deadline exceeded")
     try:
         api(f"/actions/runs/{r}/cancel", {})
     except urllib.error.HTTPError as exc:
@@ -650,28 +715,33 @@ def withdraw_cs(r, t, rev):
         # A concurrent cancellation can return 409. The conflict itself is
         # not an acknowledgement: verify this exact child in the loop below.
         exc.close()
-    for _ in range(60):
-        m = child_meta(r, t, "cs", rev)
+    deadline = min(deadline, time.monotonic() + HANDOFF_POLLS * HANDOFF_POLL_SECONDS)
+    for poll in range(HANDOFF_POLLS):
+        if time.monotonic() >= deadline:
+            break
+        m = read_worker(f"confirming CS worker {r} cancellation", child_meta, r, t, "cs", rev, deadline=deadline)
         if m["status"] == "completed":
             check(m["conclusion"] == "cancelled", "CS did not acknowledge withdrawal")
             return
-        time.sleep(5)
+        if poll + 1 == HANDOFF_POLLS or time.monotonic() + HANDOFF_POLL_SECONDS >= deadline:
+            break
+        time.sleep(HANDOFF_POLL_SECONDS)
     raise ValueError("CS cancellation not confirmed; replacement not dispatched")
 
 
-def select_cs(t, enable_site_retry):
+def select_cs(t, enable_site_retry, deadline):
     # Rotate the first choice on retries, without pinning normal work to any
     # site. A queued reservation is not proof that a site is out of capacity.
     offset = (t["parent"] + t["group"]) % len(CS_SITES)
     target = t.get("scale_set")
     remaining_sites = [*CS_SITES[offset:], *CS_SITES[:offset], None] if enable_site_retry and not target else []
     first_queued = queued_here = last_queue_report = None
-    r, rev, nonce, (j, now) = reserve(t, "cs")
+    r, rev, nonce, (j, now) = reserve(t, "cs", deadline)
     if target:
         print(f"Group {t['group']}: first CS reservation targets {target} — {run_url(r)}", flush=True)
     else:
         print(f"Group {t['group']}: requesting a CS runner — {run_url(r)}", flush=True)
-    while True:
+    while time.monotonic() < deadline:
         route, queued_here = decide(j, now, queued_here)
         if first_queued is None:
             first_queued = queued_here
@@ -682,16 +752,15 @@ def select_cs(t, enable_site_retry):
             return r, rev, nonce, route, first_queued
         threshold = CS_SITE_PROBE_WAIT if "site" in t else CS_SITE_RETRY_AFTER
         if remaining_sites and unassigned(j) and now - queued_here >= threshold:
-            parent_meta(t)
-            child_meta(r, t, "cs", rev)
-            j, now = observe(r, t, "cs")
+            j, now = read_worker(f"CS worker {r} handoff", observe_cs_handoff, r, t, rev, deadline=deadline)
             route, queued_here = decide(j, now, queued_here)
             if route == "cs":
                 return r, rev, nonce, route, first_queued
             if unassigned(j):
                 if now - first_queued >= WAIT:
                     return r, rev, nonce, "idc", first_queued
-                withdraw_cs(r, t, rev)
+                withdraw_cs(r, t, rev, deadline)
+                check(time.monotonic() < deadline, "CS selection deadline exceeded before replacement")
                 next_site = remaining_sites.pop(0)
                 if next_site is None:
                     del t["site"]
@@ -701,17 +770,25 @@ def select_cs(t, enable_site_retry):
                     notice = f"trying CS {next_site.upper()}"
                 # Keep first_queued across the entire sweep and the shared wait.
                 queued_here = None
-                r, rev, nonce, (j, now) = reserve(t, "cs")
+                r, rev, nonce, (j, now) = reserve(t, "cs", deadline)
                 print(f"Group {t['group']}: {notice} — {run_url(r)}", flush=True)
                 continue
         if first_queued is not None and (last_queue_report is None or now - last_queue_report >= PROGRESS_INTERVAL):
             print(f"Group {t['group']}: queued for a CS runner ({int(max(0, now - first_queued))}s) — {run_url(r)}", flush=True)
             last_queue_report = now
-        time.sleep(30)
-        j, now = observe(r, t, "cs")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(30, remaining))
+        if time.monotonic() < deadline:
+            j, now = read_worker(f"CS reservation {r}", observe, r, t, "cs", queued_here is not None,
+                                 deadline=deadline)
+    status = j["status"] if j is not None else "job metadata unavailable"
+    raise TimeoutError(f"CS reservation {r}: selection deadline exceeded ({status})")
 
 
 def choose():
+    deadline = time.monotonic() + SELECTOR_RESERVATION_SECONDS
     attempt = int(os.environ["GITHUB_RUN_ATTEMPT"])
     check(0 < attempt < 1_000_000, "invalid parent attempt")
     t = dict(parent=int(os.environ["GITHUB_RUN_ID"]), attempt=attempt, group=int(os.environ["GROUP"]),
@@ -728,33 +805,37 @@ def choose():
     pool = "cs"
     if initial_pool := choose_initial_scale_set(t):
         t["scale_set"] = initial_pool
-    r, rev, nonce, route, since = select_cs(t, os.environ.get("COVERAGE_CS_SITE_RETRY") == "true")
+    check(time.monotonic() < deadline, "selection deadline exceeded before CS reservation")
+    r, rev, nonce, route, since = select_cs(t, os.environ.get("COVERAGE_CS_SITE_RETRY") == "true", deadline)
     if route == "idc":
         # A concurrently assigned CS worker is still blocked at admit: its nonce
         # was never published. Confirm identity again and cancel ONLY its own run.
-        parent_meta(t)
-        child_meta(r, t, "cs", rev)
+        handoff_deadline = min(deadline, time.monotonic() + HANDOFF_POLLS * HANDOFF_POLL_SECONDS)
+        route = None
         for poll in range(HANDOFF_POLLS):
-            j, now = observe(r, t, "cs")
+            if time.monotonic() >= handoff_deadline:
+                break
+            j, now = read_worker(f"CS worker {r} handoff", observe_cs_handoff, r, t, rev,
+                                 deadline=handoff_deadline)
             route, since = decide(j, now, since)
             if route is not None:
                 break
-            if poll + 1 < HANDOFF_POLLS:
-                time.sleep(HANDOFF_POLL_SECONDS)
-                parent_meta(t)
-                child_meta(r, t, "cs", rev)
-        else:
-            raise ValueError("CS assignment did not settle at handoff; no worker granted")
+            if poll + 1 == HANDOFF_POLLS or time.monotonic() + HANDOFF_POLL_SECONDS >= handoff_deadline:
+                break
+            time.sleep(HANDOFF_POLL_SECONDS)
+        check(route is not None, "CS assignment did not settle at handoff; no worker granted")
         if route == "idc":
-            withdraw_cs(r, t, rev)
+            withdraw_cs(r, t, rev, deadline)
+            check(time.monotonic() < deadline, "selection deadline exceeded before Shanghai reservation")
             t.pop("site", None)
             t.pop("scale_set", None)
             pool = "idc"
-            r, rev, nonce, _ = reserve(t, pool)
+            r, rev, nonce, _ = reserve(t, pool, deadline)
             print(f"Group {t['group']}: switched to Shanghai standby — {run_url(r)}", flush=True)
     # Grant is immutable and costs no extra control token on the worker. Until
     # this point neither pool has been authorized to check out or run PR code.
     parent_meta(t)
+    check(time.monotonic() < deadline, "selection deadline exceeded before publishing a grant")
     Path(os.environ["RUNNER_TEMP"], "grant.json").write_text(json.dumps(
         dict(ticket=t, child=r, pool=pool, nonce=nonce)))
     placement = {"scale_set": t["scale_set"]} if "scale_set" in t else {}
@@ -790,14 +871,16 @@ def artifact(parent, name, filename):
         return json.loads(z.read(filename))
 
 
-def admission_read_delay(error):
-    if isinstance(error, urllib.error.HTTPError) and error.code == 404:
-        error.close()
+def metadata_read_delay(error):
+    if isinstance(error, WorkerIdentityPending):
         return PARENT_POLL_SECONDS
-    delay = parent_retry_delay(error)
     if isinstance(error, urllib.error.HTTPError):
+        delay = PARENT_POLL_SECONDS if error.code == 404 else confirmed_rate_limit_delay(error)
+        if delay is None:
+            delay = parent_retry_delay(error)
         error.close()
-    return delay
+        return delay
+    return parent_retry_delay(error)
 
 
 def admission_artifact(t, name, filename):
@@ -807,7 +890,7 @@ def admission_artifact(t, name, filename):
         try:
             return required_admission_read(artifact, t["parent"], name, filename)
         except OSError as error:
-            delay = admission_read_delay(error)
+            delay = metadata_read_delay(error)
             if poll + 1 == ADMISSION_ARTIFACT_POLLS or time.monotonic() + delay > deadline:
                 raise ValueError("parent admission artifact read unavailable; no PR code executed") from None
             time.sleep(delay)
@@ -826,7 +909,7 @@ def check_grant_selector(t):
         # mandatory selector check after the grant still fails closed.
         cooldown = isinstance(error, urllib.error.HTTPError) and error.code in (403, 429)
         try:
-            delay = admission_read_delay(error)
+            delay = metadata_read_delay(error)
         except urllib.error.HTTPError:
             error.close()
             delay = SELECTOR_RATE_LIMIT_FALLBACK_SECONDS if cooldown else GRANT_SELECTOR_POLL_SECONDS
@@ -843,13 +926,17 @@ def check_grant_selector(t):
     return GRANT_SELECTOR_POLL_SECONDS, False
 
 
+def worker_attempt(r):
+    return one(f"/actions/runs/{r}/attempts/1")
+
+
 def read_previous_grant(r, deadline):
     """Resolve a receipt's worker before deciding whether its group can rerun."""
     for poll in range(PARENT_POLLS):
         try:
             # Only the worker's first attempt can admit a grant. A later
             # GitHub rerun changes the latest run without changing that receipt.
-            m = one(f"/actions/runs/{r}/attempts/1")
+            m = worker_attempt(r)
             check(is_worker_run(r, m), "unrecognized previous grant; no redispatch")
             return m, identity_title(r, m)
         except WorkerIdentityPending as error:
@@ -992,35 +1079,42 @@ def _finish_admission(t, source, head):
 
 
 def revoke():
-    """Stop this selector's worker after the grant or wait step fails."""
-    grant = json.loads(Path(os.environ["RUNNER_TEMP"], "grant.json").read_text())
-    t = grant["ticket"]
-    child = int(os.environ["CHILD"])
+    """Stop this selector's worker when selection, grant, or wait fails."""
+    temp = Path(os.environ["RUNNER_TEMP"])
+    path = temp / "grant.json"
+    verify = child_meta
+    if not path.exists():
+        path = temp / "reservation.json"
+        if not path.exists():
+            return
+        verify = partial(reconcile_child_meta, wait_for_display_title=True)
+    receipt = json.loads(path.read_text())
+    t, child, pool = receipt["ticket"], receipt["child"], receipt["pool"]
+    selected = os.environ.get("CHILD")
     expected = dict(parent=int(os.environ["GITHUB_RUN_ID"]), attempt=int(os.environ["GITHUB_RUN_ATTEMPT"]),
                     group=int(os.environ["GROUP"]), pr=int(os.environ["PR"]),
                     head=os.environ["HEAD"], source=os.environ["SOURCE"])
     check(all(t.get(key) == value for key, value in expected.items())
-          and grant["child"] == child and grant["pool"] in POOLS
-          and digest(grant["nonce"]) == t["key"], "invalid selector grant")
+          and type(child) is int and child > 0 and (not selected or selected == str(child))
+          and pool in POOLS and digest(receipt["nonce"]) == t["key"], "invalid selector receipt")
+    deadline = time.monotonic() + WORKER_READ_RECOVERY_SECONDS
     for attempt in range(3):
-        try:
-            meta = child_meta(child, t, grant["pool"], t["revision"])
-            if meta["status"] == "completed":
-                print(f"selected coverage worker {child} is already complete", flush=True)
-                return
-            check(meta["status"] in ("queued", "pending", "requested", "waiting", "in_progress"),
-                  "selected worker has an unexpected status")
-            api(f"/actions/runs/{child}/cancel", {})
-            print(f"cancellation requested for selected coverage worker {child}", flush=True)
+        meta = read_worker(f"revoking worker {child}", verify, child, t, pool, t["revision"], deadline=deadline)
+        if meta["status"] == "completed":
+            print(f"coverage worker {child} is already complete", flush=True)
             return
-        except urllib.error.HTTPError as error:
-            if error.code not in (409, 429) and error.code < 500:
+        check(meta["status"] in ("queued", "pending", "requested", "waiting", "in_progress"),
+              "worker has an unexpected status")
+        try:
+            api(f"/actions/runs/{child}/cancel", {})
+            print(f"cancellation requested for coverage worker {child}", flush=True)
+            return
+        except OSError as error:
+            if (attempt == 2 or (isinstance(error, urllib.error.HTTPError)
+                                 and error.code not in (409, 429) and error.code < 500)):
                 raise
-            if attempt == 2:
-                raise
-        except OSError:
-            if attempt == 2:
-                raise
+            if isinstance(error, urllib.error.HTTPError):
+                error.close()
         time.sleep(2)
 
 
@@ -1073,9 +1167,10 @@ def wait():
     last_report = None
     next_details = None
     while True:
-        m = run(r)
+        m = read_worker(f"{pool} worker {r} result", worker_attempt, r)
+        check(m["id"] == r and m["run_attempt"] == 1, "selected worker attempt identity mismatch")
         if m["status"] == "completed":
-            check(m["run_attempt"] == 1 and m["conclusion"] == "success", "selected coverage group did not pass")
+            check(m["conclusion"] == "success", "selected coverage group did not pass")
             print(f"Group {group}: Coverage UT passed — {run_url(r)}", flush=True)
             return
         now = time.monotonic()
