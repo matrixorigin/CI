@@ -1104,6 +1104,36 @@ class Queue(unittest.TestCase):
     def test_assigned_during_final_read_is_never_cancelled(self):
         self.scenario([(self.q,1),(self.q,3601),(self.active,3602)],False,1,('cs',111))
 
+    def test_queue_and_handoff_recover_without_redispatch(self):
+        unavailable = urllib.error.HTTPError("/jobs", 503, "not available", None, None)
+        unindexed = s.WorkerIdentityPending("attempt jobs returned HTTP 404")
+        self.scenario([(self.q, 1), unavailable, (self.q, 3601), unindexed, (self.active, 3602)],
+                      False, 1, ('cs', 111))
+
+    def test_unsettled_cs_reservation_hits_selection_deadline(self):
+        now = [0]
+        observation = (dict(self.q, status="pending"), 0)
+        with patch.object(s.time, "monotonic", side_effect=lambda: now[0]), \
+             patch.object(s.time, "sleep", side_effect=lambda delay: now.__setitem__(0, now[0] + delay)), \
+             patch.object(s, "reserve", return_value=(111, "b"*40, "nonce", observation)) as reserve, \
+             patch.object(s, "observe", return_value=observation) as observe:
+            with self.assertRaisesRegex(TimeoutError, r"CS reservation 111: selection deadline exceeded \(pending\)"):
+                s.select_cs(dict(parent=42, group=0), False, deadline=65)
+        self.assertEqual(now[0], 65)
+        self.assertEqual(observe.call_count, 2)
+        reserve.assert_called_once()
+
+    def test_withdrawal_waits_for_cancellation_after_a_read_failure(self):
+        path = "/actions/runs/111"
+        unavailable = urllib.error.HTTPError(path, 503, "not available", None, None)
+        snapshots = [unavailable, {"status": "queued"}, {"status": "completed", "conclusion": "cancelled"}]
+        with patch.object(s, "api") as post, patch.object(s, "child_meta", side_effect=snapshots) as read, \
+             patch.object(s.time, "sleep") as sleep:
+            s.withdraw_cs(111, {}, "b"*40, deadline=s.time.monotonic() + 60)
+        post.assert_called_once_with(path + "/cancel", {})
+        self.assertEqual([call.args[0] for call in read.call_args_list], [111] * 3)
+        self.assertEqual(sleep.call_count, 2)
+
     def test_queued_assignment_metadata_can_settle_before_grant(self):
         transitional = dict(self.q,runner_id=123,runner_name=self.active['runner_name'])
         self.scenario([(self.q,1),(self.q,3601),(transitional,3602),(self.active,3603)],
@@ -1353,6 +1383,51 @@ class Queue(unittest.TestCase):
 
 
 class Progress(unittest.TestCase):
+    def test_wait_recovers_status_on_the_original_attempt(self):
+        path = "/actions/runs/123/attempts/1"
+        ready = dict(id=123, status="completed", run_attempt=1, conclusion="success")
+        errors = [urllib.error.HTTPError(path, code, "not available", None, None) for code in (404, 503)]
+        with patch.dict(os.environ, dict(CHILD="123", GROUP="1", POOL="cs")), \
+             patch.object(s, "one", side_effect=[*errors, ready]) as read, \
+             patch.object(s.time, "sleep") as sleep:
+            s.wait()
+        self.assertEqual([call.args for call in read.call_args_list], [(path,)] * 3)
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_worker_read_honors_rate_limit_and_phase_deadline(self):
+        path = "/actions/runs/123/attempts/1"
+        for code, headers, deadline, success, expected_sleep in (
+            (429, {"Retry-After": "60"}, 85, True, [60]),
+            (429, {"Retry-After": "60"}, 50, False, []),
+            (403, {}, 85, False, []),
+            (503, {}, 24, False, [5, 10]),
+        ):
+            now = [0]
+            errors = [urllib.error.HTTPError(path, code, "not available", headers, None)
+                      for _ in range(1 if success else 3)]
+            responses = errors + ([{"status": "completed"}] if success else [])
+            with self.subTest(code=code, deadline=deadline), patch.object(s.time, "monotonic", side_effect=lambda: now[0]), \
+                 patch.object(s.time, "sleep", side_effect=lambda delay: now.__setitem__(0, now[0] + delay)) as sleep, \
+                 patch.object(s, "one", side_effect=responses) as read:
+                if success:
+                    self.assertEqual(s.read_worker("worker result", s.one, path, deadline=deadline),
+                                     {"status": "completed"})
+                else:
+                    expected_error = urllib.error.HTTPError if code == 403 else TimeoutError
+                    with self.assertRaises(expected_error):
+                        s.read_worker("worker result", s.one, path, deadline=deadline)
+                self.assertEqual([call.args[0] for call in sleep.call_args_list], expected_sleep)
+                self.assertEqual([call.args for call in read.call_args_list], [(path,)] * (len(expected_sleep) + 1))
+
+    def test_worker_read_rejects_response_after_handoff_deadline(self):
+        with patch.object(s.time, "monotonic", side_effect=[0, 11]), \
+             patch.object(s, "one", return_value={"status": "completed"}) as read, \
+             patch.object(s.time, "sleep") as sleep:
+            with self.assertRaisesRegex(TimeoutError, "handoff: phase deadline exceeded"):
+                s.read_worker("handoff", s.one, "/runs/123", deadline=10)
+        read.assert_called_once()
+        sleep.assert_not_called()
+
     def test_live_worker_link_and_known_phases(self):
         for pool, runner, step, site in (
                 ("cs", "cs-jed-nc-n1-pr-v1-abc-runner-def", "Run coverage unit tests", "JED"),
@@ -1372,8 +1447,8 @@ class Progress(unittest.TestCase):
         env = dict(CHILD="123", GROUP="1", POOL="cs")
         for conclusion in ("success", "failure"):
             with self.subTest(conclusion=conclusion), patch.dict(os.environ, env), \
-                 patch.object(s, "run", side_effect=[dict(status="in_progress"),
-                                                    dict(status="completed", run_attempt=1, conclusion=conclusion)]), \
+                 patch.object(s, "worker_attempt", side_effect=[dict(id=123, run_attempt=1, status="in_progress"),
+                     dict(id=123, status="completed", run_attempt=1, conclusion=conclusion)]), \
                  patch.object(s, "worker_progress", side_effect=OSError("do not print API details")), \
                  patch.object(s.time, "sleep"), patch("builtins.print") as out:
                 if conclusion == "success":
@@ -1387,9 +1462,10 @@ class Progress(unittest.TestCase):
     def test_job_details_are_rate_limited_but_child_result_is_polled_each_time(self):
         interval = s.JOB_DETAIL_INTERVAL
         times = [0, interval-1, interval, interval+1]
-        finish = dict(status="completed", run_attempt=1, conclusion="success")
+        finish = dict(id=123, status="completed", run_attempt=1, conclusion="success")
         with patch.dict(os.environ, dict(CHILD="123", GROUP="1", POOL="cs")), \
-             patch.object(s, "run", side_effect=[dict(status="in_progress")]*len(times)+[finish]) as runs, \
+             patch.object(s, "worker_attempt", side_effect=[
+                 dict(id=123, run_attempt=1, status="in_progress")] * len(times) + [finish]) as runs, \
              patch.object(s.time, "monotonic", side_effect=times), patch.object(s.time, "sleep"), \
              patch.object(s, "worker_progress", return_value=("running", s.run_url(123))) as details, \
              patch("builtins.print"):
@@ -1471,18 +1547,18 @@ class ShortWorkerTitle(unittest.TestCase):
         self.assertTrue(any("HTTP 404" in call.args[0] for call in log.call_args_list))
         self.assertFalse(any(pending["display_title"] in call.args[0] for call in log.call_args_list))
 
-    def test_dispatch_retries_short_title_attempt_jobs_404_on_returned_id(self):
+    def test_dispatch_retries_transient_attempt_jobs_reads_on_returned_id(self):
         path = "/actions/runs/51/attempts/1/jobs?per_page=100"
-        missing = urllib.error.HTTPError(path, 404, "not found", None, None)
+        errors = [urllib.error.HTTPError(path, code, "not available", None, None) for code in (404, 503)]
         ready = {"total_count": 1, "jobs": [self.marker]}
         with patch.object(s, "parent_meta"), patch.object(s, "api", return_value=({"workflow_run_id": 51}, 0)) as post, \
-             patch.object(s, "run", return_value=self.meta) as run, patch.object(s, "one", side_effect=[missing, ready]) as get, \
+             patch.object(s, "run", return_value=self.meta) as run, patch.object(s, "one", side_effect=[*errors, ready]) as get, \
              patch.object(s.time, "sleep") as sleep:
             self.assertEqual(s.dispatch(self.ticket, "cs", "b"*40), (51, self.first_observation))
-        self.assertEqual([call.args[0] for call in get.call_args_list], [path, path])
-        self.assertEqual([call.args[0] for call in run.call_args_list], [51, 51])
+        self.assertEqual([call.args[0] for call in get.call_args_list], [path] * 3)
+        self.assertEqual([call.args[0] for call in run.call_args_list], [51] * 3)
         post.assert_called_once()
-        sleep.assert_called_once_with(5)
+        self.assertEqual([call.args for call in sleep.call_args_list], [(5,)] * 2)
 
     def test_selector_does_not_publish_a_grant_after_persistent_404_or_wrong_title(self):
         for problem in ("run 404", "wrong long title"):
