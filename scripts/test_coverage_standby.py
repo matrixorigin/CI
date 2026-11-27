@@ -220,8 +220,8 @@ class ParentAdmission(unittest.TestCase):
             with self.subTest(active=active), tempfile.TemporaryDirectory() as tmp, \
                  patch.dict(os.environ,{**env,'RUNNER_TEMP':tmp}), \
                  patch.object(s,'run',return_value=dict(self.p,status='queued')), \
-                 patch.object(s,'one',side_effect=metadata), patch.object(s,'dispatch',return_value=51) as dispatch, \
-                 patch.object(s,'observe',return_value=(assigned,1)), patch.object(s,'output'), \
+                 patch.object(s,'one',side_effect=metadata), patch.object(s,'dispatch',return_value=(51,(assigned,1))) as dispatch, \
+                 patch.object(s,'output'), \
                  patch.object(s,'PARENT_POLLS',2), patch.object(s.time,'sleep'):
                 if active:
                     s.choose()
@@ -315,11 +315,19 @@ class ParentAdmission(unittest.TestCase):
             return urllib.error.HTTPError('/actions/runs/51', 404, 'not found', None, None)
 
         for resolves in (True, False):
-            reads = [missing(), self.worker] if resolves else [missing() for _ in range(s.WORKER_IDENTITY_POLLS)]
+            now = 0
+            interval = s.WORKER_METADATA_POLL_SECONDS
+            reads = [missing(), self.worker if resolves else missing()]
+
+            def sleep(seconds):
+                nonlocal now
+                now += seconds
+
             with self.subTest(resolves=resolves), patch.dict(os.environ, env), \
                  patch.object(s, 'parent_meta') as parent, patch.object(s, 'run', side_effect=reads) as get, \
                  patch.object(s, 'artifact') as artifact, patch.object(s, 'one', return_value=pr), \
-                 patch.object(s.time, 'sleep') as sleep:
+                 patch.object(s, 'selector_job', return_value=None), patch.object(s, 'WORKER_ADMISSION_SECONDS', 2 * interval), \
+                 patch.object(s.time, 'monotonic', side_effect=lambda: now), patch.object(s.time, 'sleep', side_effect=sleep):
                 if resolves:
                     def read(t_parent, name, _filename):
                         self.assertEqual(t_parent, self.t['parent'])
@@ -335,7 +343,140 @@ class ParentAdmission(unittest.TestCase):
                         s.admit()
                     artifact.assert_not_called()
                 self.assertEqual([call.args[0] for call in get.call_args_list], [51] * len(reads))
-                self.assertEqual(sleep.call_count, len(reads) - 1)
+                self.assertEqual(now, interval if resolves else 2 * interval)
+
+    def test_worker_started_first_can_obtain_the_later_selector_grant(self):
+        env = dict(TICKET=json.dumps(self.t), GROUP='0', HEAD=self.sha, SOURCE=self.src, POOL='cs',
+                   GITHUB_RUN_ATTEMPT='1', GITHUB_RUN_ID='51')
+        proof = dict(schema=2, allowed='true', verified_membership_http_status=204, pr_number='32922',
+                     author='dev', head_repository=self.src, head_sha=self.sha, base_ref='main')
+        pr = dict(number=32922, user={'login': 'dev'}, state='open', draft=False,
+                  head={'repo': {'full_name': self.src, 'archived': False}, 'sha': self.sha},
+                  base={'repo': {'full_name': s.REPO}, 'ref': 'main'}, labels=[])
+        for fails in (False, True):
+            now = 0
+            worker_reads, selector_reads, artifact_reads = [], [], []
+
+            def sleep(seconds):
+                nonlocal now
+                now += seconds
+
+            def run(run_id):
+                if run_id == 42:
+                    return self.p  # The parent stays active even if this group's selector failed.
+                self.assertEqual(run_id, 51)
+                worker_reads.append(now)
+                if now < 75:  # after the old worker bound of 55s, before selector's 115s
+                    raise urllib.error.HTTPError('/actions/runs/51', 404, 'unindexed', None, None)
+                return self.worker
+
+            def one(path):
+                if path == '/pulls/32922':
+                    return pr
+                self.assertEqual(path, '/actions/runs/42/attempts/1/jobs?per_page=100&page=1')
+                selector_reads.append(now)
+                selector = self.selector()
+                if fails and now >= 40:
+                    selector.update(status='completed', conclusion='failure', steps=[
+                        {'name': s.GRANT_STEP, 'conclusion': 'skipped'},
+                    ])
+                return {'jobs': [self.selector(group=1), selector]}
+
+            def artifact(parent, name, filename):
+                self.assertEqual(parent, 42)
+                self.assertGreaterEqual(now, 75, 'read a grant before verifying the worker identity')
+                artifact_reads.append((now, name))
+                if name == 'coverage-admit-51':
+                    return self.grant if now >= 85 else None
+                self.assertEqual((name, filename), (s.proof_name(self.t), 'real-pr-authorization.json'))
+                return proof
+
+            with self.subTest(selector_fails=fails), patch.dict(os.environ, env), \
+                 patch.object(s, 'run', side_effect=run), patch.object(s, 'one', side_effect=one), \
+                 patch.object(s, 'artifact', side_effect=artifact), \
+                 patch.object(s.time, 'monotonic', side_effect=lambda: now), patch.object(s.time, 'sleep', side_effect=sleep):
+                if fails:
+                    with self.assertRaisesRegex(ValueError, r'group 0 selector completed \(failure\).*no PR code executed'):
+                        s.admit()
+                    self.assertEqual(now, 60)
+                    self.assertEqual(artifact_reads, [])
+                else:
+                    s.admit()
+                    self.assertEqual(now, 85)
+                    self.assertEqual(artifact_reads, [(75, 'coverage-admit-51'), (85, 'coverage-admit-51'),
+                                                      (85, s.proof_name(self.t))])
+                    self.assertEqual(selector_reads[-1], 85, 'grant must still be checked against a live selector')
+                self.assertEqual(worker_reads[0], 0)
+                self.assertEqual(worker_reads[-1], 60 if fails else 75)
+                self.assertEqual(selector_reads[:3], [0, 30, 60])
+
+    def test_first_cs_reservation_404_shares_the_dispatch_reconciliation_budget(self):
+        cases = (
+            ('ready after first 404', 0, 1, 2, None),
+            ('last allowed poll can recover', 2, 1, 2, None),
+            ('persistent 404', 0, 4, 4, (ValueError, 'attempt jobs lookup returned HTTP 404; no worker granted')),
+            ('title and jobs share the same bound', 2, 2, 2,
+             (ValueError, 'attempt jobs lookup returned HTTP 404; no worker granted')),
+            ('forbidden jobs read', 0, 0, 1, (urllib.error.HTTPError, '403')),
+            ('wrong job attempt', 0, 0, 1, (ValueError, 'wrong job identity')),
+        )
+        for name, delayed_title, missing_jobs, expected_jobs, error in cases:
+            now = 0
+            dispatched, run_reads, job_reads = [], [], []
+            worker_job = dict(id=9, name='cs / Coverage reservation CS group 0', run_id=51, run_attempt=1,
+                              status='in_progress', conclusion=None, labels=[s.POOLS['cs']], runner_id=3,
+                              runner_name='cs-jed-nc-n1-pr-v1-abc-runner-def')
+
+            def sleep(seconds):
+                nonlocal now
+                now += seconds
+
+            def api(path, data=None):
+                if data is not None:
+                    self.assertEqual(path, f'/actions/workflows/{s.WORKER}/dispatches')
+                    self.assertEqual(data['inputs']['pool'], 'cs')
+                    dispatched.append(json.loads(data['inputs']['ticket']))
+                    return {'workflow_run_id': 51}, now
+                if path == '/actions/runs/42':
+                    return self.p, now
+                if path == f'/git/ref/heads/{s.WORKER_REF}':
+                    return {'object': {'sha': self.t['revision']}}, now
+                if path == '/actions/runs/51':
+                    run_reads.append(now)
+                    display = 'unindexed' if len(run_reads) <= delayed_title else s.title(dispatched[0], 'cs')
+                    return dict(self.worker, display_title=display), now
+                self.assertEqual(path, '/actions/runs/51/attempts/1/jobs?per_page=100')
+                job_reads.append(now)
+                if len(job_reads) <= missing_jobs:
+                    raise urllib.error.HTTPError(path, 404, 'unindexed', None, None)
+                if name == 'forbidden jobs read':
+                    raise urllib.error.HTTPError(path, 403, 'forbidden', None, None)
+                if name == 'wrong job attempt':
+                    return {'total_count': 1, 'jobs': [dict(worker_job, run_attempt=2)]}, now
+                return {'total_count': 1, 'jobs': [worker_job]}, now
+
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                env = {**self.selector_env, 'RUNNER_TEMP': tmp, 'GITHUB_OUTPUT': str(Path(tmp, 'outputs')),
+                       'COVERAGE_CS_SITE_RETRY': 'true'}
+                with patch.dict(os.environ, env), patch.object(s, 'api', side_effect=api), \
+                     patch.object(s, 'DISPATCH_METADATA_POLLS', 4), \
+                     patch.object(s.time, 'monotonic', side_effect=lambda: now), patch.object(s.time, 'sleep', side_effect=sleep):
+                    if error is None:
+                        s.choose()
+                        grant = json.loads(Path(tmp, 'grant.json').read_text())
+                        self.assertEqual((grant['child'], grant['pool'], grant['ticket']), (51, 'cs', dispatched[0]))
+                        self.assertEqual(s.digest(grant['nonce']), dispatched[0]['key'])
+                    else:
+                        with self.assertRaisesRegex(*error) as raised:
+                            s.choose()
+                        if isinstance(raised.exception, urllib.error.HTTPError):
+                            raised.exception.close()
+                        self.assertFalse(Path(tmp, 'grant.json').exists())
+                        self.assertFalse(Path(tmp, 'outputs').exists())
+                self.assertEqual(len(dispatched), 1)
+                self.assertEqual(len(job_reads), expected_jobs)
+                self.assertEqual(len(run_reads), delayed_title + expected_jobs)
+                self.assertEqual(job_reads[0], delayed_title * s.WORKER_METADATA_POLL_SECONDS)
 
     def test_ungranted_worker_stops_when_its_exact_selector_failed(self):
         env = dict(TICKET=json.dumps(self.t), GROUP='0', HEAD=self.sha, SOURCE=self.src, POOL='cs',
@@ -361,15 +502,22 @@ class ParentAdmission(unittest.TestCase):
             {'jobs': [self.selector(status='completed', conclusion=None)]},
             urllib.error.HTTPError('https://api.github.com', 404, 'not yet indexed', None, None),
         ):
+            now = 0
+
+            def sleep(seconds):
+                nonlocal now
+                now += seconds
+
             with self.subTest(observation=observation), patch.dict(os.environ, env), \
                  patch.object(s, 'run', return_value=self.p), patch.object(s, 'child_meta'), \
-                 patch.object(s.time, 'sleep') as sleep, patch.object(s, 'GRANT_POLLS', 2), \
+                 patch.object(s.time, 'sleep', side_effect=sleep), patch.object(s.time, 'monotonic', side_effect=lambda: now), \
+                 patch.object(s, 'WORKER_ADMISSION_SECONDS', 2 * s.GRANT_POLL_SECONDS), \
                  patch.object(s, 'artifact', return_value=None) as artifact, \
                  patch.object(s, 'one', side_effect=[observation]) as one:
                 with self.assertRaisesRegex(ValueError, '^no grant; no PR code executed$'):
                     s.admit()
                 self.assertEqual(artifact.call_count, 2)
-                self.assertEqual(sleep.call_count, 2)
+                self.assertEqual(now, 2 * s.GRANT_POLL_SECONDS)
                 one.assert_called_once()
 
     def test_admission_artifact_retries_transient_reads_and_checks_parent(self):
@@ -580,11 +728,17 @@ class Queue(unittest.TestCase):
                     status='completed' if stopped else 'queued')
             with patch.object(s,'parent_meta'), patch.object(s,'api',side_effect=post), \
                  patch.object(s,'one',side_effect=[{'object':{'sha':x}} for x in (rev1,rev2)]), \
-                 patch.object(s,'run',side_effect=metadata):
-                r, rev, nonce = s.reserve(t, pool)
+                 patch.object(s,'run',side_effect=metadata), patch.object(s,'observe',return_value=(None, 0)) as observe:
+                r, rev, nonce, first = s.reserve(t, pool)
             self.assertEqual(events, ['dispatch','cancel','confirmed','dispatch'])
             self.assertEqual((r,rev,s.digest(nonce)),(102,rev2,dispatched[1]['key']))
             self.assertNotEqual(dispatched[0]['key'],dispatched[1]['key'])
+            if pool == 'cs':
+                observe.assert_called_once_with(102, t, 'cs')
+                self.assertEqual(first, (None, 0))
+            else:
+                observe.assert_not_called()
+                self.assertIsNone(first)
 
     def test_revision_retry_fails_closed(self):
         t = dict(parent=1, attempt=1, group=0, head='a'*40)
@@ -649,8 +803,8 @@ class Queue(unittest.TestCase):
              patch.object(s,'parent_meta',return_value={'head_sha':'a'*40,'head_repository':{'full_name':'fork/matrixone'}}), \
              patch.object(s,'one',side_effect=[{'object':{'sha':sha}} for sha in revisions]), \
              patch.object(s,'require_previous_grants_terminal') as previous, \
-             patch.object(s,'dispatch',side_effect=[111,222]) as launch, \
-             patch.object(s,'observe',side_effect=observations), \
+             patch.object(s,'dispatch',side_effect=[(111,observations[0]),(222,None)]) as launch, \
+             patch.object(s,'observe',side_effect=observations[1:]), \
              patch.object(s,'child_meta',return_value={'status':'completed','conclusion':'cancelled'}), \
              patch.object(s,'api') as api, patch.object(s.time,'sleep'), patch.object(s,'output'):
             s.choose()
@@ -687,8 +841,8 @@ class Queue(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,{**self.env,'RUNNER_TEMP':tmp}), \
              patch.object(s,'HANDOFF_POLLS',3), patch.object(s,'parent_meta'), \
              patch.object(s,'one',return_value={'object':{'sha':'b'*40}}), \
-             patch.object(s,'dispatch',return_value=111), \
-             patch.object(s,'observe',side_effect=[(self.q,1),(self.q,3601)]+[(transitional,3602)]*3), \
+             patch.object(s,'dispatch',return_value=(111,(self.q,1))), \
+             patch.object(s,'observe',side_effect=[(self.q,3601)]+[(transitional,3602)]*3), \
              patch.object(s,'child_meta'), patch.object(s,'api') as api, patch.object(s.time,'sleep'):
             with self.assertRaisesRegex(ValueError,'did not settle'):
                 s.choose()
@@ -702,12 +856,13 @@ class Queue(unittest.TestCase):
         events = []
         withdrawn = set()
         rev = "b" * 40
+        snapshots = iter(observations)
 
         def reserve(ticket, pool):
             run_id = 1 + sum(event[0] == "reserve" for event in events)
             events.append(("reserve", run_id, pool, ticket.get("site")))
             ticket.update(revision=rev, key=s.digest(f"test-nonce-{run_id}"))
-            return run_id, rev, f"test-nonce-{run_id}"
+            return run_id, rev, f"test-nonce-{run_id}", next(snapshots) if pool == "cs" else None
 
         def cancel(path, data):
             run_id = int(path.split("/")[-2])
@@ -732,7 +887,7 @@ class Queue(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {
                 **self.env, "RUNNER_TEMP": tmp, "COVERAGE_CS_SITE_RETRY": "true" if enabled else "false",
-        }), patch.object(s, "reserve", side_effect=reserve), patch.object(s, "observe", side_effect=observations), \
+        }), patch.object(s, "reserve", side_effect=reserve), patch.object(s, "observe", side_effect=lambda *_: next(snapshots)), \
              patch.object(s, "parent_meta"), patch.object(s, "child_meta", side_effect=metadata), \
              patch.object(s, "api", side_effect=cancel), patch.object(s, "output"), patch.object(s.time, "sleep"):
             if expected_error is not None:
@@ -825,8 +980,9 @@ class Queue(unittest.TestCase):
         t = dict(parent=1, attempt=1, group=1, head='a'*40, key='b'*64)
         with patch.object(s, 'WORKER_REF', 'staging'), patch.object(s, 'parent_meta'), \
              patch.object(s, 'child_meta'), patch.object(s, 'api', return_value=({},0)) as post, \
+             patch.object(s, 'observe', return_value=(None, 0)), \
              patch.object(s, 'one', return_value={'workflow_runs':[{'id':123,'display_title':s.title(t,'cs')}]}) as get:
-            self.assertEqual(s.dispatch(t,'cs','c'*40),123)
+            self.assertEqual(s.dispatch(t,'cs','c'*40),(123,(None,0)))
             self.assertEqual(post.call_count,1)
             self.assertEqual(post.call_args.args[1]['ref'],'staging')
             self.assertIn('branch=staging',get.call_args.args[0])
@@ -920,6 +1076,12 @@ class ShortWorkerTitle(unittest.TestCase):
                          display_title="GROUP0")
         self.marker = dict(run_id=51, run_attempt=1, status="completed", conclusion="skipped",
                            name=s.title(self.ticket, "cs")+s.IDENTITY_SUFFIX)
+        # These tests isolate identity reconciliation; the selector test above
+        # exercises the real first attempt-jobs read and passes its snapshot onward.
+        self.first_observation = (None, 0)
+        observation = patch.object(s, 'observe', return_value=self.first_observation)
+        self.addCleanup(observation.stop)
+        observation.start()
 
     def test_exact_identity_still_required(self):
         self.assertEqual(s.short_title(self.ticket), "GROUP0")
@@ -950,14 +1112,14 @@ class ShortWorkerTitle(unittest.TestCase):
             return {"total_count": 1, "jobs": [wrong_marker if "/52/" in path else self.marker]}
         with patch.object(s, "parent_meta"), patch.object(s, "api", return_value=({}, 0)) as post, \
              patch.object(s, "one", side_effect=read), patch.object(s, "run", return_value=self.meta):
-            self.assertEqual(s.dispatch(self.ticket, "cs", "b"*40), 51)
+            self.assertEqual(s.dispatch(self.ticket, "cs", "b"*40), (51, self.first_observation))
             post.assert_called_once()
 
     def test_dispatch_requests_run_id_and_checks_the_returned_worker(self):
         with patch.object(s, "parent_meta"), patch.object(s, "api", return_value=({"workflow_run_id": 51}, 0)) as post, \
              patch.object(s, "one", return_value={"total_count": 1, "jobs": [self.marker]}) as lookup, \
              patch.object(s, "run", return_value=self.meta):
-            self.assertEqual(s.dispatch(self.ticket, "cs", "b"*40), 51)
+            self.assertEqual(s.dispatch(self.ticket, "cs", "b"*40), (51, self.first_observation))
             post.assert_called_once()
             self.assertIs(post.call_args.args[1]["return_run_details"], True)
             lookup.assert_called_once_with("/actions/runs/51/attempts/1/jobs?per_page=100")
@@ -970,7 +1132,7 @@ class ShortWorkerTitle(unittest.TestCase):
         with patch.object(s, "parent_meta"), patch.object(s, "api", return_value=({"workflow_run_id": 51}, 0)) as post, \
              patch.object(s, "one", side_effect=[lookup_error, untitled, pending, ready]) as get, \
              patch.object(s.time, "sleep") as sleep, patch("builtins.print") as log:
-            self.assertEqual(s.dispatch(self.ticket, "cs", "b"*40), 51)
+            self.assertEqual(s.dispatch(self.ticket, "cs", "b"*40), (51, self.first_observation))
         self.assertEqual([call.args[0] for call in get.call_args_list], ["/actions/runs/51"] * 4)
         post.assert_called_once()
         self.assertEqual(sleep.call_count, 3)
@@ -984,7 +1146,7 @@ class ShortWorkerTitle(unittest.TestCase):
         with patch.object(s, "parent_meta"), patch.object(s, "api", return_value=({"workflow_run_id": 51}, 0)) as post, \
              patch.object(s, "run", return_value=self.meta) as run, patch.object(s, "one", side_effect=[missing, ready]) as get, \
              patch.object(s.time, "sleep") as sleep:
-            self.assertEqual(s.dispatch(self.ticket, "cs", "b"*40), 51)
+            self.assertEqual(s.dispatch(self.ticket, "cs", "b"*40), (51, self.first_observation))
         self.assertEqual([call.args[0] for call in get.call_args_list], [path, path])
         self.assertEqual([call.args[0] for call in run.call_args_list], [51, 51])
         post.assert_called_once()
@@ -1052,7 +1214,7 @@ class ShortWorkerTitle(unittest.TestCase):
         with patch.object(s, "parent_meta"), patch.object(s, "api", return_value=({}, 0)) as post, \
              patch.object(s, "one", return_value={"workflow_runs": [ready]}) as find, \
              patch.object(s, "run", side_effect=[missing, ready]) as run, patch.object(s.time, "sleep") as sleep:
-            self.assertEqual(s.dispatch(self.ticket, "cs", "b"*40), 51)
+            self.assertEqual(s.dispatch(self.ticket, "cs", "b"*40), (51, self.first_observation))
         post.assert_called_once()
         find.assert_called_once()
         self.assertEqual([call.args[0] for call in run.call_args_list], [51, 51])
@@ -1063,7 +1225,7 @@ class ShortWorkerTitle(unittest.TestCase):
         with patch.object(s, "parent_meta"), patch.object(s, "api", return_value=({"workflow_run_id": 51}, 0)) as post, \
              patch.object(s, "one", side_effect=[{"total_count": 1, "jobs": [m]} for m in (queued, self.marker)]), \
              patch.object(s, "run", return_value=self.meta), patch.object(s.time, "sleep") as sleep:
-            self.assertEqual(s.dispatch(self.ticket, "cs", "b"*40), 51)
+            self.assertEqual(s.dispatch(self.ticket, "cs", "b"*40), (51, self.first_observation))
             post.assert_called_once()
             sleep.assert_called_once_with(5)
         for changes in (dict(run_id=90), dict(run_attempt=2), dict(conclusion="success")):
@@ -1098,7 +1260,7 @@ class ShortWorkerTitle(unittest.TestCase):
                         s.dispatch(self.ticket, "cs", "b"*40)
                     metadata.assert_not_called()
                 else:
-                    self.assertEqual(s.dispatch(self.ticket, "cs", "b"*40), 51)
+                    self.assertEqual(s.dispatch(self.ticket, "cs", "b"*40), (51, self.first_observation))
                     metadata.assert_called_once_with(51)
                 post.assert_called_once()
                 sleep.assert_not_called()

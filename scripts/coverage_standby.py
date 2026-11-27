@@ -33,11 +33,11 @@ JOB_DETAIL_INTERVAL = 120
 HANDOFF_POLLS = 60
 HANDOFF_POLL_SECONDS = 5
 DISPATCH_METADATA_POLLS = 24
-WORKER_IDENTITY_POLLS = 12
 WORKER_METADATA_POLL_SECONDS = 5
+# One deadline for both identity and grant, inside the workflow's 20-minute step.
+WORKER_ADMISSION_SECONDS = 19 * 60
 ADMISSION_ARTIFACT_POLLS = 4
 ADMISSION_ARTIFACT_WINDOW_SECONDS = 30
-GRANT_POLLS = 108
 GRANT_POLL_SECONDS = 10
 GRANT_SELECTOR_POLL_SECONDS = 30
 
@@ -319,7 +319,13 @@ def unassigned(job):
 
 
 def observe(r, t, pool):
-    data, now = api(f"/actions/runs/{r}/attempts/1/jobs?per_page=100")
+    try:
+        data, now = api(f"/actions/runs/{r}/attempts/1/jobs?per_page=100")
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            raise
+        error.close()
+        raise WorkerIdentityPending("worker attempt jobs lookup returned HTTP 404") from error
     check(len(data["jobs"]) == data["total_count"], "incomplete jobs response")
     target = []
     for j in data["jobs"]:
@@ -357,6 +363,7 @@ def decide(job, now, since):
 
 
 def dispatch(t, pool, revision):
+    """Return the exact dispatched ID and its first CS observation (IDC: None)."""
     parent_meta(t)
     # At most one POST. If the response is lost, fail closed; no blind retries.
     body, dispatched_at = api(f"/actions/workflows/{WORKER}/dispatches", {
@@ -367,6 +374,7 @@ def dispatch(t, pool, revision):
     # A plain GROUP0/GROUP1 is shared across PRs. The dispatch time bound is
     # just a discovery filter; always compare the full identity below.
     recent = datetime.fromtimestamp(dispatched_at - 60, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    deadline = time.monotonic() + DISPATCH_METADATA_POLLS * WORKER_METADATA_POLL_SECONDS
     pending = None
     reported = set()
     for poll in range(DISPATCH_METADATA_POLLS):
@@ -396,6 +404,9 @@ def dispatch(t, pool, revision):
         if r:
             try:
                 reconcile_child_meta(r, t, pool, revision, wait_for_display_title=(r == returned_id))
+                # A legacy full title can be indexed before its attempt jobs.
+                # Keep the first CS observation in this same read-only budget.
+                first_observation = observe(r, t, pool) if pool == "cs" else None
             except WorkerIdentityPending as error:
                 pending = str(error)
                 if pending not in reported:
@@ -403,12 +414,17 @@ def dispatch(t, pool, revision):
                     # Do not log the ticket, raw response, or API-supplied title.
                     print(f"worker {r} metadata not ready: {pending}; no grant yet", flush=True)
             else:
+                check(time.monotonic() < deadline, "dispatch metadata window elapsed; no worker granted")
                 print(f"{pool} group {t['group']}: https://github.com/{REPO}/actions/runs/{r}", flush=True)
-                return r
-        if poll + 1 < DISPATCH_METADATA_POLLS:
-            time.sleep(WORKER_METADATA_POLL_SECONDS)
+                return r, first_observation
+        if poll + 1 == DISPATCH_METADATA_POLLS or time.monotonic() + WORKER_METADATA_POLL_SECONDS >= deadline:
+            break
+        time.sleep(WORKER_METADATA_POLL_SECONDS)
+        parent_meta(t)
+        if time.monotonic() >= deadline:
+            break
     if pending is not None:
-        raise ValueError(f"worker {r} metadata not verified after {DISPATCH_METADATA_POLLS} reads: "
+        raise ValueError(f"worker {r} metadata not verified after {poll + 1} reads: "
                          f"{pending}; no worker granted")
     raise ValueError("dispatch not reconciled; inspect Actions before retrying")
 
@@ -428,7 +444,8 @@ def reserve(t, pool):
         nonce = secrets.token_hex(32)
         t["key"] = digest(nonce)
         try:
-            return dispatch(t, pool, rev), rev, nonce
+            r, first_observation = dispatch(t, pool, rev)
+            return r, rev, nonce, first_observation
         except DispatchRevisionChanged as changed:
             r = changed.child
             parent_meta(t)
@@ -475,10 +492,9 @@ def select_cs(t, enable_site_retry):
     offset = (t["parent"] + t["group"]) % len(CS_SITES)
     remaining_sites = [*CS_SITES[offset:], *CS_SITES[:offset], None] if enable_site_retry else []
     first_queued = queued_here = last_queue_report = None
-    r, rev, nonce = reserve(t, "cs")
+    r, rev, nonce, (j, now) = reserve(t, "cs")
     print(f"Group {t['group']}: requesting a CS runner — {run_url(r)}", flush=True)
     while True:
-        j, now = observe(r, t, "cs")
         route, queued_here = decide(j, now, queued_here)
         if first_queued is None:
             first_queued = queued_here
@@ -508,13 +524,14 @@ def select_cs(t, enable_site_retry):
                     notice = f"trying CS {next_site.upper()}"
                 # Keep first_queued across the entire sweep and the shared wait.
                 queued_here = None
-                r, rev, nonce = reserve(t, "cs")
+                r, rev, nonce, (j, now) = reserve(t, "cs")
                 print(f"Group {t['group']}: {notice} — {run_url(r)}", flush=True)
                 continue
         if first_queued is not None and (last_queue_report is None or now - last_queue_report >= PROGRESS_INTERVAL):
             print(f"Group {t['group']}: queued for a CS runner ({int(max(0, now - first_queued))}s) — {run_url(r)}", flush=True)
             last_queue_report = now
         time.sleep(30)
+        j, now = observe(r, t, "cs")
 
 
 def choose():
@@ -553,7 +570,7 @@ def choose():
             withdraw_cs(r, t, rev)
             t.pop("site", None)
             pool = "idc"
-            r, rev, nonce = reserve(t, pool)
+            r, rev, nonce, _ = reserve(t, pool)
             print(f"Group {t['group']}: switched to Shanghai standby — {run_url(r)}", flush=True)
     # Grant is immutable and costs no extra control token on the worker. Until
     # this point neither pool has been authorized to check out or run PR code.
@@ -625,7 +642,7 @@ def check_grant_selector(t):
         conclusion = selector.get("conclusion")
         if conclusion in ("failure", "cancelled", "timed_out", "skipped", "action_required", "startup_failure", "stale"):
             raise ValueError(f"parent {t['parent']} attempt {t['attempt']} group {t['group']} "
-                             f"selector completed ({conclusion}) without a grant; no PR code executed")
+                             f"selector completed ({conclusion}) before worker admission; no PR code executed")
     return GRANT_SELECTOR_POLL_SECONDS
 
 
@@ -657,6 +674,45 @@ def proof_name(t):
     return f"real-pr-retry-{t['parent']}-attempt-{t['attempt']}-group-{t['group']}"
 
 
+def wait_for_grant(t, r, pool):
+    """Keep the exact worker alive through reconciliation, without reading a grant early."""
+    # The worker can start before the selector sees the dispatch response.
+    # Spending time on identity reconciliation reduces the remaining grant wait.
+    deadline = time.monotonic() + WORKER_ADMISSION_SECONDS
+    verified = False
+    next_selector_check = 0
+    while time.monotonic() < deadline:
+        parent_meta(t)
+        if time.monotonic() >= deadline:
+            break
+        if not verified:
+            try:
+                reconcile_child_meta(r, t, pool, t["revision"], wait_for_display_title=True)
+            except WorkerIdentityPending:
+                pass
+            else:
+                verified = True
+                parent_meta(t)
+        if verified and time.monotonic() < deadline:
+            g = admission_artifact(t, f"coverage-admit-{r}", "grant.json")
+            if g is not None and time.monotonic() < deadline:
+                check(g["child"] == r and g["ticket"] == t and g["pool"] == pool
+                      and digest(g["nonce"]) == t["key"], "grant mismatch")
+                return
+        now = time.monotonic()
+        if now >= deadline:
+            break
+        if now >= next_selector_check:
+            delay = check_grant_selector(t)
+            next_selector_check = time.monotonic() + delay
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            interval = GRANT_POLL_SECONDS if verified else WORKER_METADATA_POLL_SECONDS
+            time.sleep(min(interval, remaining))
+    reason = "no grant" if verified else "worker identity is unavailable"
+    raise ValueError(f"{reason}; no PR code executed")
+
+
 def admit():
     t = json.loads(os.environ["TICKET"])
     group, source, head, pool = int(os.environ["GROUP"]), os.environ["SOURCE"], os.environ["HEAD"], os.environ["POOL"]
@@ -670,32 +726,8 @@ def admit():
     if site is not None:
         worker_labels(pool, site)
         check((os.environ.get("RUNNER_NAME") or "").startswith(f"cs-{site}-"), "runner is outside requested CS site")
-    parent_meta(t)
     check(re.fullmatch("[a-f0-9]{40}", t["revision"]), "invalid dispatch revision")
-    for poll in range(WORKER_IDENTITY_POLLS):
-        try:
-            reconcile_child_meta(r, t, pool, t["revision"], wait_for_display_title=True)
-            break
-        except WorkerIdentityPending:
-            if poll + 1 < WORKER_IDENTITY_POLLS:
-                parent_meta(t)
-                time.sleep(WORKER_METADATA_POLL_SECONDS)
-    else:
-        raise ValueError("worker identity is unavailable; no PR code executed")
-    next_selector_check = 0
-    for _ in range(GRANT_POLLS):
-        parent_meta(t)
-        g = admission_artifact(t, f"coverage-admit-{r}", "grant.json")
-        if g is not None:
-            check(g["child"] == r and g["ticket"] == t and g["pool"] == pool
-                  and digest(g["nonce"]) == t["key"], "grant mismatch")
-            break
-        if time.monotonic() >= next_selector_check:
-            delay = check_grant_selector(t)
-            next_selector_check = time.monotonic() + delay
-        time.sleep(GRANT_POLL_SECONDS)
-    else:
-        raise ValueError("no grant; no PR code executed")
+    wait_for_grant(t, r, pool)
     proof = admission_artifact(t, proof_name(t), "real-pr-authorization.json")
     pr = one(f"/pulls/{int(t['pr'])}")
     # In-flight receipts from the old entrypoint retain their original
