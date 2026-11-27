@@ -13,14 +13,16 @@ import unittest
 DIRECTORY = Path(__file__).parents[1] / ".github/workflows"
 ENTRY = (DIRECTORY / "coverage-ut.yaml").read_text()
 WORKFLOW = (DIRECTORY / "coverage-worker-cs.yaml").read_text()
+STANDBY = (DIRECTORY / "coverage-ut-standby.yaml").read_text()
 STACKS = ("mty", "mnl2", "jed", "ruh")
 CONFIGS = tuple(f"CS_S3_{stack.upper()}_CONFIG" for stack in STACKS)
 
 
-def step_script(step):
-    source = ENTRY if step == "check_coverage_secrets" else WORKFLOW
-    if step == "eligibility":
-        source = (Path(__file__).parents[1] / ".github/workflows/coverage-ut-pre-cutover.yaml").read_text()
+def step_script(step, source=None):
+    if source is None:
+        source = ENTRY if step == "check_coverage_secrets" else WORKFLOW
+        if step == "eligibility":
+            source = (DIRECTORY / "coverage-ut-pre-cutover.yaml").read_text()
     marker = re.search(rf"^( +)- id: {step}$", source, re.M)
     block = re.split(rf"\n(?:{marker[1]}- |  [\w-]+:)", source[marker.end():], maxsplit=1)[0]
     return textwrap.dedent(re.split(r"\n +run: \|\n", block, maxsplit=1)[1])
@@ -104,6 +106,86 @@ class CSS3CoverageTest(unittest.TestCase):
                     if ok:
                         self.assertIn(f"ci-ut/123-{attempt}", summary.read_text())
                         self.assertNotIn(config, summary.read_text() + result.stdout + result.stderr)
+
+    def test_release_storage_uses_shanghai_and_the_authorized_head(self):
+        job = STANDBY.split("\n  release-storage-coverage:\n")[1].split("\n  merge-coverage-groups:\n")[0]
+        self.assertIn("runs-on: amd64-mo-shanghai-ut-safe", job)
+        self.assertIn("github.base_ref == '4.2-dev' && inputs.enable_4_2_dev", job)
+        self.assertIn("needs.check_coverage_eligibility.outputs.allowed == 'true'", job)
+        self.assertIn("ref: ${{ needs.check_coverage_eligibility.outputs.head_sha }}", job)
+        self.assertLess(job.index("Verify Shanghai runner isolation"), job.index("Checkout authorized MatrixOne head"))
+        self.assertLess(job.index("coverage_pr_entry.py\n        grep"), job.index("Checkout authorized MatrixOne head"))
+        self.assertIn("profile: ${{ steps.profile.outputs.artifact-id }}", job)
+        self.assertIn("artifact-ids: ${{ needs.release-storage-coverage.outputs.profile }}", STANDBY)
+
+    def test_release_provider_test_uses_both_specs_and_surfaces_failure(self):
+        script = step_script("test_storage_providers", STANDBY)
+        for aliyun, qcloud, test_exit, expected in (
+                ("oss-spec", "cos-spec", 0, 0), ("", "cos-spec", 0, 1),
+                ("oss-spec", "", 0, 1), ("oss-spec", "cos-spec", 7, 7)):
+            with self.subTest(aliyun=bool(aliyun), qcloud=bool(qcloud), test_exit=test_exit), \
+                 tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                go = root / "go"
+                go.write_text("#!/bin/bash\n"
+                              '[[ "${TEST_S3FS_ALIYUN}" == oss-spec && "${TEST_S3FS_QCLOUD}" == cos-spec ]] || exit 8\n'
+                              '[[ -z "${TEST_S3FS_CS+x}${endpoint+x}" ]] || exit 9\n'
+                              'printf "%s\\n" "$@" > "$RUNNER_TEMP/args"\n'
+                              'exit "$TEST_EXIT"\n')
+                go.chmod(0o755)
+                env = dict(PATH=f"{root}:{os.environ['PATH']}", RUNNER_TEMP=tmp,
+                           TEST_S3FS_ALIYUN=aliyun, TEST_S3FS_QCLOUD=qcloud, TEST_EXIT=str(test_exit),
+                           TEST_S3FS_CS="unexpected", endpoint="unexpected")
+                result = subprocess.run(["bash", "-c", script], cwd=tmp, env=env, capture_output=True)
+                self.assertEqual(result.returncode, expected, result.stderr)
+                if aliyun and qcloud:
+                    args = (root / "args").read_text().splitlines()
+                    self.assertEqual(args[-1], "./pkg/fileservice")
+                    self.assertIn("-covermode=set", args)
+                else:
+                    self.assertFalse((root / "args").exists())
+
+    def test_release_merge_requires_and_includes_provider_coverage(self):
+        require = step_script("validate_release_storage", STANDBY)
+        for status, profile, expected in (
+                ("success", "123", True), ("success", "", False),
+                ("skipped", "123", False), ("failure", "123", False)):
+            with self.subTest(status=status, profile=profile):
+                result = subprocess.run(["bash", "-c", require], capture_output=True,
+                                        env=dict(PATH=os.environ["PATH"], STORAGE_RESULT=status, STORAGE_PROFILE=profile))
+                self.assertEqual(result.returncode == 0, expected)
+
+        merge = step_script("merge_profiles", STANDBY)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            scripts = root / "scripts"
+            scripts.mkdir()
+            for name in ("coverage_group_collect.py", "coverage_two_groups_merge.py"):
+                (scripts / name).touch()
+            go = root / "go"
+            go.write_text("#!/bin/bash\nexit 0\n")
+            go.chmod(0o755)
+            for folder, name in (("selected/profiles/0", "group0"), ("selected/profiles/1", "group1"),
+                                 ("raw/release-storage", "oss-cos")):
+                profile = root / folder / "ut-coverage.out"
+                profile.parent.mkdir(parents=True)
+                profile.write_text(f"mode: set\n{name}:1.1,1.2 1 1\n")
+            env = dict(PATH=f"{root}:{os.environ['PATH']}", RUNNER_TEMP=tmp, EXPECTED_HEAD_SHA="a"*40,
+                       GROUP_COUNT="2", GITHUB_RUN_ID="42")
+            for required in ("false", "true"):
+                with self.subTest(required=required):
+                    result = subprocess.run(["bash", "-c", merge], cwd=tmp, capture_output=True,
+                                            env={**env, "RELEASE_STORAGE_REQUIRED": required})
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    contents = (root / "ut-coverage.out").read_text()
+                    self.assertEqual(contents.count("mode: set"), 1)
+                    self.assertIn("group0:", contents)
+                    self.assertIn("group1:", contents)
+                    self.assertEqual("oss-cos:" in contents, required == "true")
+            (root / "raw/release-storage/ut-coverage.out").unlink()
+            result = subprocess.run(["bash", "-c", merge], cwd=tmp, capture_output=True,
+                                    env={**env, "RELEASE_STORAGE_REQUIRED": "true"})
+            self.assertNotEqual(result.returncode, 0)
 
     def test_required_s3_tests_cannot_be_missing_skipped_or_failed(self):
         script = step_script("coverage_ut")

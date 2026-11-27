@@ -142,10 +142,8 @@ jobs:
     needs: [check_coverage_eligibility]
     if: ${{ needs.check_coverage_eligibility.outputs.allowed == 'true' }}
     environment: ci
-    # Preserve the Guangzhou network path and capacity used by main's
-    # external Aliyun/QCloud coverage UT. This is intentionally larger than
-    # the UT-only minimum while we validate the external-storage timeout fix.
-    runs-on: amd64-mo-guangzhou-2xlarge16
+    # Keep both routes for main and 4.2-dev on the shared CS and Shanghai pools.
+    runs-on: ${{ (github.base_ref == 'main' || github.base_ref == '4.2-dev') && 'amd64-mo-shanghai-ut-safe' || 'amd64-mo-guangzhou-2xlarge16' }}
     # The cache-enabled failure path has 305m of step limits: 20m for the
     # two checkouts, 20m cache seeding, 190m coverage, 15m Go/Python setup,
     # 5m cache status, and 55m for failure reports, artifacts, final status,

@@ -446,10 +446,19 @@ class EntryTest(unittest.TestCase):
         for field in ("coverage_ready:", "coverage_status:", "bvt_generation:", "cache_seed:"):
             self.assertIn(field, src.split("jobs:\n")[0])
 
-    def test_fallback_matches_existing_default_blob(self):
+    def test_fallback_keeps_the_legacy_body_with_updated_runner_placement(self):
         s = (ROOT/".github/workflows/coverage-ut-pre-cutover.yaml").read_text()
         checkout = "repository: matrixorigin/CI\n          ref: "+LEGACY_HELPER_SHA
         self.assertEqual(s.count(checkout), 1)
-        b = s.replace(checkout, "repository: ${{ job.workflow_repository }}\n          ref: ${{ job.workflow_sha }}").encode()
+        runner = ("    # Keep both routes for main and 4.2-dev on the shared CS and Shanghai pools.\n"
+                  "    runs-on: ${{ (github.base_ref == 'main' || github.base_ref == '4.2-dev') && "
+                  "'amd64-mo-shanghai-ut-safe' || 'amd64-mo-guangzhou-2xlarge16' }}")
+        original_runner = ("    # Preserve the Guangzhou network path and capacity used by main's\n"
+                           "    # external Aliyun/QCloud coverage UT. This is intentionally larger than\n"
+                           "    # the UT-only minimum while we validate the external-storage timeout fix.\n"
+                           "    runs-on: amd64-mo-guangzhou-2xlarge16")
+        self.assertEqual(s.count(runner), 1)
+        b = s.replace(checkout, "repository: ${{ job.workflow_repository }}\n          ref: ${{ job.workflow_sha }}").replace(
+            runner, original_runner).encode()
         self.assertEqual(hashlib.sha1(b"blob "+str(len(b)).encode()+b"\0"+b).hexdigest(),
                          "52b9213fa50e4de5184b9089ef15f13f82cf8a54")
