@@ -337,6 +337,70 @@ class ParentAdmission(unittest.TestCase):
                 self.assertEqual([call.args[0] for call in get.call_args_list], [51] * len(reads))
                 self.assertEqual(sleep.call_count, len(reads) - 1)
 
+    def test_ungranted_worker_stops_when_its_exact_selector_failed(self):
+        env = dict(TICKET=json.dumps(self.t), GROUP='0', HEAD=self.sha, SOURCE=self.src, POOL='cs',
+                   GITHUB_RUN_ATTEMPT='1', GITHUB_RUN_ID='51')
+        terminal = self.selector(status='completed', conclusion='failure', steps=[
+            {'name': s.GRANT_STEP, 'conclusion': 'skipped'},
+        ])
+        with patch.dict(os.environ, env), patch.object(s, 'run', return_value=self.p), \
+             patch.object(s, 'child_meta'), patch.object(s.time, 'sleep') as sleep, \
+             patch.object(s, 'artifact', return_value=None) as artifact, \
+             patch.object(s, 'one', return_value={'jobs': [self.selector(group=1), terminal]}) as one:
+            with self.assertRaisesRegex(ValueError, r'attempt 1 group 0 selector completed \(failure\).*no PR code executed'):
+                s.admit()
+            one.assert_called_once_with('/actions/runs/42/attempts/1/jobs?per_page=100&page=1')
+            artifact.assert_called_once_with(42, 'coverage-admit-51', 'grant.json')
+            sleep.assert_not_called()
+
+    def test_selector_probe_never_grants_or_stops_a_live_group_for_a_sibling(self):
+        env = dict(TICKET=json.dumps(self.t), GROUP='0', HEAD=self.sha, SOURCE=self.src, POOL='cs',
+                   GITHUB_RUN_ATTEMPT='1', GITHUB_RUN_ID='51')
+        for observation in (
+            {'jobs': [self.selector(group=1, status='completed', conclusion='failure'), self.selector()]},
+            {'jobs': [self.selector(status='completed', conclusion=None)]},
+            urllib.error.HTTPError('https://api.github.com', 404, 'not yet indexed', None, None),
+        ):
+            with self.subTest(observation=observation), patch.dict(os.environ, env), \
+                 patch.object(s, 'run', return_value=self.p), patch.object(s, 'child_meta'), \
+                 patch.object(s.time, 'sleep') as sleep, patch.object(s, 'GRANT_POLLS', 2), \
+                 patch.object(s, 'artifact', return_value=None) as artifact, \
+                 patch.object(s, 'one', side_effect=[observation]) as one:
+                with self.assertRaisesRegex(ValueError, '^no grant; no PR code executed$'):
+                    s.admit()
+                self.assertEqual(artifact.call_count, 2)
+                self.assertEqual(sleep.call_count, 2)
+                one.assert_called_once()
+
+    def test_admission_artifact_retries_transient_reads_and_checks_parent(self):
+        for code in (404, 408, 503):
+            with self.subTest(code=code), patch.object(s, 'parent_meta') as parent, \
+                 patch.object(s.time, 'sleep') as sleep, patch.object(s, 'artifact', side_effect=[
+                    urllib.error.HTTPError('https://api.github.com', code, 'temporary', None, None),
+                    self.grant,
+                 ]) as read:
+                self.assertEqual(s.admission_artifact(self.t, 'coverage-admit-51', 'grant.json'), self.grant)
+                parent.assert_called_once_with(self.t)
+                sleep.assert_called_once_with(s.PARENT_POLL_SECONDS)
+                self.assertEqual([call.args for call in read.call_args_list], [(42, 'coverage-admit-51', 'grant.json')] * 2)
+
+    def test_admission_artifact_read_is_bounded_and_does_not_retry_invalid_payload(self):
+        for error, reads, pattern in (
+            (urllib.error.HTTPError('https://api.github.com', 404, 'absent', None, None),
+             s.ADMISSION_ARTIFACT_POLLS, 'no PR code executed'),
+            (urllib.error.HTTPError('https://api.github.com', 429, 'rate limit', {'Retry-After': '60'}, None),
+             1, 'no PR code executed'),
+            (urllib.error.HTTPError('https://api.github.com', 403, 'forbidden', None, None), 1, '403'),
+            (ValueError('invalid control artifact payload'), 1, 'invalid control artifact payload'),
+        ):
+            with self.subTest(error=error), patch.object(s, 'parent_meta') as parent, \
+                 patch.object(s.time, 'sleep') as sleep, patch.object(s, 'artifact', side_effect=error) as read:
+                with self.assertRaisesRegex((ValueError, urllib.error.HTTPError), pattern):
+                    s.admission_artifact(self.t, 'coverage-admit-51', 'grant.json')
+                self.assertEqual(read.call_count, reads)
+                self.assertEqual(parent.call_count, reads - 1)
+                self.assertEqual(sleep.call_count, reads - 1)
+
     def test_revoke_only_the_worker_owned_by_the_selector(self):
         for scenario in ('active', 'completed', 'wrong_child', 'wrong_attempt', 'wrong_nonce',
                          'wrong_worker', 'unexpected_status'):

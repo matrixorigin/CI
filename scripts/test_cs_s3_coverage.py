@@ -122,7 +122,8 @@ class CSS3CoverageTest(unittest.TestCase):
     def test_skip_manifest_uploaded_for_success_and_failure(self):
         block = WORKFLOW.split("- id: skip_manifest\n", 1)[1].split("- id: upload_coverage_report\n", 1)[0]
         self.assertIn("always() && !cancelled()", block)
-        self.assertNotIn("outcome == 'failure'", block)
+        self.assertIn("steps.coverage_ut.outcome == 'success' || steps.coverage_ut.outcome == 'failure'", block)
+        self.assertIn("steps.skip_manifest.outputs.available == 'true'", block)
         self.assertIn("coverage_skip_manifest.py", block)
         self.assertIn("ut-coverage-skip-manifest.json", block)
 

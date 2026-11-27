@@ -35,6 +35,11 @@ HANDOFF_POLL_SECONDS = 5
 DISPATCH_METADATA_POLLS = 24
 WORKER_IDENTITY_POLLS = 12
 WORKER_METADATA_POLL_SECONDS = 5
+ADMISSION_ARTIFACT_POLLS = 4
+ADMISSION_ARTIFACT_WINDOW_SECONDS = 30
+GRANT_POLLS = 108
+GRANT_POLL_SECONDS = 10
+GRANT_SELECTOR_POLL_SECONDS = 30
 
 
 def check(ok, msg):
@@ -128,8 +133,8 @@ def parent_identity(t, p):
         check(actual == value, f"parent {t['parent']} identity mismatch: {field}")
 
 
-def selector_active(t):
-    """Confirm this group's selector is still running in the parent attempt."""
+def selector_job(t, *, include_not_granted=False):
+    """Find the exact group's selector, including an aborted grant if requested."""
     page = 1
     matches = []
     while True:
@@ -142,7 +147,7 @@ def selector_active(t):
             names = job["name"].split(" / ")
             if (len(names) >= 2 and names[-2] == f"Route Coverage group {t['group']}"
                     and any(step["name"] == GRANT_STEP
-                            and step.get("conclusion") in (None, "success")
+                            and (include_not_granted or step.get("conclusion") in (None, "success"))
                             for step in (job.get("steps") or []))):
                 check(job["run_id"] == t["parent"] and job["run_attempt"] == t["attempt"],
                       "selector identity mismatch")
@@ -151,9 +156,14 @@ def selector_active(t):
             break
         page += 1
     check(len(matches) <= 1, "ambiguous parent selector")
-    if not matches:
+    return matches[0] if matches else None
+
+
+def selector_active(t):
+    """Confirm this group's selector is still running in the parent attempt."""
+    selector = selector_job(t)
+    if selector is None:
         return False
-    selector = matches[0]
     waits = [step for step in selector["steps"] if step["name"] == WAIT_STEP]
     return (selector["status"] == "in_progress"
             and selector["conclusion"] is None
@@ -579,6 +589,46 @@ def artifact(parent, name, filename):
         return json.loads(z.read(filename))
 
 
+def admission_read_delay(error):
+    if isinstance(error, urllib.error.HTTPError) and error.code == 404:
+        error.close()
+        return PARENT_POLL_SECONDS
+    delay = parent_retry_delay(error)
+    if isinstance(error, urllib.error.HTTPError):
+        error.close()
+    return delay
+
+
+def admission_artifact(t, name, filename):
+    """Allow briefly lagging artifact metadata without accepting a partial grant."""
+    deadline = time.monotonic() + ADMISSION_ARTIFACT_WINDOW_SECONDS
+    for poll in range(ADMISSION_ARTIFACT_POLLS):
+        try:
+            return artifact(t["parent"], name, filename)
+        except OSError as error:
+            delay = admission_read_delay(error)
+            if poll + 1 == ADMISSION_ARTIFACT_POLLS or time.monotonic() + delay > deadline:
+                raise ValueError("parent admission artifact read unavailable; no PR code executed") from None
+            time.sleep(delay)
+            parent_meta(t)
+
+
+def check_grant_selector(t):
+    """Stop only for a definitively failed selector of the exact parent attempt and group."""
+    try:
+        selector = selector_job(t, include_not_granted=True)
+    except OSError as error:
+        # This probe can stop an ungranted worker, never authorize it. If
+        # metadata is lagging, keep checking the grant at its normal cadence.
+        return max(GRANT_SELECTOR_POLL_SECONDS, admission_read_delay(error))
+    if selector and selector.get("status") == "completed":
+        conclusion = selector.get("conclusion")
+        if conclusion in ("failure", "cancelled", "timed_out", "skipped", "action_required", "startup_failure", "stale"):
+            raise ValueError(f"parent {t['parent']} attempt {t['attempt']} group {t['group']} "
+                             f"selector completed ({conclusion}) without a grant; no PR code executed")
+    return GRANT_SELECTOR_POLL_SECONDS
+
+
 def require_previous_grants_terminal(t):
     page = 1
     while True:
@@ -632,18 +682,21 @@ def admit():
                 time.sleep(WORKER_METADATA_POLL_SECONDS)
     else:
         raise ValueError("worker identity is unavailable; no PR code executed")
-    for _ in range(108):
+    next_selector_check = 0
+    for _ in range(GRANT_POLLS):
         parent_meta(t)
-        g = artifact(t["parent"], f"coverage-admit-{r}", "grant.json")
+        g = admission_artifact(t, f"coverage-admit-{r}", "grant.json")
         if g is not None:
             check(g["child"] == r and g["ticket"] == t and g["pool"] == pool
                   and digest(g["nonce"]) == t["key"], "grant mismatch")
             break
-        time.sleep(10)
+        if time.monotonic() >= next_selector_check:
+            delay = check_grant_selector(t)
+            next_selector_check = time.monotonic() + delay
+        time.sleep(GRANT_POLL_SECONDS)
     else:
         raise ValueError("no grant; no PR code executed")
-    proof = artifact(t["parent"], proof_name(t),
-                     "real-pr-authorization.json")
+    proof = admission_artifact(t, proof_name(t), "real-pr-authorization.json")
     pr = one(f"/pulls/{int(t['pr'])}")
     # In-flight receipts from the old entrypoint retain their original
     # eligibility. New receipts bind the exact base and allow Draft PRs

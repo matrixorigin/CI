@@ -13,6 +13,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class CoverageFailureDisplayTest(unittest.TestCase):
+    def run_reporting_step(self, start, end, temp, env, preamble=""):
+        workflow = (ROOT / ".github/workflows/coverage-worker-cs.yaml").read_text()
+        block = workflow.split(start, 1)[1].split(end, 1)[0]
+        script = textwrap.dedent(block.split("      run: |\n", 1)[1])
+        return subprocess.run(
+            ["bash", "-e", "-c", preamble + script],
+            env={**os.environ, "RUNNER_TEMP": str(temp), "GITHUB_OUTPUT": str(temp / "output"),
+                 "GITHUB_STEP_SUMMARY": str(temp / "summary"), **env}, text=True, capture_output=True,
+        )
+
     def run_failure_step(self, temp):
         workflow = (ROOT / ".github/workflows/coverage-worker-cs.yaml").read_text()
         step = workflow.split("    - name: Fail on coverage UT failure\n", 1)[1]
@@ -88,6 +98,70 @@ class CoverageFailureDisplayTest(unittest.TestCase):
         self.assertIn("Coverage UT phase: prepare_cgo", result.stdout)
         self.assertIn("Coverage UT status: coverage_phase_failure", result.stdout)
         self.assertNotIn("not for the console", result.stdout)
+
+    @unittest.skipUnless(shutil.which("jq"), "requires jq, installed on coverage runners")
+    def test_status_keeps_the_first_failed_phase_and_fails_closed_on_its_own_checks(self):
+        defaults = dict(ADMISSION_OUTCOME="success", BUILD_TOOLS_OUTCOME="success", NODE_CACHE_OUTCOME="success",
+                        COVERAGE_OUTCOME="success", PROFILE_UPLOAD_OUTCOME="success", CACHE_ACCEPTANCE_OUTCOME="success")
+        cases = (
+            (dict(ADMISSION_OUTCOME="failure", COVERAGE_OUTCOME="skipped", CACHE_ACCEPTANCE_OUTCOME="skipped"),
+             None, "failed", "worker_admission_failure"),
+            (dict(BUILD_TOOLS_OUTCOME="failure", COVERAGE_OUTCOME="skipped"),
+             None, "failed", "runner_build_dependencies_failure"),
+            (dict(NODE_CACHE_OUTCOME="failure", COVERAGE_OUTCOME="skipped", CACHE_ACCEPTANCE_OUTCOME="skipped"),
+             {"result": "passed", "reason": "old_data", "elapsed_seconds": 99}, "failed", "node_cache_configuration_failure"),
+            (dict(COVERAGE_OUTCOME="failure", CACHE_ACCEPTANCE_OUTCOME="skipped"),
+             {"result": "failed", "reason": "command_exit"}, "failed", "command_exit"),
+            (dict(COVERAGE_OUTCOME="failure", CACHE_ACCEPTANCE_OUTCOME="failure"),
+             {"result": "timeout", "reason": "coverage_phase_deadline"}, "timeout", "coverage_phase_deadline"),
+            (dict(COVERAGE_OUTCOME="failure"), {"result": "passed"}, "failed", "post_test_phase_failure"),
+            (dict(PROFILE_UPLOAD_OUTCOME="failure", CACHE_ACCEPTANCE_OUTCOME="skipped"),
+             None, "failed", "coverage_profile_artifact_upload_failure"),
+            (dict(CACHE_ACCEPTANCE_OUTCOME="failure"), None, "failed", "incremental_cache_validation_failure"),
+            (dict(CACHE_ACCEPTANCE_OUTCOME="skipped"), None, "failed", "incremental_cache_validation_failure"),
+            ({}, {"result": "passed", "reason": "command_exit"}, "passed", "command_exit"),
+        )
+        for overrides, input_status, result, reason in cases:
+            with self.subTest(overrides=overrides, result=result, reason=reason), tempfile.TemporaryDirectory() as folder:
+                temp = Path(folder)
+                path = temp / "ut-coverage-status.json"
+                if input_status is not None:
+                    path.write_text(json.dumps(input_status))
+                proc = self.run_reporting_step("    - id: coverage_status\n", "    - id: render_coverage_report\n",
+                                               temp, {**defaults, **overrides})
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertEqual(json.loads(path.read_text()), {"result": result, "reason": reason})
+                self.assertEqual((temp / "output").read_text(), f"status={result}\n")
+
+    def test_skip_manifest_not_built_from_missing_report_on_failed_ut(self):
+        for outcome in ("failure", "success"):
+            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as folder:
+                temp = Path(folder)
+                proc = self.run_reporting_step("    - id: skip_manifest\n", "    - name: Upload skip comparison evidence\n",
+                                               temp, dict(COVERAGE_OUTCOME=outcome),
+                                               preamble="python3() { exit 86; }\n")
+                self.assertEqual(proc.returncode, 0 if outcome == "failure" else 1, proc.stderr)
+                self.assertFalse((temp / "output").exists())
+                self.assertIn("No per-test skip evidence" if outcome == "failure" else "::error::", proc.stdout)
+
+    def test_skip_manifest_is_still_required_and_uploaded_after_a_valid_report(self):
+        workflow = (ROOT / ".github/workflows/coverage-worker-cs.yaml").read_text()
+        upload = workflow.split("    - name: Upload skip comparison evidence\n", 1)[1].split("    - id:", 1)[0]
+        self.assertIn("steps.skip_manifest.outputs.available == 'true'", upload)
+        self.assertIn("if-no-files-found: error", upload)
+        with tempfile.TemporaryDirectory() as folder:
+            temp = Path(folder)
+            (temp / "ut-coverage-report.json").write_text('{"Action":"pass"}\n')
+            env = dict(COVERAGE_OUTCOME="success", ACTUAL_RUNNER="test", STORAGE_MODE="cs-s3", GITHUB_WORKSPACE=folder)
+            proc = self.run_reporting_step("    - id: skip_manifest\n", "    - name: Upload skip comparison evidence\n",
+                                           temp, env, preamble="git() { echo test-sha; }\npython3() { return 0; }\n")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual((temp / "output").read_text(), "available=true\n")
+            (temp / "output").unlink()
+            proc = self.run_reporting_step("    - id: skip_manifest\n", "    - name: Upload skip comparison evidence\n",
+                                           temp, env, preamble="git() { echo test-sha; }\npython3() { return 9; }\n")
+            self.assertEqual(proc.returncode, 9)
+            self.assertFalse((temp / "output").exists())
 
     def test_compact_failure_is_ready_when_optional_tool_is_interrupted(self):
         workflow = (ROOT / ".github/workflows/coverage-worker-cs.yaml").read_text()

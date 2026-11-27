@@ -440,7 +440,9 @@ class EntryTest(unittest.TestCase):
         label = "      name: Configure reviewed node cache with private incremental writes\n"
         self.assertEqual(body.count(label), 1)
         body = body.replace(label, label+"      if: ${{ true }}\n")
-        self.assertEqual(hashlib.sha256(body.encode()).hexdigest(), "8cb2793dcfa0eb8ba74bb78828895bd1fe36e79a6c73bfba5519aa80d59671de")
+        # Includes the audited producer status and report guards. Test
+        # commands, artifact identities, and the merge handoff are unchanged.
+        self.assertEqual(hashlib.sha256(body.encode()).hexdigest(), "cf822d41b5acdfae3b58100d73021f1e75da7fdae5daf58cd5c1794477377498")
         for field in ("coverage_ready:", "coverage_status:", "bvt_generation:", "cache_seed:"):
             self.assertIn(field, src.split("jobs:\n")[0])
 
