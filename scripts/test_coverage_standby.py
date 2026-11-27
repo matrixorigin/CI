@@ -303,6 +303,40 @@ class ParentAdmission(unittest.TestCase):
                     else:
                         s.admit()
 
+    def test_admission_waits_for_own_identity_before_looking_up_grant(self):
+        proof = dict(schema=2, allowed='true', verified_membership_http_status=204, pr_number='32922',
+                     author='dev', head_repository=self.src, head_sha=self.sha, base_ref='main')
+        pr = dict(number=32922, user={'login': 'dev'},
+                  head={'repo': {'full_name': self.src, 'archived': False}, 'sha': self.sha},
+                  state='open', draft=False, base={'repo': {'full_name': s.REPO}, 'ref': 'main'}, labels=[])
+        env = dict(TICKET=json.dumps(self.t), GROUP='0', HEAD=self.sha, SOURCE=self.src, POOL='cs',
+                   GITHUB_RUN_ATTEMPT='1', GITHUB_RUN_ID='51')
+        def missing():
+            return urllib.error.HTTPError('/actions/runs/51', 404, 'not found', None, None)
+
+        for resolves in (True, False):
+            reads = [missing(), self.worker] if resolves else [missing() for _ in range(s.WORKER_IDENTITY_POLLS)]
+            with self.subTest(resolves=resolves), patch.dict(os.environ, env), \
+                 patch.object(s, 'parent_meta') as parent, patch.object(s, 'run', side_effect=reads) as get, \
+                 patch.object(s, 'artifact') as artifact, patch.object(s, 'one', return_value=pr), \
+                 patch.object(s.time, 'sleep') as sleep:
+                if resolves:
+                    def read(t_parent, name, _filename):
+                        self.assertEqual(t_parent, self.t['parent'])
+                        self.assertEqual(get.call_count, len(reads))
+                        return self.grant if name == 'coverage-admit-51' else proof
+
+                    artifact.side_effect = read
+                    s.admit()
+                    self.assertEqual(artifact.call_count, 2)
+                    self.assertEqual(parent.call_args.kwargs, {'require_selector': True})
+                else:
+                    with self.assertRaisesRegex(ValueError, 'no PR code executed'):
+                        s.admit()
+                    artifact.assert_not_called()
+                self.assertEqual([call.args[0] for call in get.call_args_list], [51] * len(reads))
+                self.assertEqual(sleep.call_count, len(reads) - 1)
+
     def test_revoke_only_the_worker_owned_by_the_selector(self):
         for scenario in ('active', 'completed', 'wrong_child', 'wrong_attempt', 'wrong_nonce',
                          'wrong_worker', 'unexpected_status'):
@@ -863,6 +897,102 @@ class ShortWorkerTitle(unittest.TestCase):
             post.assert_called_once()
             self.assertIs(post.call_args.args[1]["return_run_details"], True)
             lookup.assert_called_once_with("/actions/runs/51/attempts/1/jobs?per_page=100")
+
+    def test_dispatch_waits_through_run_404_and_unready_titles_on_the_same_id(self):
+        ready = dict(self.meta, display_title=s.title(self.ticket, "cs"))
+        pending = dict(ready, display_title="Coverage standby single-group worker")
+        untitled = {key: value for key, value in ready.items() if key != "display_title"}
+        lookup_error = urllib.error.HTTPError("/actions/runs/51", 404, "not found", None, None)
+        with patch.object(s, "parent_meta"), patch.object(s, "api", return_value=({"workflow_run_id": 51}, 0)) as post, \
+             patch.object(s, "one", side_effect=[lookup_error, untitled, pending, ready]) as get, \
+             patch.object(s.time, "sleep") as sleep, patch("builtins.print") as log:
+            self.assertEqual(s.dispatch(self.ticket, "cs", "b"*40), 51)
+        self.assertEqual([call.args[0] for call in get.call_args_list], ["/actions/runs/51"] * 4)
+        post.assert_called_once()
+        self.assertEqual(sleep.call_count, 3)
+        self.assertTrue(any("HTTP 404" in call.args[0] for call in log.call_args_list))
+        self.assertFalse(any(pending["display_title"] in call.args[0] for call in log.call_args_list))
+
+    def test_dispatch_retries_short_title_attempt_jobs_404_on_returned_id(self):
+        path = "/actions/runs/51/attempts/1/jobs?per_page=100"
+        missing = urllib.error.HTTPError(path, 404, "not found", None, None)
+        ready = {"total_count": 1, "jobs": [self.marker]}
+        with patch.object(s, "parent_meta"), patch.object(s, "api", return_value=({"workflow_run_id": 51}, 0)) as post, \
+             patch.object(s, "run", return_value=self.meta) as run, patch.object(s, "one", side_effect=[missing, ready]) as get, \
+             patch.object(s.time, "sleep") as sleep:
+            self.assertEqual(s.dispatch(self.ticket, "cs", "b"*40), 51)
+        self.assertEqual([call.args[0] for call in get.call_args_list], [path, path])
+        self.assertEqual([call.args[0] for call in run.call_args_list], [51, 51])
+        post.assert_called_once()
+        sleep.assert_called_once_with(5)
+
+    def test_selector_does_not_publish_a_grant_after_persistent_404_or_wrong_title(self):
+        for problem in ("run 404", "wrong long title"):
+            def run_metadata(run_id):
+                self.assertEqual(run_id, 51)
+                if problem == "run 404":
+                    raise urllib.error.HTTPError("/actions/runs/51", 404, "not found", None, None)
+                # A canonical-looking title from a different parent cannot grant this worker.
+                return dict(self.meta, display_title=s.title(dict(self.ticket, parent=43), "cs"))
+
+            with self.subTest(problem=problem), tempfile.TemporaryDirectory() as root:
+                env = dict(GITHUB_RUN_ID="42", GITHUB_RUN_ATTEMPT="1", GROUP="0", HEAD="a"*40,
+                           SOURCE="contributor/matrixone", PR="33174", COVERAGE_CS_SITE_RETRY="false",
+                           RUNNER_TEMP=root, GITHUB_OUTPUT=str(Path(root, "outputs")))
+                with patch.dict(os.environ, env), patch.object(s, "parent_meta"), patch.object(s, "observe") as observe, \
+                     patch.object(s, "api", return_value=({"workflow_run_id": 51}, 0)) as post, \
+                     patch.object(s, "one", return_value={"object": {"sha": "b"*40}}) as branch, \
+                     patch.object(s, "run", side_effect=run_metadata) as run, patch.object(s.time, "sleep") as sleep:
+                    with self.assertRaisesRegex(ValueError, r"worker 51 metadata not verified.*no worker granted"):
+                        s.choose()
+                self.assertEqual(run.call_count, s.DISPATCH_METADATA_POLLS)
+                self.assertEqual(sleep.call_count, s.DISPATCH_METADATA_POLLS - 1)
+                post.assert_called_once()
+                self.assertTrue(post.call_args.args[0].endswith("/dispatches"))
+                branch.assert_called_once_with("/git/ref/heads/main")
+                observe.assert_not_called()
+                self.assertFalse(Path(root, "grant.json").exists())
+                self.assertFalse(Path(root, "outputs").exists())
+
+    def test_dispatch_does_not_retry_forbidden_or_invalid_identity(self):
+        wrong_marker = dict(self.marker, name=s.title(dict(self.ticket, parent=43), "cs") + s.IDENTITY_SUFFIX)
+        for reason in ("run 403", "wrong run envelope", "wrong short-title marker", "wrong revision"):
+            meta = dict(self.meta)
+            if reason == "wrong run envelope":
+                meta["head_branch"] = "other"
+            if reason == "wrong revision":
+                meta.update(head_sha="e"*40, display_title=s.title(self.ticket, "cs"))
+            result = urllib.error.HTTPError("/actions/runs/51", 403, "forbidden", None, None) if reason == "run 403" else meta
+            with self.subTest(reason=reason), patch.object(s, "parent_meta"), \
+                 patch.object(s, "api", return_value=({"workflow_run_id": 51}, 0)) as post, \
+                 patch.object(s, "run", side_effect=[result]) as run, patch.object(s, "one", return_value={
+                     "jobs": [wrong_marker], "total_count": 1}), patch.object(s.time, "sleep") as sleep:
+                if reason == "run 403":
+                    with self.assertRaises(urllib.error.HTTPError) as exc:
+                        s.dispatch(self.ticket, "cs", "b"*40)
+                    self.assertEqual(exc.exception.code, 403)
+                    exc.exception.close()
+                elif reason == "wrong revision":
+                    with self.assertRaises(s.DispatchRevisionChanged):
+                        s.dispatch(self.ticket, "cs", "b"*40)
+                else:
+                    with self.assertRaisesRegex(ValueError, "dedicated worker identity mismatch"):
+                        s.dispatch(self.ticket, "cs", "b"*40)
+                run.assert_called_once_with(51)
+                post.assert_called_once()
+                sleep.assert_not_called()
+
+    def test_dispatch_204_sticks_with_previously_verified_id_after_404(self):
+        ready = dict(self.meta, display_title=s.title(self.ticket, "cs"))
+        missing = urllib.error.HTTPError("/actions/runs/51", 404, "not found", None, None)
+        with patch.object(s, "parent_meta"), patch.object(s, "api", return_value=({}, 0)) as post, \
+             patch.object(s, "one", return_value={"workflow_runs": [ready]}) as find, \
+             patch.object(s, "run", side_effect=[missing, ready]) as run, patch.object(s.time, "sleep") as sleep:
+            self.assertEqual(s.dispatch(self.ticket, "cs", "b"*40), 51)
+        post.assert_called_once()
+        find.assert_called_once()
+        self.assertEqual([call.args[0] for call in run.call_args_list], [51, 51])
+        sleep.assert_called_once_with(5)
 
     def test_dispatch_retries_a_queued_marker_for_the_returned_id(self):
         queued = dict(self.marker, status="queued", conclusion=None)

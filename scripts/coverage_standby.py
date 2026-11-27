@@ -32,6 +32,9 @@ PROGRESS_INTERVAL = 300
 JOB_DETAIL_INTERVAL = 120
 HANDOFF_POLLS = 60
 HANDOFF_POLL_SECONDS = 5
+DISPATCH_METADATA_POLLS = 24
+WORKER_IDENTITY_POLLS = 12
+WORKER_METADATA_POLL_SECONDS = 5
 
 
 def check(ok, msg):
@@ -241,20 +244,49 @@ class DispatchRevisionChanged(ValueError):
         self.child, self.actual = child, actual
 
 
+class WorkerDisplayTitleMismatch(ValueError):
+    pass
+
+
 def child_meta(r, t, pool, revision):
     m = run(r)
     check(m["id"] == r and m["repository"]["full_name"] == REPO and m["run_attempt"] == 1
           and m["path"] == ".github/workflows/" + WORKER and m["event"] == "workflow_dispatch"
           and m["head_branch"] == WORKER_REF, "dedicated worker identity mismatch")
+    display = m.get("display_title")
+    if display is None:
+        raise WorkerDisplayTitleMismatch("dedicated worker identity mismatch: display title is missing")
+    check(isinstance(display, str), "invalid worker display title")
     canonical = identity_title(r, m)
-    check(canonical == title(t, pool) and (m["display_title"] == canonical
-          or (t.get("title_version") == 2 and m["display_title"] == short_title(t))),
+    expected = title(t, pool)
+    if canonical == display and canonical != expected:
+        raise WorkerDisplayTitleMismatch("dedicated worker identity mismatch: display title differs from ticket")
+    check(canonical == expected and (display == canonical
+          or (t.get("title_version") == 2 and display == short_title(t))),
           "dedicated worker identity mismatch")
     actual = m["head_sha"]
     check(re.fullmatch("[a-f0-9]{40}", actual), "invalid worker revision")
     if actual != revision:
         raise DispatchRevisionChanged(r, actual)
     return m
+
+
+def reconcile_child_meta(r, t, pool, revision, *, wait_for_display_title):
+    """Classify only retryable read failures, without accepting partial identity."""
+    try:
+        return child_meta(r, t, pool, revision)
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            raise
+        # Either the run record or its attempt-jobs metadata can index late.
+        resource = ("attempt jobs" if urlsplit(error.geturl() or "").path.endswith("/attempts/1/jobs")
+                    else "run record")
+        error.close()
+        raise WorkerIdentityPending(f"worker {resource} lookup returned HTTP 404") from error
+    except WorkerDisplayTitleMismatch as error:
+        if not wait_for_display_title:
+            raise
+        raise WorkerIdentityPending(str(error)) from error
 
 
 def assigned(job, pool):
@@ -320,18 +352,20 @@ def dispatch(t, pool, revision):
     body, dispatched_at = api(f"/actions/workflows/{WORKER}/dispatches", {
         "ref": WORKER_REF, "return_run_details": True,
         "inputs": {"ticket": json.dumps(t, separators=(",", ":")), "pool": pool}})
-    r = body.get("workflow_run_id")
+    returned_id = r = body.get("workflow_run_id")
     check(r is None or (type(r) is int and r > 0), "invalid dispatch run ID")
     # A plain GROUP0/GROUP1 is shared across PRs. The dispatch time bound is
     # just a discovery filter; always compare the full identity below.
     recent = datetime.fromtimestamp(dispatched_at - 60, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    for _ in range(24):
+    pending = None
+    reported = set()
+    for poll in range(DISPATCH_METADATA_POLLS):
         if not r:  # also support a legacy 204 response, correlated without guessing
             page = one(f"/actions/workflows/{WORKER}/runs?" + urlencode(
                 dict(event="workflow_dispatch", branch=WORKER_REF, created=f">={recent}", per_page=100)))
             ids = []
             for candidate in page["workflow_runs"]:
-                display = candidate["display_title"]
+                display = candidate.get("display_title")
                 if display == title(t, pool):
                     ids.append(candidate["id"])
                 elif t.get("title_version") == 2 and display == short_title(t):
@@ -351,13 +385,21 @@ def dispatch(t, pool, revision):
             r = ids[0] if ids else None
         if r:
             try:
-                child_meta(r, t, pool, revision)
-            except WorkerIdentityPending:
-                pass
+                reconcile_child_meta(r, t, pool, revision, wait_for_display_title=(r == returned_id))
+            except WorkerIdentityPending as error:
+                pending = str(error)
+                if pending not in reported:
+                    reported.add(pending)
+                    # Do not log the ticket, raw response, or API-supplied title.
+                    print(f"worker {r} metadata not ready: {pending}; no grant yet", flush=True)
             else:
                 print(f"{pool} group {t['group']}: https://github.com/{REPO}/actions/runs/{r}", flush=True)
                 return r
-        time.sleep(5)
+        if poll + 1 < DISPATCH_METADATA_POLLS:
+            time.sleep(WORKER_METADATA_POLL_SECONDS)
+    if pending is not None:
+        raise ValueError(f"worker {r} metadata not verified after {DISPATCH_METADATA_POLLS} reads: "
+                         f"{pending}; no worker granted")
     raise ValueError("dispatch not reconciled; inspect Actions before retrying")
 
 
@@ -580,13 +622,14 @@ def admit():
         check((os.environ.get("RUNNER_NAME") or "").startswith(f"cs-{site}-"), "runner is outside requested CS site")
     parent_meta(t)
     check(re.fullmatch("[a-f0-9]{40}", t["revision"]), "invalid dispatch revision")
-    for _ in range(12):
+    for poll in range(WORKER_IDENTITY_POLLS):
         try:
-            child_meta(r, t, pool, t["revision"])
+            reconcile_child_meta(r, t, pool, t["revision"], wait_for_display_title=True)
             break
         except WorkerIdentityPending:
-            parent_meta(t)
-            time.sleep(5)
+            if poll + 1 < WORKER_IDENTITY_POLLS:
+                parent_meta(t)
+                time.sleep(WORKER_METADATA_POLL_SECONDS)
     else:
         raise ValueError("worker identity is unavailable; no PR code executed")
     for _ in range(108):
