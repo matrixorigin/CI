@@ -1268,7 +1268,7 @@ class Queue(unittest.TestCase):
 
     def test_live_old_grant_blocks_only_its_group(self):
         t = dict(parent=42,group=0,attempt=2,head='a'*40)
-        old = dict(display_title=s.title(dict(t,attempt=1,key='a'*64), 'cs'),
+        old = dict(id=81, run_attempt=1, display_title=s.title(dict(t,attempt=1,key='a'*64), 'cs'),
                    path='.github/workflows/'+s.WORKER, event='workflow_dispatch',
                    repository={'full_name':s.REPO},head_branch=s.WORKER_REF,status='in_progress')
         with patch.object(s,'one',return_value={'artifacts':[{'name':'coverage-admit-81'}]}), \
@@ -1278,6 +1278,48 @@ class Queue(unittest.TestCase):
             s.require_previous_grants_terminal(dict(t,group=1))
             old['status'] = 'completed'
             s.require_previous_grants_terminal(t)
+
+    def test_previous_short_title_grant_retries_only_pending_identity(self):
+        t = dict(parent=42, group=0, attempt=2, head='a'*40)
+        title = s.title(dict(t, attempt=1, key='a'*64), 'cs')
+        old = dict(id=81, run_attempt=1, display_title='GROUP0', path='.github/workflows/'+s.WORKER,
+                   event='workflow_dispatch', repository={'full_name':s.REPO}, head_branch=s.WORKER_REF,
+                   status='completed')
+        marker = dict(name=title+s.IDENTITY_SUFFIX, run_id=81, run_attempt=1,
+                      status='completed', conclusion='skipped')
+        jobs = '/actions/runs/81/attempts/1/jobs?per_page=100'
+
+        def http(code):
+            return urllib.error.HTTPError(jobs, code, 'unavailable', None, None)
+
+        for name, responses, expected_error in (
+            ('404 then ready', [http(404), [marker]], None),
+            ('not indexed then ready', [[], [marker]], None),
+            ('persistent 404', [http(404), http(404)], (ValueError, 'previous grant.*not verified')),
+            ('permission denied', [http(403)], (urllib.error.HTTPError, '403')),
+            ('wrong attempt', [[dict(marker, run_attempt=2)]], (ValueError, 'invalid worker identity marker')),
+        ):
+            results = iter(responses)
+
+            def one(path):
+                if '/artifacts?' in path:
+                    return {'artifacts': [{'name': 'coverage-admit-81'}]}
+                self.assertEqual(path, jobs)
+                result = next(results)
+                if isinstance(result, Exception):
+                    raise result
+                return {'jobs': result, 'total_count': len(result)}
+
+            with self.subTest(name=name), patch.object(s, 'one', side_effect=one), \
+                 patch.object(s, 'run', return_value=old) as read, patch.object(s, 'PARENT_POLLS', 2), \
+                 patch.object(s.time, 'sleep') as sleep:
+                if expected_error is None:
+                    s.require_previous_grants_terminal(t)
+                else:
+                    with self.assertRaisesRegex(*expected_error):
+                        s.require_previous_grants_terminal(t)
+                self.assertEqual([c.args for c in read.call_args_list], [(81,)] * len(responses))
+                self.assertEqual(sleep.call_count, len(responses) - 1)
 
     def test_failed_only_job_boundary(self):
         from pathlib import Path
