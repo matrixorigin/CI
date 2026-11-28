@@ -1200,6 +1200,12 @@ class Queue(unittest.TestCase):
                     receipt([dict(rows[0], pool="ubuntu-latest")])):
             self.assertEqual(s.first_cs_pool_plan(bad, now), ())
 
+        for captured in (10**1000, -(10**1000)):
+            with self.subTest(positive=captured > 0):
+                # A valid receipt well under 4 KiB can still contain an integer
+                # outside the range representable by wall-clock floats.
+                self.assertEqual(s.first_cs_pool_plan(receipt(rows, captured), float(now)), ())
+
     def test_first_pool_is_ignored_without_exact_isolated_pin(self):
         target = "cs-ruh-nc-n0-pr-v1"
         ticket = {"pr": 32922, "attempt": 1, "group": 0}
@@ -1333,6 +1339,44 @@ class Queue(unittest.TestCase):
                                         exact="cs-ruh-nc-n0-pr-v1", after_cancel="failure",
                                         expected_error=(ValueError, "did not acknowledge withdrawal"))
         self.assertEqual([e[0] for e in events], ["reserve", "cancel", "confirm"])
+
+    def test_failed_exact_probe_is_revocable_without_child_output(self):
+        target = "cs-ruh-nc-n0-pr-v1"
+        posts = []
+        ticket = {}
+
+        def post(path, data):
+            posts.append(path)
+            if path == f"/actions/workflows/{s.WORKER}/dispatches":
+                ticket.update(json.loads(data["inputs"]["ticket"]))
+                return {"workflow_run_id": 111}, 50
+            self.assertEqual((path, data), ("/actions/runs/111/cancel", {}))
+            if posts.count(path) == 1:
+                raise urllib.error.HTTPError(path, 503, "temporary failure", None, None)
+            return {}, 81
+
+        def worker(run_id):
+            self.assertEqual(run_id, 111)
+            return dict(id=111, repository={"full_name": s.REPO}, run_attempt=1, status="queued",
+                        path=".github/workflows/" + s.WORKER, event="workflow_dispatch",
+                        head_branch=s.WORKER_REF, head_sha=ticket["revision"], display_title=s.title(ticket, "cs"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = {**self.env, "RUNNER_TEMP": tmp, "GITHUB_OUTPUT": str(root / "outputs"), "CHILD": ""}
+            with patch.dict(os.environ, env), patch.object(s, "choose_initial_scale_set", return_value=target), \
+                 patch.object(s, "parent_meta"), patch.object(s, "one", return_value={"object": {"sha": "b"*40}}), \
+                 patch.object(s, "run", side_effect=worker), patch.object(s.time, "sleep"), \
+                 patch.object(s, "observe", side_effect=[(self.q, 50), (self.q, 80), (self.q, 81)]), \
+                 patch.object(s, "api", side_effect=post):
+                with self.assertRaisesRegex(urllib.error.HTTPError, "503"):
+                    s.choose()
+                self.assertEqual(json.loads((root / "reservation.json").read_text())["ticket"], ticket)
+                self.assertFalse((root / "grant.json").exists())
+                self.assertFalse((root / "outputs").exists())
+                s.revoke()
+        self.assertEqual(posts, [f"/actions/workflows/{s.WORKER}/dispatches", "/actions/runs/111/cancel",
+                                 "/actions/runs/111/cancel"])
 
     def test_shared_replacement_keeps_original_shanghai_deadline(self):
         target = "cs-ruh-nc-n0-pr-v1"

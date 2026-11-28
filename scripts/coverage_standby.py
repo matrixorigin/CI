@@ -493,7 +493,7 @@ def first_cs_pool_plan(raw, now):
     if not isinstance(receipt, dict):
         return ()
     captured, pools = receipt.get("captured_at"), receipt.get("pools")
-    if (type(captured) is not int or not 0 <= now - captured <= FIRST_POOL_MAX_AGE
+    if (type(captured) is not int or not now - FIRST_POOL_MAX_AGE <= captured <= now
             or not isinstance(pools, list) or len(pools) > len(FIRST_CS_POOLS)):
         return ()
     offers = {}
