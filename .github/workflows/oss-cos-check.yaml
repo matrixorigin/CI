@@ -71,7 +71,7 @@ jobs:
           # Go's test names can contain provider fixture or bucket names.
           # Use them only for correlation and publish fixed case identifiers.
           jq -nr '
-            reduce inputs as $event ({providers: {}, failed: {}};
+            reduce inputs as $event ({providers: {}, failed: {}, s3fs: []};
               ($event.Test // "") as $test |
               ([$test | capture("^TestObjectStorages/(?<fixture>.+)/(?<sdk>aliyun|qcloud)(?:/(?<leaf>.*))?$")][0]) as $sdk |
               if $sdk then
@@ -81,13 +81,23 @@ jobs:
                 else . end
               elif $event.Action == "fail" and ($test | startswith("TestQCloudSDK/") or . == "TestQCloudSDK") then
                 .failed["qcloud/sdk"] = true
-              elif $event.Action == "fail" then
-                ([$test | capture("^TestS3FSFromSpecs/(?<fixture>.+)/streaming_write$")][0]) as $stream |
-                if $stream and .providers[$stream.fixture] then
-                  .failed[.providers[$stream.fixture] + "/streaming_write"] = true
-                else . end
+              elif $event.Action == "fail" and ($test | startswith("TestS3FSFromSpecs/")) then
+                .s3fs += [$test | ltrimstr("TestS3FSFromSpecs/")]
               else . end
-            ) | .failed | keys[] | "OSS/COS failed case: \(.)"
+            ) | . as $events |
+            reduce $events.s3fs[] as $path ($events.failed;
+              # Fixture names may contain slashes. Resolve the most specific match.
+              ([$events.providers | to_entries[] | .key as $fixture |
+                select($path == $fixture or ($path | startswith($fixture + "/")))] | max_by(.key | length)) as $fixture |
+              if $fixture then
+                ($path | ltrimstr($fixture.key)) as $case |
+                ($fixture.value + "/streaming_write") as $stream |
+                if $case == "/streaming_write" then .[$stream] = true
+                # Go emits an aggregate fixture failure after failed children.
+                elif $case == "" and .[$stream] then .
+                else .[$fixture.value + "/s3fs"] = true end
+              else . end
+            ) | keys[] | "OSS/COS failed case: \(.)"
           ' "$report" 2>/dev/null || true
           exit "$status"
         }

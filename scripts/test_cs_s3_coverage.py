@@ -185,16 +185,33 @@ class CSS3CoverageTest(unittest.TestCase):
         disk_only = [dict(Action="pass", Package=package, Test="TestObjectStorages/test/disk/basic")]
         cos_skipped = passed[:-1] + [dict(passed[-1], Action="skip")]
         wrong_fixture = passed[:-1] + [dict(passed[-1], Test="TestS3FSFromSpecs/test/streaming_write")]
-        for name, missing, test_exit, events, expected in (
-                ("both providers passed", None, 0, passed, 0),
-                ("missing OSS config", "TEST_S3FS_ALIYUN", 0, passed, 1),
-                ("missing COS config", "TEST_S3FS_QCLOUD", 0, passed, 1),
-                ("OSS SDK failed", None, 7, [dict(passed[0], Action="fail")], 7),
-                ("COS stream failed", None, 7, [dict(passed[1], Action="run"), dict(passed[3], Action="fail")], 7),
-                ("disk only", None, 0, disk_only, 1),
-                ("only COS passed", None, 0, passed[1::2], 1),
-                ("unrelated streaming fixture passed", None, 0, wrong_fixture, 1),
-                ("COS streaming skipped", None, 0, cos_skipped, 1)):
+        for name, missing, test_exit, events, expected, diagnostics in (
+                ("both providers passed", None, 0, passed, 0, ()),
+                ("missing OSS config", "TEST_S3FS_ALIYUN", 0, passed, 1, ()),
+                ("missing COS config", "TEST_S3FS_QCLOUD", 0, passed, 1, ()),
+                ("OSS SDK failed", None, 7, [dict(passed[0], Action="fail")], 7, ("aliyun/basic",)),
+                ("COS stream failed", None, 7, [
+                    passed[1], dict(passed[3], Action="fail"),
+                    dict(Action="fail", Test="TestS3FSFromSpecs/TencentCOS"),
+                ], 7, ("qcloud/streaming_write",)),
+                ("OSS tree failed", None, 7, [
+                    passed[0], dict(Action="output", Output="private SDK data marker"),
+                    dict(Action="fail", Test="TestS3FSFromSpecs/oss_eu/storage/tree"),
+                    dict(Action="fail", Test="TestS3FSFromSpecs/oss_eu/storage"),
+                ], 7, ("aliyun/s3fs",)),
+                ("nested test with overlapping fixture names", None, 7, [
+                    passed[0],
+                    dict(Action="fail", Test="TestS3FSFromSpecs/oss_eu/storage/cos/tree/nested"),
+                    dict(Action="fail", Test="TestS3FSFromSpecs/oss_eu/storages/tree"),
+                    dict(passed[1], Test="TestObjectStorages/oss_eu/storage/cos/qcloud/basic"),
+                ], 7, ("qcloud/s3fs",)),
+                ("COS fixture failed before children ran", None, 7, [
+                    passed[1], dict(Action="fail", Test="TestS3FSFromSpecs/TencentCOS"),
+                ], 7, ("qcloud/s3fs",)),
+                ("disk only", None, 0, disk_only, 1, ()),
+                ("only COS passed", None, 0, passed[1::2], 1, ()),
+                ("unrelated streaming fixture passed", None, 0, wrong_fixture, 1, ()),
+                ("COS streaming skipped", None, 0, cos_skipped, 1, ())):
             with self.subTest(name=name), \
                  tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
@@ -215,11 +232,11 @@ class CSS3CoverageTest(unittest.TestCase):
                     env[missing] = ""
                 result = subprocess.run(["bash", "-c", script], cwd=tmp, env=env, capture_output=True)
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
-                diagnostic = {"OSS SDK failed": b"aliyun/basic", "COS stream failed": b"qcloud/streaming_write"}.get(name)
-                if diagnostic:
-                    self.assertIn(b"OSS/COS failed case: " + diagnostic, result.stdout)
-                    self.assertNotIn(b"oss_eu/storage", result.stdout + result.stderr)
-                    self.assertNotIn(b"TencentCOS", result.stdout + result.stderr)
+                reported = tuple(line.removeprefix("OSS/COS failed case: ") for line in result.stdout.decode().splitlines()
+                                 if line.startswith("OSS/COS failed case: "))
+                self.assertEqual(reported, diagnostics)
+                for private in (b"oss_eu/storage", b"TencentCOS", b"private SDK data marker"):
+                    self.assertNotIn(private, result.stdout + result.stderr)
                 if not missing:
                     args = (root / "args").read_text().splitlines()
                     self.assertEqual(args[-1], "./pkg/fileservice")
