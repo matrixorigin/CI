@@ -34,9 +34,8 @@ WAIT = 3600
 # Leave time to report a selection failure before the 85-minute workflow step ends.
 SELECTOR_RESERVATION_SECONDS = 84 * 60
 WORKER_READ_RECOVERY_SECONDS = 90
-# A primary GitHub quota resets hourly. Selection and cleanup have their own
-# earlier deadlines. This budget only applies after a confirmed throttle.
-WORKER_RATE_LIMIT_RECOVERY_SECONDS = 60 * 60
+# A running or completed worker can outlast one GitHub quota window.
+RESULT_RATE_LIMIT_RECOVERY_SECONDS = 60 * 60
 PROGRESS_INTERVAL = 300
 HANDOFF_POLLS = 60
 HANDOFF_POLL_SECONDS = 5
@@ -48,7 +47,7 @@ ADMISSION_ARTIFACT_POLLS = 4
 ADMISSION_ARTIFACT_WINDOW_SECONDS = 30
 GRANT_POLL_SECONDS = 10
 GRANT_SELECTOR_POLL_SECONDS = 30
-SELECTOR_RATE_LIMIT_FALLBACK_SECONDS = 60
+RATE_LIMIT_FALLBACK_SECONDS = 60
 ADMISSION_WINDOW = ContextVar("coverage_worker_admission", default=None)
 
 
@@ -72,9 +71,9 @@ class AdmissionWindow:
             raise AdmissionDeadlineExceeded("worker admission deadline exceeded; no PR code executed")
         return remaining
 
-    def rate_backoff(self, delay):
-        self.backoff = max(delay, self.backoff * 2)
-        return self.backoff
+    def rate_backoff(self, hint):
+        delay, self.backoff = rate_limit_pause(hint, self.backoff)
+        return delay
 
 
 @contextmanager
@@ -253,16 +252,8 @@ def selector_active(t):
                 for step in selector["steps"]))
 
 
-def parent_retry_delay(error):
-    """Return a safe delay for a transient parent metadata read."""
-    if not isinstance(error, urllib.error.HTTPError):
-        return PARENT_POLL_SECONDS
-    headers = error.headers or {}
+def retry_hint(error, headers, *, rate_limited):
     retry_after = headers.get("Retry-After")
-    rate_limited = error.code == 429 or (error.code == 403 and
-                   (retry_after is not None or headers.get("X-RateLimit-Remaining") == "0"))
-    if not rate_limited and error.code != 408 and not 500 <= error.code <= 599:
-        raise error
     if retry_after is not None:
         try:
             delay = int(retry_after)
@@ -277,19 +268,35 @@ def parent_retry_delay(error):
         except (KeyError, TypeError, ValueError, OverflowError):
             raise error
     else:
-        delay = 60 if rate_limited else PARENT_POLL_SECONDS
+        return None
     return max(PARENT_POLL_SECONDS, delay)
 
 
-def confirmed_rate_limit_delay(error):
-    """Distinguish a GitHub throttle from a forbidden required read."""
+def throttle_headers(error, headers):
+    return error.code == 429 or (error.code == 403 and
+           (headers.get("Retry-After") is not None or headers.get("X-RateLimit-Remaining") == "0"))
+
+
+def parent_retry_delay(error):
+    """Return a safe delay for a transient parent metadata read."""
+    if not isinstance(error, urllib.error.HTTPError):
+        return PARENT_POLL_SECONDS
     headers = error.headers or {}
-    if error.code == 429 or (error.code == 403 and
-                            (headers.get("Retry-After") is not None or headers.get("X-RateLimit-Remaining") == "0")):
+    rate_limited = throttle_headers(error, headers)
+    if not rate_limited and error.code != 408 and not 500 <= error.code <= 599:
+        raise error
+    hint = retry_hint(error, headers, rate_limited=rate_limited)
+    return hint or (RATE_LIMIT_FALLBACK_SECONDS if rate_limited else PARENT_POLL_SECONDS)
+
+
+def confirmed_rate_limit_hint(error):
+    """Return seconds from GitHub, zero for a throttle without a hint, or None."""
+    headers = error.headers or {}
+    if throttle_headers(error, headers):
         try:
-            return parent_retry_delay(error)
+            return retry_hint(error, headers, rate_limited=True) or 0
         except urllib.error.HTTPError:
-            return SELECTOR_RATE_LIMIT_FALLBACK_SECONDS
+            return 0
     if error.code == 403 and error.fp is not None:
         # The primary quota may still be positive during a secondary limit.
         # Only use the documented error message, never log the response body.
@@ -304,8 +311,15 @@ def confirmed_rate_limit_delay(error):
         if isinstance(message, str):
             reason = message.casefold()
             if reason.startswith("api rate limit exceeded") or "secondary rate limit" in reason:
-                return SELECTOR_RATE_LIMIT_FALLBACK_SECONDS
+                return 0
     return None
+
+
+def rate_limit_pause(hint, previous):
+    if hint:
+        return hint, 0
+    backoff = max(RATE_LIMIT_FALLBACK_SECONDS, previous * 2)
+    return backoff, backoff
 
 
 def required_admission_read(read, *args, **kwargs):
@@ -318,13 +332,13 @@ def required_admission_read(read, *args, **kwargs):
         try:
             result = read(*args, **kwargs)
         except urllib.error.HTTPError as error:
-            delay = confirmed_rate_limit_delay(error)
-            if delay is None:
+            hint = confirmed_rate_limit_hint(error)
+            if hint is None:
                 raise
             error.close()
-            backoff = window.rate_backoff(delay)
+            delay = window.rate_backoff(hint)
             print("GitHub throttled a required admission read; backing off", flush=True)
-            time.sleep(min(backoff, window.remaining()))
+            time.sleep(min(delay, window.remaining()))
         else:
             window.remaining()
             # A successful read ends the throttle streak across admission calls.
@@ -573,6 +587,7 @@ def dispatch(t, pool, revision, deadline, *, remember):
                 first_observation = observe(r, t, pool) if pool == "cs" else None
             except (OSError, WorkerIdentityPending) as error:
                 delay, _ = metadata_read_retry(error)
+                delay = delay or RATE_LIMIT_FALLBACK_SECONDS
                 if isinstance(error, WorkerIdentityPending):
                     pending = str(error)
                 elif isinstance(error, urllib.error.HTTPError):
@@ -649,8 +664,9 @@ def reserve(t, pool, deadline):
     raise ValueError("workflow revision kept changing; no worker granted")
 
 
-def read_worker(phase, read, *args, deadline=float("inf"), retry_pending=True):
-    """Retry the same metadata read within one outage and phase budget."""
+def read_worker(phase, read, *args, deadline=float("inf"), retry_pending=True,
+                rate_limit_budget=HANDOFF_POLLS * HANDOFF_POLL_SECONDS):
+    """Use the handoff budget for control reads and a larger budget for results."""
     retryable = (OSError, WorkerIdentityPending) if retry_pending else OSError
     retry_started = None
     ordinary_deadline = None
@@ -668,13 +684,10 @@ def read_worker(phase, read, *args, deadline=float("inf"), retry_pending=True):
                 retry_started = now
                 if not rate_limited:
                     print(f"{phase}: metadata temporarily unavailable; retrying read", flush=True)
-            retry_until = min(deadline, retry_started + WORKER_RATE_LIMIT_RECOVERY_SECONDS)
+            retry_until = min(deadline, retry_started + rate_limit_budget)
             if rate_limited:
-                if not rate_backoff:
-                    print(f"{phase}: GitHub API throttled; waiting for the quota", flush=True)
                 ordinary_deadline = None
-                delay = max(delay, rate_backoff)
-                rate_backoff = delay * 2
+                delay, rate_backoff = rate_limit_pause(delay, rate_backoff)
             else:
                 if ordinary_deadline is None:
                     ordinary_deadline = now + WORKER_READ_RECOVERY_SECONDS
@@ -687,9 +700,14 @@ def read_worker(phase, read, *args, deadline=float("inf"), retry_pending=True):
                     delay = max(backoff, delay)
                     backoff = min(30, delay * 2)
             if now + delay < retry_until:
+                if rate_limited:
+                    print(f"{phase}: GitHub API throttled; retrying in {delay:.0f}s", flush=True)
                 time.sleep(delay)
                 if time.monotonic() < retry_until:
                     continue
+            if rate_limited:
+                raise TimeoutError(f"{phase}: GitHub cooldown ({delay:.0f}s) exceeds the remaining "
+                                   f"read budget ({max(0, retry_until - now):.0f}s)") from error
             raise TimeoutError(f"{phase}: worker metadata did not recover within the retry budget") from error
         if deadline != float("inf") and time.monotonic() >= deadline:
             raise TimeoutError(f"{phase}: phase deadline exceeded")
@@ -870,9 +888,9 @@ def metadata_read_retry(error):
         return PARENT_POLL_SECONDS, False
     if isinstance(error, urllib.error.HTTPError):
         try:
-            delay = confirmed_rate_limit_delay(error)
-            if delay is not None:
-                return delay, True
+            hint = confirmed_rate_limit_hint(error)
+            if hint is not None:
+                return hint, True
             if error.code == 404:
                 return PARENT_POLL_SECONDS, False
             return parent_retry_delay(error), False
@@ -889,6 +907,7 @@ def admission_artifact(t, name, filename):
             return required_admission_read(artifact, t["parent"], name, filename)
         except OSError as error:
             delay, _ = metadata_read_retry(error)
+            delay = delay or RATE_LIMIT_FALLBACK_SECONDS
             if poll + 1 == ADMISSION_ARTIFACT_POLLS or time.monotonic() + delay > deadline:
                 raise ValueError("parent admission artifact read unavailable; no PR code executed") from None
             time.sleep(delay)
@@ -910,7 +929,7 @@ def check_grant_selector(t):
             delay, _ = metadata_read_retry(error)
         except urllib.error.HTTPError:
             error.close()
-            delay = SELECTOR_RATE_LIMIT_FALLBACK_SECONDS if cooldown else GRANT_SELECTOR_POLL_SECONDS
+            delay = 0 if cooldown else GRANT_SELECTOR_POLL_SECONDS
         return delay, cooldown
     except (AttributeError, KeyError, TypeError, ValueError):
         # Malformed or ambiguous metadata from a diagnostic probe is not
@@ -977,9 +996,13 @@ def _wait_for_grant(t, r, pool, window):
     deadline = window.deadline
     identify = partial(reconcile_child_meta, r, t, pool, t["revision"], wait_for_display_title=True)
     verified = False
-    next_selector_check = 0
+    next_liveness_check = 0
     while time.monotonic() < deadline:
-        parent_meta(t)
+        # The grant may arrive between liveness checks. Final admission
+        # revalidates the parent and selector before any PR checkout.
+        check_liveness = time.monotonic() >= next_liveness_check
+        if check_liveness:
+            parent_meta(t)
         if time.monotonic() >= deadline:
             break
         if not verified:
@@ -1002,15 +1025,15 @@ def _wait_for_grant(t, r, pool, window):
         if now >= deadline:
             break
         interval = GRANT_POLL_SECONDS if verified else WORKER_METADATA_POLL_SECONDS
-        if now >= next_selector_check:
+        if check_liveness:
             delay, cooldown = check_grant_selector(t)
             if cooldown:
-                interval = delay = window.rate_backoff(max(delay, interval))
+                interval = delay = max(interval, window.rate_backoff(delay))
                 print(f"worker {r}: selector lookup returned 403/429; pausing admission reads", flush=True)
             else:
                 window.backoff = 0
             now = time.monotonic()
-            next_selector_check = now + min(max(delay, GRANT_SELECTOR_POLL_SECONDS), deadline - now)
+            next_liveness_check = now + min(max(delay, GRANT_SELECTOR_POLL_SECONDS), deadline - now)
         remaining = deadline - time.monotonic()
         if remaining > 0:
             time.sleep(min(interval, remaining))
@@ -1109,11 +1132,11 @@ def run_url(r):
     return f"https://github.com/{REPO}/actions/runs/{r}"
 
 
-def worker_progress(r, group, pool):
+def worker_progress(r, group, pool, *, cache=None):
     t = {"group": group}
     if site := os.environ.get("COVERAGE_CS_SITE"):
         t["site"] = site
-    target, _ = observe(r, t, pool)
+    target, _ = observe(r, t, pool, cache=cache)
     if not target:
         return "waiting for the worker job", run_url(r)
     # Print only known phase text and canonical numeric URLs. Never relay output
@@ -1152,7 +1175,8 @@ def wait():
     # Poll cheaply. Dispatch, authorization and handoff use separate reads.
     cache = {}
     while True:
-        m = read_worker(f"{pool} worker {r} result", worker_attempt, r, cache)
+        m = read_worker(f"{pool} worker {r} result", worker_attempt, r, cache,
+                        rate_limit_budget=RESULT_RATE_LIMIT_RECOVERY_SECONDS)
         check(m["id"] == r and m["run_attempt"] == 1, "selected worker attempt identity mismatch")
         if m["status"] == "completed":
             check(m["conclusion"] == "success", "selected coverage group did not pass")
@@ -1162,7 +1186,7 @@ def wait():
         if next_progress_at is None or now >= next_progress_at:
             next_progress_at = now + PROGRESS_INTERVAL
             try:
-                phase, url = worker_progress(r, group, pool)
+                phase, url = worker_progress(r, group, pool, cache=cache)
             except (OSError, ValueError, KeyError, TypeError, AttributeError):
                 phase, url = "worker details temporarily unavailable; still waiting", run_url(r)
             print(f"Group {group}: {phase} — {url}", flush=True)

@@ -610,6 +610,27 @@ class ParentAdmission(unittest.TestCase):
             self.assertEqual(sleeps, [60, 70])
             self.assertEqual(now, 130)
 
+    def test_grant_polling_checks_parent_at_selector_cadence(self):
+        now = 0
+        parents, selectors, grants = [], [], []
+
+        def sleep(seconds):
+            nonlocal now
+            now += seconds
+
+        def grant(*_):
+            grants.append(now)
+            return self.grant if now >= 65 else None
+
+        with patch.object(s, 'parent_meta', side_effect=lambda *_: parents.append(now)), \
+             patch.object(s, 'reconcile_child_meta'), patch.object(s, 'admission_artifact', side_effect=grant), \
+             patch.object(s, 'selector_job', side_effect=lambda *_, **__: selectors.append(now)), \
+             patch.object(s.time, 'monotonic', side_effect=lambda: now), patch.object(s.time, 'sleep', side_effect=sleep):
+            s.wait_for_grant(self.t, 51, 'cs')
+        self.assertEqual(grants, list(range(0, 71, 10)))
+        self.assertEqual(parents, [0, 0, 30, 60])
+        self.assertEqual(selectors, [0, 30, 60])
+
     def test_admission_backoff_grows_until_read_succeeds(self):
         env = dict(TICKET=json.dumps(self.t), GROUP='0', HEAD=self.sha, SOURCE=self.src, POOL='cs',
                    GITHUB_RUN_ATTEMPT='1', GITHUB_RUN_ID='51')
@@ -1584,28 +1605,30 @@ class Progress(unittest.TestCase):
             result("in_progress"),
             urllib.error.HTTPError(path, 304, "Not Modified", {"Date": date}, None),
             urllib.error.HTTPError(path, 403, "Forbidden",
-                                   {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1120"}, None),
+                                   {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "2560"}, None),
+            urllib.error.HTTPError(path, 403, "Forbidden",
+                                   {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "2565"}, None),
             result("completed", conclusion="success"),
         ]
         with patch.dict(os.environ, dict(CHILD="123", GROUP="1", POOL="cs", ACTIONS_TOKEN="test-token")), \
              patch.object(s.urllib.request, "build_opener", return_value=opener), \
              patch.object(s, "worker_progress", return_value=("running", s.run_url(123))), \
              patch.object(s.time, "monotonic", side_effect=lambda: now[0]), \
-             patch.object(s.time, "time", return_value=1000), \
+             patch.object(s.time, "time", side_effect=lambda: 1000 + now[0]), \
              patch.object(s.time, "sleep", side_effect=lambda delay: now.__setitem__(0, now[0] + delay)) as sleep:
             s.wait()
         requests = [call.args[0] for call in opener.open.call_args_list]
         self.assertEqual([(req.get_method(), req.full_url, req.get_header("Authorization")) for req in requests],
-                         [("GET", s.API + path, "Bearer test-token")] * 4)
-        self.assertEqual([req.get_header("If-none-match") for req in requests], [None] + ['"in_progress"'] * 3)
-        self.assertEqual([call.args[0] for call in sleep.call_args_list], [30, 30, 120])
+                         [("GET", s.API + path, "Bearer test-token")] * 5)
+        self.assertEqual([req.get_header("If-none-match") for req in requests], [None] + ['"in_progress"'] * 4)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [30, 30, 1500, 5])
 
     def test_worker_read_honors_rate_limit_and_phase_deadline(self):
         path = "/actions/runs/123/attempts/1"
         for code, headers, deadline, success, expected_sleep in (
             (429, {"Retry-After": "60"}, 85, True, [60]),
             (429, {"Retry-After": "120"}, 130, True, [120]),
-            (429, {"Retry-After": "3710"}, float("inf"), False, []),
+            (429, {"Retry-After": "1800"}, s.SELECTOR_RESERVATION_SECONDS, False, []),
             (429, {"Retry-After": "60"}, 50, False, []),
             (403, {}, 85, False, []),
             (503, {}, 24, False, [5, 10]),
@@ -1649,7 +1672,7 @@ class Progress(unittest.TestCase):
                 with self.subTest(pool=pool, status=status), patch.object(s, "observe", return_value=(target, 1)) as read:
                     self.assertEqual(s.worker_progress(123, 1, pool),
                                      (f"{site}: {phase}", f"https://github.com/{s.REPO}/actions/runs/123/job/312"))
-                    read.assert_called_once_with(123, {"group": 1}, pool)
+                    read.assert_called_once_with(123, {"group": 1}, pool, cache=None)
 
     def test_progress_is_best_effort_and_child_result_is_authoritative(self):
         env = dict(CHILD="123", GROUP="1", POOL="cs")
