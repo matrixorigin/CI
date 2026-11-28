@@ -1,0 +1,87 @@
+name: Check OSS and COS integration
+on:
+  workflow_call:
+    secrets:
+      TEST_S3FS_ALIYUN: {required: false}
+      TEST_S3FS_QCLOUD: {required: false}
+
+permissions:
+  contents: read
+
+jobs:
+  storage:
+    if: >-
+      github.repository == 'matrixorigin/matrixone' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.workflow_ref == 'matrixorigin/matrixone/.github/workflows/oss-cos-check.yaml@refs/heads/main'
+    runs-on: amd64-mo-shanghai-ut-safe
+    timeout-minutes: 90
+    environment: ci
+    steps:
+    - name: Verify Shanghai runner isolation before checkout
+      env:
+        ASSIGNED: ${{ runner.name }}
+      run: |
+        set -eu
+        [[ "$ASSIGNED" == amd64-mo-shanghai-ut-safe-*-runner-* && "$(uname -m)" == x86_64 ]]
+        for path in /var/run/secrets/kubernetes.io/serviceaccount/token /var/run/docker.sock /run/containerd/containerd.sock; do
+          if test -e "$path" || test -L "$path"; then
+            echo "::error::Shanghai test runner exposes $path"
+            exit 1
+          fi
+        done
+    - name: Checkout 4.2-dev
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      timeout-minutes: 10
+      with:
+        ref: refs/heads/4.2-dev
+        path: matrixone
+        persist-credentials: false
+    - uses: matrixorigin/CI/actions/setup-env@5fc75d89bc2841e50ae1557d28ebd9aaec6ec3e2
+      timeout-minutes: 10
+      with:
+        setup-java: false
+        go-version-file: matrixone/go.mod
+    - name: Prepare CGo libraries
+      timeout-minutes: 30
+      working-directory: matrixone
+      run: make cgo
+    - id: test_storage_providers
+      name: Test OSS and COS
+      timeout-minutes: 22
+      working-directory: matrixone
+      env:
+        GOPROXY: http://goproxy.goproxy.svc.cluster.local|https://goproxy.cn|direct
+        TEST_S3FS_ALIYUN: ${{ secrets.TEST_S3FS_ALIYUN }}
+        TEST_S3FS_QCLOUD: ${{ secrets.TEST_S3FS_QCLOUD }}
+      run: |
+        set -euo pipefail
+        if [[ -z "$TEST_S3FS_ALIYUN" || -z "$TEST_S3FS_QCLOUD" ]]; then
+          echo '::error::Configure both OSS and COS before running this check'
+          exit 1
+        fi
+        unset endpoint region apikey apisecret bucket TEST_S3FS_CS
+        export CGO_CFLAGS="-I$PWD/cgo -I$PWD/thirdparties/install/include"
+        export CGO_LDFLAGS="-L$PWD/cgo -lmo -Wl,-rpath,$PWD/cgo -L$PWD/thirdparties/install/lib -lusearch_c -Wl,-rpath,$PWD/thirdparties/install/lib -lm"
+        report="$RUNNER_TEMP/release-storage-test.json"
+        go test -mod=readonly -count=1 -short -json -tags matrixone_test -timeout=20m \
+          -run '^(TestObjectStorages|TestS3FSFromSpecs|TestQCloudSDK)$' ./pkg/fileservice > "$report" || {
+          status=$?
+          echo '::error::OSS/COS integration tests failed'
+          exit "$status"
+        }
+        # The SDK pass identifies the provider and the tested fixture name.
+        # Match that same fixture in the S3FS tests regardless of its name.
+        for sdk in aliyun qcloud; do
+          jq -ne --arg sdk "$sdk" '
+            [inputs | select(.Action == "pass" and .Package == "github.com/matrixorigin/matrixone/pkg/fileservice")
+                    | .Test | strings] as $passed
+            | any($passed[] | capture("^TestObjectStorages/(?<fixture>.+)/" + $sdk + "/basic$");
+                  ("TestS3FSFromSpecs/" + .fixture + "/streaming_write") as $stream
+                  | ($passed | index($stream)) != null)
+          ' "$report" >/dev/null || {
+            echo "::error::Missing passing basic and streaming write tests for $sdk"
+            exit 1
+          }
+        done
+        echo 'OSS and COS basic and streaming write tests passed.'

@@ -492,7 +492,7 @@ class EntryTest(unittest.TestCase):
         for field in ("coverage_ready:", "coverage_status:", "bvt_generation:", "cache_seed:"):
             self.assertIn(field, src.split("jobs:\n")[0])
 
-    def test_fallback_keeps_the_legacy_body_with_updated_runner_placement(self):
+    def test_fallback_keeps_the_legacy_body_with_updated_runner_and_storage_policy(self):
         s = (ROOT/".github/workflows/coverage-ut-pre-cutover.yaml").read_text()
         checkout = "repository: matrixorigin/CI\n          ref: "+LEGACY_HELPER_SHA
         self.assertEqual(s.count(checkout), 1)
@@ -507,4 +507,4 @@ class EntryTest(unittest.TestCase):
         b = s.replace(checkout, "repository: ${{ job.workflow_repository }}\n          ref: ${{ job.workflow_sha }}").replace(
             runner, original_runner).encode()
         self.assertEqual(hashlib.sha1(b"blob "+str(len(b)).encode()+b"\0"+b).hexdigest(),
-                         "52b9213fa50e4de5184b9089ef15f13f82cf8a54")
+                         "d57f4dcf57f6ecde6d753b146f9f56ab55119302")

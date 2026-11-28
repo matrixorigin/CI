@@ -97,8 +97,8 @@ jobs:
       - id: check_coverage_secrets
         name: Check coverage secrets
         env:
-          TEST_S3FS_ALIYUN: ${{ secrets.TEST_S3FS_ALIYUN }}
-          TEST_S3FS_QCLOUD: ${{ secrets.TEST_S3FS_QCLOUD }}
+          TEST_S3FS_ALIYUN: ${{ github.base_ref != 'main' && github.base_ref != '4.2-dev' && secrets.TEST_S3FS_ALIYUN || '' }}
+          TEST_S3FS_QCLOUD: ${{ github.base_ref != 'main' && github.base_ref != '4.2-dev' && secrets.TEST_S3FS_QCLOUD || '' }}
           S3ENDPOINT: ${{ secrets.S3ENDPOINT }}
           S3REGION: ${{ secrets.S3REGION }}
           S3APIKEY: ${{ secrets.S3APIKEY }}
@@ -107,7 +107,12 @@ jobs:
         run: |
           set -euo pipefail
           missing=()
-          for name in TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD S3ENDPOINT S3REGION S3APIKEY S3APISECRET S3BUCKET; do
+          required=(S3ENDPOINT S3REGION S3APIKEY S3APISECRET S3BUCKET)
+          case "${GITHUB_BASE_REF:-}" in
+            main|4.2-dev) ;;
+            *) required+=(TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD) ;;
+          esac
+          for name in "${required[@]}"; do
             if [ -z "${!name:-}" ]; then
               missing+=("${name}")
             fi
@@ -243,6 +248,8 @@ jobs:
           # Embedded-cluster packages run in a second pass on their own (see
           # scripts/run_coverage_ut_phases.sh); this bounds that pass.
           COVERAGE_UT_EMBEDDED_PACKAGE_PARALLELISM: "2"
+          TEST_S3FS_ALIYUN: ${{ github.base_ref != 'main' && github.base_ref != '4.2-dev' && secrets.TEST_S3FS_ALIYUN || '' }}
+          TEST_S3FS_QCLOUD: ${{ github.base_ref != 'main' && github.base_ref != '4.2-dev' && secrets.TEST_S3FS_QCLOUD || '' }}
           COVERAGE_UT_DISCOVERY_TIMEOUT_SECONDS: "900"
           COVERAGE_UT_CGO_TIMEOUT_SECONDS: "1800"
         run: |
@@ -253,8 +260,6 @@ jobs:
           export apikey='${{ secrets.S3APIKEY }}'
           export apisecret='${{ secrets.S3APISECRET }}'
           export bucket='${{ secrets.S3BUCKET }}'
-          export TEST_S3FS_ALIYUN='${{ secrets.TEST_S3FS_ALIYUN }}'
-          export TEST_S3FS_QCLOUD='${{ secrets.TEST_S3FS_QCLOUD }}'
           coverage_profile="${RUNNER_TEMP}/ut-coverage.out"
           coverage_report="${RUNNER_TEMP}/ut-coverage-report.json"
           coverage_progress="${RUNNER_TEMP}/ut-coverage-progress.txt"

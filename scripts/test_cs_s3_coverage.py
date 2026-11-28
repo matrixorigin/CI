@@ -14,6 +14,7 @@ DIRECTORY = Path(__file__).parents[1] / ".github/workflows"
 ENTRY = (DIRECTORY / "coverage-ut.yaml").read_text()
 WORKFLOW = (DIRECTORY / "coverage-worker-cs.yaml").read_text()
 STANDBY = (DIRECTORY / "coverage-ut-standby.yaml").read_text()
+OSS_COS = (DIRECTORY / "oss-cos-check.yaml").read_text()
 STACKS = ("mty", "mnl2", "jed", "ruh")
 CONFIGS = tuple(f"CS_S3_{stack.upper()}_CONFIG" for stack in STACKS)
 
@@ -107,19 +108,35 @@ class CSS3CoverageTest(unittest.TestCase):
                         self.assertIn(f"ci-ut/123-{attempt}", summary.read_text())
                         self.assertNotIn(config, summary.read_text() + result.stdout + result.stderr)
 
-    def test_release_storage_uses_shanghai_and_the_authorized_head(self):
-        job = STANDBY.split("\n  release-storage-coverage:\n")[1].split("\n  merge-coverage-groups:\n")[0]
-        self.assertIn("runs-on: amd64-mo-shanghai-ut-safe", job)
-        self.assertIn("github.base_ref == '4.2-dev' && inputs.enable_4_2_dev", job)
-        self.assertIn("needs.check_coverage_eligibility.outputs.allowed == 'true'", job)
-        self.assertIn("ref: ${{ needs.check_coverage_eligibility.outputs.head_sha }}", job)
-        self.assertLess(job.index("Verify Shanghai runner isolation"), job.index("Checkout authorized MatrixOne head"))
-        self.assertLess(job.index("coverage_pr_entry.py\n        grep"), job.index("Checkout authorized MatrixOne head"))
-        self.assertIn("profile: ${{ steps.profile.outputs.artifact-id }}", job)
-        self.assertIn("artifact-ids: ${{ needs.release-storage-coverage.outputs.profile }}", STANDBY)
+    def test_oss_cos_workflow_is_manual_and_uses_the_release_branch(self):
+        self.assertIn("github.event_name == 'workflow_dispatch'", OSS_COS)
+        self.assertIn("/oss-cos-check.yaml@refs/heads/main", OSS_COS)
+        self.assertIn("runs-on: amd64-mo-shanghai-ut-safe", OSS_COS)
+        self.assertIn("ref: refs/heads/4.2-dev", OSS_COS)
+        self.assertLess(OSS_COS.index("Verify Shanghai runner isolation"), OSS_COS.index("Checkout 4.2-dev"))
+        self.assertNotIn("oss-cos-check.yaml", STANDBY)
+        self.assertNotIn("release-storage-coverage", STANDBY)
 
-    def test_release_provider_coverage_requires_actual_provider_passes(self):
-        script = step_script("test_storage_providers", STANDBY)
+    def test_shanghai_legacy_coverage_requires_only_idc_s3(self):
+        source = (DIRECTORY / "coverage-ut-pre-cutover.yaml").read_text()
+        script = step_script("check_coverage_secrets", source)
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "output"
+            env = dict(PATH=os.environ["PATH"], GITHUB_OUTPUT=str(output), S3ENDPOINT="idc",
+                       S3REGION="test", S3APIKEY="key", S3APISECRET="secret", S3BUCKET="bucket")
+            for branch in ("main", "4.2-dev", "v4.2.8-hotfix"):
+                with self.subTest(branch=branch):
+                    output.write_text("")
+                    subprocess.run(["bash", "-c", script], check=True, capture_output=True,
+                                   env={**env, "GITHUB_BASE_REF": branch})
+                    self.assertEqual(output.read_text(), "ready=true\n" if branch in ("main", "4.2-dev") else "ready=false\n")
+            output.write_text("")
+            subprocess.run(["bash", "-c", script], check=True, capture_output=True,
+                           env={**env, "GITHUB_BASE_REF": "4.2-dev", "S3BUCKET": ""})
+            self.assertEqual(output.read_text(), "ready=false\n")
+
+    def test_oss_cos_check_requires_actual_provider_passes(self):
+        script = step_script("test_storage_providers", OSS_COS)
         package = "github.com/matrixorigin/matrixone/pkg/fileservice"
         passed = [dict(Action="pass", Package=package, Test=name) for name in (
             "TestObjectStorages/oss_eu/storage/aliyun/basic",
@@ -164,25 +181,12 @@ class CSS3CoverageTest(unittest.TestCase):
                 if not missing:
                     args = (root / "args").read_text().splitlines()
                     self.assertEqual(args[-1], "./pkg/fileservice")
-                    self.assertIn("-covermode=set", args)
+                    self.assertEqual(args[-2], "^(TestObjectStorages|TestS3FSFromSpecs|TestQCloudSDK)$")
+                    self.assertFalse(any(arg.startswith("-cover") for arg in args))
                 else:
                     self.assertFalse((root / "args").exists())
 
-    def test_release_merge_requires_and_includes_provider_coverage(self):
-        require = step_script("validate_release_storage", STANDBY)
-        for status, profile, expected in (
-                ("success", "123", True), ("success", "", False),
-                ("skipped", "123", False), ("failure", "123", False)):
-            with self.subTest(status=status, profile=profile):
-                result = subprocess.run(["bash", "-c", require], capture_output=True,
-                                        env=dict(PATH=os.environ["PATH"], STORAGE_RESULT=status, STORAGE_PROFILE=profile))
-                self.assertEqual(result.returncode == 0, expected)
-
-        download = STANDBY.split("    - name: Download the selected release provider profile\n", 1)[1]
-        download = download.split("    - id: merge_profiles\n", 1)[0]
-        # The pinned action nests downloads by artifact ID unless flattening is enabled.
-        self.assertRegex(download, r"(?m)^        merge-multiple: true$")
-        storage_dir = re.search(r"(?m)^        path: (.+)$", download)[1]
+    def test_coverage_merge_uses_both_group_profiles(self):
         merge = step_script("merge_profiles", STANDBY)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -193,26 +197,17 @@ class CSS3CoverageTest(unittest.TestCase):
             go = root / "go"
             go.write_text("#!/bin/bash\nexit 0\n")
             go.chmod(0o755)
-            for folder, name in (("selected/profiles/0", "group0"), ("selected/profiles/1", "group1"),
-                                 (storage_dir, "oss-cos")):
-                profile = root / folder / "ut-coverage.out"
+            for group in (0, 1):
+                profile = root / "selected/profiles" / str(group) / "ut-coverage.out"
                 profile.parent.mkdir(parents=True)
-                profile.write_text(f"mode: set\n{name}:1.1,1.2 1 1\n")
+                profile.write_text(f"mode: set\ngroup{group}:1.1,1.2 1 1\n")
             env = dict(PATH=f"{root}:{os.environ['PATH']}", RUNNER_TEMP=tmp, EXPECTED_HEAD_SHA="a"*40,
                        GROUP_COUNT="2", GITHUB_RUN_ID="42")
-            for required in ("false", "true"):
-                with self.subTest(required=required):
-                    result = subprocess.run(["bash", "-c", merge], cwd=tmp, capture_output=True,
-                                            env={**env, "RELEASE_STORAGE_REQUIRED": required})
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    contents = (root / "ut-coverage.out").read_text()
-                    self.assertEqual(contents.count("mode: set"), 1)
-                    self.assertIn("group0:", contents)
-                    self.assertIn("group1:", contents)
-                    self.assertEqual("oss-cos:" in contents, required == "true")
-            (root / storage_dir / "ut-coverage.out").unlink()
-            result = subprocess.run(["bash", "-c", merge], cwd=tmp, capture_output=True,
-                                    env={**env, "RELEASE_STORAGE_REQUIRED": "true"})
+            subprocess.run(["bash", "-c", merge], cwd=tmp, check=True, capture_output=True, env=env)
+            self.assertEqual((root / "ut-coverage.out").read_text(),
+                             "mode: set\ngroup0:1.1,1.2 1 1\ngroup1:1.1,1.2 1 1\n")
+            (root / "selected/profiles/1/ut-coverage.out").unlink()
+            result = subprocess.run(["bash", "-c", merge], cwd=tmp, capture_output=True, env=env)
             self.assertNotEqual(result.returncode, 0)
 
     def test_smoke_requires_pass_events_and_preserves_safe_failure_details(self):
