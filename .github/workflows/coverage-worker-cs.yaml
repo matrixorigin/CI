@@ -380,22 +380,40 @@ jobs:
         fi
         cgo_ldflags="-L${GITHUB_WORKSPACE}/cgo -lmo -Wl,-rpath,${GITHUB_WORKSPACE}/cgo -L${thirdparties_install_dir}/lib -lusearch_c -Wl,-rpath,${thirdparties_install_dir}/lib -lm"
 
-        # Fail early on the real restricted-account SDK path before the suite.
+        # Probe the restricted account before either group starts. The full
+        # fileservice suite, including tree traversal, runs in group 0.
         phase_start cs_s3_smoke
+        smoke_report="${RUNNER_TEMP}/cs-s3-smoke.json"
+        smoke_tests='^(TestCSStoragePrefixScopedInitialization|TestCITestS3ErrorRedactsDetails|TestCSStorageArgumentsPreservePrefix|TestCITestS3FixtureSafety|TestValidCITestS3Prefix)$|^TestObjectStorages$/^cs-s3$/^minio$/^basic$|^TestS3FSFromSpecs$/^cs-s3$/^streaming_write$'
         set +e
         env CGO_CFLAGS="${cgo_cflags}" CGO_LDFLAGS="${cgo_ldflags}" \
           go test -mod=readonly -count=1 -json -short -tags matrixone_test -timeout=5m \
-          ./pkg/fileservice -run '^(TestCSStoragePrefixScopedInitialization|TestCITestS3ErrorRedactsDetails|TestCSStorageArgumentsPreservePrefix|TestCITestS3FixtureSafety|TestValidCITestS3Prefix|TestObjectStorages|TestS3FSFromSpecs)$' \
-          > "$RUNNER_TEMP/cs-s3-smoke.json"
+          ./pkg/fileservice -run "$smoke_tests" > "$smoke_report"
         smoke_status=$?
         set -e
         phase_end "${smoke_status}"
         if (( smoke_status != 0 )); then
-          jq -r 'select(.Action == "fail" or (.Action == "output" and (.Output | contains("CS S3"))))' "$RUNNER_TEMP/cs-s3-smoke.json"
+          # SDK output can contain signed URLs. Report only a fixed error category.
+          smoke_signal=$(jq -nr '
+            first(inputs | select(.Action == "output" and
+              ((.Test // "") | test("^(TestObjectStorages|TestS3FSFromSpecs)/cs-s3(/|$)|^$"))) | .Output // "" |
+              if test("DeadlineExceeded|context deadline exceeded|i/o timeout|TLS handshake timeout|test timed out"; "i") then "timeout"
+              elif test("no such host|temporary failure in name resolution"; "i") then "dns"
+              elif test("connection refused|connection reset|network is unreachable"; "i") then "connection"
+              elif test("SlowDown|TooManyRequests|HTTP 429"; "i") then "throttled"
+              elif test("AccessDenied|SignatureDoesNotMatch|InvalidAccessKeyId|HTTP 40[13]"; "i") then "authorization"
+              elif test("ServiceUnavailable|HTTP 50[0234]"; "i") then "service_unavailable"
+              else empty end) // "unknown"
+          ' "$smoke_report") || smoke_signal=unknown
+          printf 'CS S3 smoke failure signal: %s\n' "$smoke_signal"
+          printf 'smoke_signal=%s\n' "$smoke_signal" >> "$phase_failure"
           exit "${smoke_status}"
         fi
         for required in 'TestObjectStorages/cs-s3/minio/basic' 'TestS3FSFromSpecs/cs-s3/streaming_write' 'TestCSStoragePrefixScopedInitialization'; do
-          jq -e --arg test_name "$required" 'select(.Action == "pass" and .Test == $test_name)' "$RUNNER_TEMP/cs-s3-smoke.json" >/dev/null || exit 1
+          jq -e --arg test_name "$required" 'select(.Action == "pass" and .Test == $test_name)' "$smoke_report" >/dev/null || {
+            echo "::error::Required CS S3 smoke test did not pass: ${required}"
+            exit 1
+          }
         done
         echo '- Restricted-account S3 initialization, basic and streaming smoke passed.' >> "$GITHUB_STEP_SUMMARY"
 

@@ -215,6 +215,39 @@ class CSS3CoverageTest(unittest.TestCase):
                                     env={**env, "RELEASE_STORAGE_REQUIRED": "true"})
             self.assertNotEqual(result.returncode, 0)
 
+    def test_smoke_checks_required_tests_and_reports_only_a_safe_failure_signal(self):
+        script = step_script("coverage_ut").split("\nphase_start cs_s3_smoke\n", 1)[1]
+        script = script.split("\nphase_name=launch_coverage_suite", 1)[0]
+        script = """set -euo pipefail
+cgo_cflags= cgo_ldflags=
+phase_failure="$RUNNER_TEMP/failure"
+phase_end() { printf 'phase=cs_s3_smoke status=%s\\n' "$1" > "$phase_failure"; }
+""" + script
+        names = ("TestCSStoragePrefixScopedInitialization", "TestObjectStorages/cs-s3/minio/basic",
+                 "TestS3FSFromSpecs/cs-s3/streaming_write")
+        for mode in ("success", "missing", "failure"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                events = [dict(Action="pass", Test=name) for name in names]
+                if mode == "missing":
+                    events.pop()
+                if mode == "failure":
+                    events = [dict(Action="output", Test=names[-1],
+                                   Output="PUT credential-marker: context deadline exceeded")]
+                (root / "events").write_text("\n".join(map(json.dumps, events)) + "\n")
+                go = root / "go"
+                go.write_text('#!/bin/sh\ncat "$RUNNER_TEMP/events"\nexit "$TEST_EXIT"\n')
+                go.chmod(0o755)
+                env = dict(PATH=f"{root}:{os.environ['PATH']}", RUNNER_TEMP=directory,
+                           TEST_EXIT="7" if mode == "failure" else "0", GITHUB_STEP_SUMMARY=str(root / "summary"))
+                result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, {"success": 0, "missing": 1, "failure": 7}[mode], result.stderr)
+                self.assertNotIn("credential-marker", result.stdout + result.stderr)
+                if mode == "failure":
+                    self.assertIn("smoke_signal=timeout", (root / "failure").read_text())
+                if mode == "missing":
+                    self.assertIn(names[-1], result.stdout)
+
     def test_required_s3_tests_cannot_be_missing_skipped_or_failed(self):
         script = step_script("coverage_ut")
         script = 'if [[ "${COVERAGE_GROUP}" == \'0\' ]]; then' + script.split('if [[ "${COVERAGE_GROUP}" == \'0\' ]]; then', 1)[1].split("phase_start compact_profile", 1)[0]
