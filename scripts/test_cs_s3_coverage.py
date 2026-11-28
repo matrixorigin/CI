@@ -215,6 +215,69 @@ class CSS3CoverageTest(unittest.TestCase):
                                     env={**env, "RELEASE_STORAGE_REQUIRED": "true"})
             self.assertNotEqual(result.returncode, 0)
 
+    def test_smoke_requires_pass_events_and_preserves_safe_failure_details(self):
+        script = step_script("coverage_ut").split("\nphase_start cs_s3_smoke\n", 1)[1]
+        script = script.split("\nphase_name=launch_coverage_suite", 1)[0]
+        script = """set -euo pipefail
+cgo_cflags= cgo_ldflags=
+phase_failure="$RUNNER_TEMP/failure"
+phase_end() { printf 'phase=cs_s3_smoke status=%s\\n' "$1" > "$phase_failure"; }
+""" + script
+        names = ("TestCSStoragePrefixScopedInitialization", "TestObjectStorages/cs-s3/minio/basic",
+                 "TestS3FSFromSpecs/cs-s3/streaming_write")
+        passes = [dict(Action="pass", Test=name) for name in names]
+        fixture_test = "TestS3FSFromSpecs/cs-s3"
+        cleanup_output = ("    object_storage_arguments_test.go:111: "
+                          "CS S3 remove fixture object failed (HTTP 0, code DeadlineExceeded, type *url.Error)\n")
+        cases = (
+            ("success", passes, 0, 0, []),
+            ("missing", passes[:-1], 0, 1, [f"smoke_missing_test_pass={names[-1]}"]),
+            ("assertion", [
+                dict(Action="output", Test=names[1], Output="assertion failed: credential-marker"),
+                dict(Action="fail", Test=names[1]),
+                dict(Action="fail", Test=names[1]),
+                dict(Action="fail", Test="TestObjectStorages/cs-s3/minio"),
+                dict(Action="fail", Test=names[1] + "/credential-marker"),
+                dict(Action="fail", Test="TestCITestS3FixtureSafety"),
+                dict(Action="fail"),
+            ], 7, 7, ["smoke_failed_test=TestCITestS3FixtureSafety", f"smoke_failed_test={names[1]}"]),
+            ("cleanup_deadline", [
+                dict(Action="output", Test=names[-1], Output="PUT credential-marker: context deadline exceeded"),
+                dict(Action="fail", Test=names[-1]),
+                dict(Action="output", Test=fixture_test, Output=cleanup_output),
+                dict(Action="output", Output="panic: test timed out after 5m0s\n"),
+            ], 7, 7, ["smoke_operation=remove_fixture_object smoke_http_status=0 smoke_error_code=DeadlineExceeded",
+                      f"smoke_failed_test={names[-1]}"]),
+            ("missing_bucket", [dict(Action="output", Test=fixture_test, Output=
+                "CS S3 list fixture prefix failed (HTTP 404, code NoSuchBucket, type minio.ErrorResponse)\n")],
+             7, 7, ["smoke_operation=list_fixture_prefix smoke_http_status=404 smoke_error_code=NoSuchBucket"]),
+            ("go_timeout", [dict(Action="output", Output="panic: test timed out after 5m0s\n")],
+             7, 7, ["smoke_signal=go_test_timeout"]),
+            ("untrusted_output", [
+                dict(Action="output", Test=names[0], Output=cleanup_output),
+                dict(Action="output", Test=fixture_test, Output=cleanup_output.rstrip() + " credential-marker"),
+            ], 7, 7, ["smoke_signal=unknown"]),
+        )
+        for mode, events, go_exit, expected_exit, diagnostics in cases:
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "events").write_text("\n".join(map(json.dumps, events)) + "\n")
+                go = root / "go"
+                go.write_text('#!/bin/sh\ncat "$RUNNER_TEMP/events"\nexit "$TEST_EXIT"\n')
+                go.chmod(0o755)
+                env = dict(PATH=f"{root}:{os.environ['PATH']}", RUNNER_TEMP=directory,
+                           TEST_EXIT=str(go_exit), GITHUB_STEP_SUMMARY=str(root / "summary"))
+                result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, expected_exit, result.stderr)
+                self.assertNotIn("credential-marker", result.stdout + result.stderr)
+                if diagnostics:
+                    self.assertEqual((root / "failure").read_text().splitlines(),
+                                     [f"phase=cs_s3_smoke status={expected_exit}", *diagnostics])
+                if mode == "missing":
+                    self.assertIn(f"Required CS S3 smoke test did not pass: {names[-1]}", result.stdout)
+                elif expected_exit:
+                    self.assertEqual(result.stdout.splitlines(), ["CS S3 smoke failure", *diagnostics])
+
     def test_required_s3_tests_cannot_be_missing_skipped_or_failed(self):
         script = step_script("coverage_ut")
         script = 'if [[ "${COVERAGE_GROUP}" == \'0\' ]]; then' + script.split('if [[ "${COVERAGE_GROUP}" == \'0\' ]]; then', 1)[1].split("phase_start compact_profile", 1)[0]

@@ -486,9 +486,9 @@ class EntryTest(unittest.TestCase):
         label = "      name: Configure reviewed node cache with private incremental writes\n"
         self.assertEqual(body.count(label), 1)
         body = body.replace(label, label+"      if: ${{ true }}\n")
-        # Includes the audited producer status and report guards. Test
-        # commands, artifact identities, and the merge handoff are unchanged.
-        self.assertEqual(hashlib.sha256(body.encode()).hexdigest(), "cf822d41b5acdfae3b58100d73021f1e75da7fdae5daf58cd5c1794477377498")
+        # Includes the restricted S3 smoke selection, the full test command,
+        # producer status guards and artifact handoff.
+        self.assertEqual(hashlib.sha256(body.encode()).hexdigest(), "5320d042b6c1e76b01bb8b55296547eb469544c99195b83f914a1275c0df655c")
         for field in ("coverage_ready:", "coverage_status:", "bvt_generation:", "cache_seed:"):
             self.assertIn(field, src.split("jobs:\n")[0])
 
