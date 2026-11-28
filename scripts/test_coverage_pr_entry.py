@@ -507,4 +507,4 @@ class EntryTest(unittest.TestCase):
         b = s.replace(checkout, "repository: ${{ job.workflow_repository }}\n          ref: ${{ job.workflow_sha }}").replace(
             runner, original_runner).encode()
         self.assertEqual(hashlib.sha1(b"blob "+str(len(b)).encode()+b"\0"+b).hexdigest(),
-                         "d57f4dcf57f6ecde6d753b146f9f56ab55119302")
+                         "5432058725db3ffb471a798dd7c2f19ef343390f")

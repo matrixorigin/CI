@@ -135,6 +135,42 @@ class CSS3CoverageTest(unittest.TestCase):
                            env={**env, "GITHUB_BASE_REF": "4.2-dev", "S3BUCKET": ""})
             self.assertEqual(output.read_text(), "ready=false\n")
 
+    def test_idc_legacy_and_standby_share_the_scoped_fixture_and_pass_gate(self):
+        for file in ("coverage-ut-pre-cutover.yaml", "coverage-worker-idc.yaml"):
+            src = (DIRECTORY / file).read_text()
+            self.assertIn('source "$RUNNER_TEMP/idc_coverage_s3.sh"', src)
+            self.assertIn('require_idc_coverage_s3_tests "$coverage_report"', src)
+            self.assertLess(src.index("Preserve the trusted IDC S3 helper"), src.index("ref: ${{ " +
+                ("github.event.pull_request.head.sha" if file == "coverage-ut-pre-cutover.yaml" else "inputs.head") + " }}"))
+        helper = DIRECTORY.parents[1] / "scripts/idc_coverage_s3.sh"
+        command = 'source "$1"; configure_idc_coverage_s3 group-0; printf "%s\n" "$MO_CI_S3_PREFIX"; ' \
+                  '[[ "$TEST_S3FS_CS" == name=cs,is-minio=true,endpoint=http://idc,* && ! -v IDC_SECRET && ! -v TEST_S3FS_ALIYUN ]]'
+        values = dict(PATH=os.environ["PATH"], IDC_ENDPOINT="http://idc", IDC_REGION="test",
+                      IDC_BUCKET="bucket", IDC_KEY="key", IDC_SECRET="opaque-value", TEST_S3FS_ALIYUN="old",
+                      GITHUB_RUN_ID="12", GITHUB_RUN_ATTEMPT="2")
+        result = subprocess.run(["bash", "-ec", command, "bash", helper],
+                                env=values, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "ci-ut/12-2/group-0\n")
+        result = subprocess.run(["bash", "-ec", command, "bash", helper],
+                                env={**values, "IDC_BUCKET": ""}, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("opaque-value", result.stdout + result.stderr)
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "report.json"
+            tests = ["TestObjectStorages/cs-s3/minio/basic", "TestS3FSFromSpecs/cs-s3/streaming_write"]
+            command = 'source "$1"; require_idc_coverage_s3_tests "$2"'
+            for result_name in ("pass", "skip"):
+                events = [dict(Action="pass" if i == 0 else result_name, Test=name,
+                               Package="github.com/matrixorigin/matrixone/pkg/fileservice")
+                          for i, name in enumerate(tests)]
+                report.write_text("\n".join(map(json.dumps, events)))
+                result = subprocess.run(["bash", "-ec", command, "bash", helper, report],
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode == 0, result_name == "pass")
+                if result_name == "skip":
+                    self.assertIn("update the PR branch", result.stdout)
+
     def test_oss_cos_check_requires_actual_provider_passes(self):
         script = step_script("test_storage_providers", OSS_COS)
         package = "github.com/matrixorigin/matrixone/pkg/fileservice"
@@ -153,7 +189,8 @@ class CSS3CoverageTest(unittest.TestCase):
                 ("both providers passed", None, 0, passed, 0),
                 ("missing OSS config", "TEST_S3FS_ALIYUN", 0, passed, 1),
                 ("missing COS config", "TEST_S3FS_QCLOUD", 0, passed, 1),
-                ("Go test failed", None, 7, passed, 7),
+                ("OSS SDK failed", None, 7, [dict(passed[0], Action="fail")], 7),
+                ("COS stream failed", None, 7, [dict(passed[1], Action="run"), dict(passed[3], Action="fail")], 7),
                 ("disk only", None, 0, disk_only, 1),
                 ("only COS passed", None, 0, passed[1::2], 1),
                 ("unrelated streaming fixture passed", None, 0, wrong_fixture, 1),
@@ -178,6 +215,11 @@ class CSS3CoverageTest(unittest.TestCase):
                     env[missing] = ""
                 result = subprocess.run(["bash", "-c", script], cwd=tmp, env=env, capture_output=True)
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                diagnostic = {"OSS SDK failed": b"aliyun/basic", "COS stream failed": b"qcloud/streaming_write"}.get(name)
+                if diagnostic:
+                    self.assertIn(b"OSS/COS failed case: " + diagnostic, result.stdout)
+                    self.assertNotIn(b"oss_eu/storage", result.stdout + result.stderr)
+                    self.assertNotIn(b"TencentCOS", result.stdout + result.stderr)
                 if not missing:
                     args = (root / "args").read_text().splitlines()
                     self.assertEqual(args[-1], "./pkg/fileservice")

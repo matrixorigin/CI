@@ -68,6 +68,27 @@ jobs:
           -run '^(TestObjectStorages|TestS3FSFromSpecs|TestQCloudSDK)$' ./pkg/fileservice > "$report" || {
           status=$?
           echo '::error::OSS/COS integration tests failed'
+          # Go's test names can contain provider fixture or bucket names.
+          # Use them only for correlation and publish fixed case identifiers.
+          jq -nr '
+            reduce inputs as $event ({providers: {}, failed: {}};
+              ($event.Test // "") as $test |
+              ([$test | capture("^TestObjectStorages/(?<fixture>.+)/(?<sdk>aliyun|qcloud)(?:/(?<leaf>.*))?$")][0]) as $sdk |
+              if $sdk then
+                .providers[$sdk.fixture] = $sdk.sdk |
+                if $event.Action == "fail" then
+                  .failed[$sdk.sdk + (if $sdk.leaf == "basic" then "/basic" else "/sdk" end)] = true
+                else . end
+              elif $event.Action == "fail" and ($test | startswith("TestQCloudSDK/") or . == "TestQCloudSDK") then
+                .failed["qcloud/sdk"] = true
+              elif $event.Action == "fail" then
+                ([$test | capture("^TestS3FSFromSpecs/(?<fixture>.+)/streaming_write$")][0]) as $stream |
+                if $stream and .providers[$stream.fixture] then
+                  .failed[.providers[$stream.fixture] + "/streaming_write"] = true
+                else . end
+              else . end
+            ) | .failed | keys[] | "OSS/COS failed case: \(.)"
+          ' "$report" 2>/dev/null || true
           exit "$status"
         }
         # The SDK pass identifies the provider and the tested fixture name.
