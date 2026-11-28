@@ -16,7 +16,7 @@ HOST = "mo-standard-1"
 PROFILE = "matrixone.cloud/profile"
 
 
-def site_reader(site, free, *, pending=0, pod_cpu="0", pod_mem="0", ready=True, taints=()):
+def site_reader(site, free, *, replicas=0, limit=None, runner_bound=False, pod_cpu="0", pod_mem="0", ready=True, taints=()):
     name = f"cs-{site}-nc-n1-pr-v1"
     node = {"metadata": {"name": HOST, "labels": {"kubernetes.io/hostname": HOST, PROFILE: "cn.cloudsigma"}},
             "spec": {"taints": list(taints)},
@@ -28,10 +28,16 @@ def site_reader(site, free, *, pending=0, pod_cpu="0", pod_mem="0", ready=True, 
                 "containers": [{"name": "runner", "resources": {"requests": {"cpu": "7", "memory": "12Gi"}}}],
                 "volumes": [{"name": "work", "ephemeral": {"volumeClaimTemplate": {
                     "spec": {"storageClassName": cap.WORK_CLASS, "resources": {"requests": {"storage": "80Gi"}}}}}}]}
-    scale = {"metadata": {"name": name, "annotations": {"runner-scale-set-id": "1"}},
+    scale = {"metadata": {"name": name, "uid": "scale-uid", "generation": 1, "annotations": {"runner-scale-set-id": "1"}},
              "spec": {"runnerScaleSetName": name, "runnerScaleSetLabels": [cap.LABEL],
                       "template": {"spec": template}},
-             "status": {"phase": "Running", "pendingEphemeralRunners": pending}}
+             "status": {"phase": "Running", "observedGeneration": 1}}
+    if limit is not None:
+        scale["spec"]["maxRunners"] = limit
+    runner_set = {"metadata": {"name": name, "ownerReferences": [
+                      {"apiVersion": cap.ARC_API, "kind": "AutoscalingRunnerSet", "name": name,
+                       "uid": "scale-uid", "controller": True}]},
+                  "spec": {"replicas": replicas} if replicas else {}}
     drives = [{"metadata": {"labels": {"directpv.min.io/node": HOST, "directpv.min.io/tier": "ephemeral"}},
                "status": {"status": "Ready", "freeCapacity": value * cap.GIB,
                           "topology": {"directpv.min.io/identity": "allowed"}}} for value in free]
@@ -39,8 +45,13 @@ def site_reader(site, free, *, pending=0, pod_cpu="0", pod_mem="0", ready=True, 
                      "volumeBindingMode": "WaitForFirstConsumer", "parameters": {"directpv.min.io/tier": "ephemeral"},
                      "allowedTopologies": [{"matchLabelExpressions": [
                          {"key": "directpv.min.io/identity", "values": ["allowed"]}]}]}
-    pod = {"spec": {"nodeName": HOST, "containers": [{"resources": {"requests": {"cpu": pod_cpu, "memory": pod_mem}}}]},
+    pod = {"metadata": {"name": "unrelated", "namespace": "other"},
+           "spec": {"nodeName": HOST, "containers": [{"resources": {"requests": {"cpu": pod_cpu, "memory": pod_mem}}}]},
            "status": {"phase": "Running"}}
+    if runner_bound:
+        pod["metadata"] = {"name": f"{name}-runner-fresh", "namespace": "cicd",
+                           "labels": {"actions-ephemeral-runner": "True"}}
+        pod["spec"]["containers"] = template["containers"]
 
     def get(path, filters):
         if path == cap.PODS_PATH:
@@ -48,7 +59,7 @@ def site_reader(site, free, *, pending=0, pod_cpu="0", pod_mem="0", ready=True, 
                 raise AssertionError("capacity read must be limited to a candidate node")
             return [pod]
         return {cap.NODES_PATH: [node], cap.ARS_PATH: [scale], cap.CLASSES_PATH: [storage_class],
-                cap.DRIVES_PATH: drives, cap.CI_PODS_PATH: []}[path]
+                cap.DRIVES_PATH: drives, cap.ERS_PATH: [runner_set]}[path]
 
     return get
 
@@ -78,7 +89,7 @@ class Capacity(unittest.TestCase):
 
     def test_allocatable_pending_and_node_readiness(self):
         for kwargs, expected in [
-            ({"pending": 2}, (2, 2)),
+            ({"replicas": 2}, (2, 2)),
             ({"pod_cpu": "1600m", "pod_mem": "5Gi"}, (1, 0)),
             ({"pod_cpu": "9100m"}, (0, 0)),
             ({"ready": False}, None),
@@ -87,6 +98,45 @@ class Capacity(unittest.TestCase):
             with self.subTest(kwargs=kwargs):
                 rows = cap.collect_site("mnl2", site_reader("mnl2", [160], **kwargs))
                 self.assertEqual([(r["slots"], r["pending"]) for r in rows], [] if expected is None else [expected])
+
+    def test_listener_replicas_and_capped_slots_use_same_fields_across_arc_versions(self):
+        for version, status in (
+            ("0.14", {"phase": "Running", "currentRunners": 1, "pendingEphemeralRunners": 1}),
+            ("0.15", {"phase": "Running", "observedGeneration": 1}),
+        ):
+            for replicas, limit, bound, available in ((0, 2, False, 2), (1, 1, False, 0),
+                                                       (1, 2, True, 1), (1, 1, True, 0), (0, 1, True, 0)):
+                with self.subTest(version=version, replicas=replicas, limit=limit, bound=bound):
+                    inventory = site_reader("jed", [160], replicas=replicas, limit=limit, runner_bound=bound)
+
+                    def get(path, filters):
+                        rows = inventory(path, filters)
+                        if path == cap.ARS_PATH:
+                            rows[0]["status"] = status
+                        return rows
+
+                    row, = cap.collect_site("jed", get)
+                    self.assertEqual(row["slots"] - row["pending"], available)
+
+    def test_stale_or_ambiguous_runner_sets_do_not_offer_capacity(self):
+        for case in ("wrong owner", "deleting", "overlapping", "old generation"):
+            with self.subTest(case=case):
+                inventory = site_reader("jed", [160], limit=2)
+
+                def get(path, filters):
+                    rows = inventory(path, filters)
+                    if path == cap.ERS_PATH:
+                        if case == "wrong owner":
+                            rows[0]["metadata"]["ownerReferences"][0]["uid"] = "old-uid"
+                        if case == "deleting":
+                            rows[0]["metadata"]["deletionTimestamp"] = "2026-11-20T00:00:00Z"
+                        if case == "overlapping":
+                            return rows * 2
+                    if path == cap.ARS_PATH and case == "old generation":
+                        rows[0]["metadata"]["generation"] = 2
+                    return rows
+
+                self.assertEqual(cap.collect_site("jed", get), [])
 
     def test_init_container_resources_and_overhead(self):
         spec = {"containers": [{"resources": {"requests": {"cpu": "2"}}}],

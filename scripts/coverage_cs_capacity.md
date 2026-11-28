@@ -17,9 +17,11 @@ short-lived read-only bearer credential) and optionally `ca_pem` (its trusted
 CA certificate). Use a platform-approved network path and restricted identity.
 Do not copy a personal kubeconfig or grant a CI credential access to Secrets
 or to any write API. The read-only identity needs list access to nodes, pods,
-storage classes, and DirectPV drives, plus list access to the ARC runner sets
-in the `cicd` namespace. The preflight filters pod reads to the candidate node
-or pending `cicd` pods.
+storage classes, and DirectPV drives, plus list access to
+`autoscalingrunnersets` and `ephemeralrunnersets` in the `cicd` namespace. The
+preflight filters pod reads to candidate nodes. Standard Kubernetes RBAC grants
+cluster-wide pod list access for that query, so approve this scope before
+connecting a site.
 
 No credential or Kubernetes resource body is passed to selectors or workers.
 Only a timestamp and numerical capacity counts for allowlisted pools are
@@ -27,14 +29,19 @@ passed. Missing credentials, inaccessible data, stale data and insufficient
 resources fall back to the shared queue. Each initial parent run shares one
 15-second collection budget for both groups. A slow or unavailable site is
 omitted while other completed reads remain usable. Equally suitable pools are
-spread by parent run ID. Pending demand is deducted from the advisory capacity
-estimate. Validate collector reachability, API load and real allocations before
-enabling the repository setting.
+spread by parent run ID. ARC 0.14 and 0.15 expose desired replicas on the
+owned `EphemeralRunnerSet`. Pods already bound to the candidate node count
+toward that target and already consume the node's resources. The remaining
+desired replicas reduce the offer. Validate read access, S3 fixture health and
+real allocations at the configured sites before enabling the repository setting.
 
 An exact probe uses an approved CS scale set and a worker dispatched by GitHub
 Actions. The worker still needs the exact parent grant before checking out PR
-code. After 30 seconds unassigned, or if the probe ends before a grant, the
-selector confirms that exact worker is terminal before dispatching one shared
-CS reservation. An attempt without a usable pool hint follows the existing
+code. The selector starts the 30-second probe budget when it initiates the
+reservation, including time in `pending`, `requested` or `waiting`. It then
+checks the exact worker's assignment and run state. A verified assignment
+wins. Otherwise it confirms that worker is terminal before dispatching one
+shared CS reservation. Cancellation and identity checks use the bounded
+handoff window. An attempt without a usable pool hint follows the existing
 queue policy. The one-hour Shanghai timer starts at the first observed CS
-queue wait. A verified assignment at handoff wins.
+queue wait.

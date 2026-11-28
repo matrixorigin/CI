@@ -20,12 +20,15 @@ GIB = 1024 ** 3
 MAX_BUCKET = 128  # The selector rejects out-of-range receipts.
 MAX_PAGE_BYTES = 8 * 1024 * 1024
 SNAPSHOT_SECONDS = 15
-ARS_PATH = "/apis/actions.github.com/v1alpha1/namespaces/cicd/autoscalingrunnersets"
+ARC_API = "actions.github.com/v1alpha1"
+ARC_NAMESPACE = "cicd"
+ARC_PATH = f"/apis/{ARC_API}/namespaces/{ARC_NAMESPACE}"
+ARS_PATH = f"{ARC_PATH}/autoscalingrunnersets"
+ERS_PATH = f"{ARC_PATH}/ephemeralrunnersets"
 DRIVES_PATH = "/apis/directpv.min.io/v1beta1/directpvdrives"
 CLASSES_PATH = "/apis/storage.k8s.io/v1/storageclasses"
 NODES_PATH = "/api/v1/nodes"
 PODS_PATH = "/api/v1/pods"
-CI_PODS_PATH = "/api/v1/namespaces/cicd/pods"
 QUANTITIES = {"": 1, "n": Decimal("1e-9"), "u": Decimal("1e-6"), "m": Decimal("1e-3")}
 QUANTITIES.update({s: 1000 ** i for i, s in enumerate("kMGTPE", 1)})
 QUANTITIES.update({s + "i": 1024 ** i for i, s in enumerate("KMGTPE", 1)})
@@ -88,13 +91,34 @@ def ready_node(node, template, host):
                     for taint in node["spec"].get("taints", []) if taint["effect"] in ("NoSchedule", "NoExecute")))
 
 
-def pool_offer(ars, node, drives, active_pods, pending_pods):
-    pool, spec, status = ars["metadata"]["name"], ars["spec"], ars["status"]
+def runner_set(ars, ephemeral_sets):
+    """Use the listener's desired replicas from the current, owned runner set."""
+    owner = ars["metadata"]
+    owned = [r for r in ephemeral_sets if any(
+        ref.get("controller") is True and ref["kind"] == "AutoscalingRunnerSet"
+        and ref["apiVersion"] == ARC_API and ref["uid"] == owner["uid"] and ref["name"] == owner["name"]
+        for ref in r["metadata"].get("ownerReferences", []))]
+    if len(owned) == 1 and not owned[0]["metadata"].get("deletionTimestamp"):
+        return owned[0]
+    return None
+
+
+def pool_offer(ars, node, drives, active_pods, ephemeral_sets):
+    metadata, spec, status = ars["metadata"], ars["spec"], ars["status"]
+    pool = metadata["name"]
     host = node["metadata"]["name"]
     template = spec["template"]["spec"]
     if (spec.get("runnerScaleSetName") != pool or LABEL not in spec.get("runnerScaleSetLabels", [])
-            or not ars["metadata"].get("annotations", {}).get("runner-scale-set-id")
+            or metadata.get("deletionTimestamp") or not metadata.get("annotations", {}).get("runner-scale-set-id")
+            or status.get("observedGeneration", metadata.get("generation")) != metadata.get("generation")
             or status.get("phase") != "Running" or not ready_node(node, template, host)):
+        return None
+    active_set = runner_set(ars, ephemeral_sets)
+    if active_set is None:
+        return None
+    replicas = active_set["spec"].get("replicas", 0)  # Zero is omitted by ARC.
+    limit = spec.get("maxRunners")
+    if type(replicas) is not int or replicas < 0 or (limit is not None and (type(limit) is not int or limit < 0)):
         return None
     work, = [v["ephemeral"]["volumeClaimTemplate"]["spec"] for v in template["volumes"]
              if v["name"] == "work"]
@@ -117,22 +141,16 @@ def pool_offer(ars, node, drives, active_pods, pending_pods):
             if type(free) is not int or free < 0:
                 raise ValueError("invalid work-disk capacity")
             disk_slots += int(free // work_size)
-    pending_count = status.get("pendingEphemeralRunners", 0)
-    if type(pending_count) is not int or pending_count < 0:
-        raise ValueError("invalid pending ARC demand")
-    pending = max(pending_count, sum(p["metadata"]["name"].startswith(pool + "-")
-                                    for p in pending_pods if not p["spec"].get("nodeName")))
+    # ARC derives pod names from the owned set. Bound pods already consume the
+    # node's resources, so only the remaining desired replicas claim new slots.
+    prefix = active_set["metadata"]["name"] + "-runner-"
+    bound = sum(p["namespace"] == ARC_NAMESPACE and p["name"].startswith(prefix)
+                and p.get("labels", {}).get("actions-ephemeral-runner") == "True"
+                for p in (pod["metadata"] for pod in active_pods))
+    pending = max(0, replicas - bound)
     slots = max(0, min(free_cpu // cpu, free_mem // mem, disk_slots, MAX_BUCKET))
-    if (limit := spec.get("maxRunners")) is not None:
-        current = status.get("currentRunners")
-        if type(limit) is not int or type(current) is not int or min(limit, current) < 0:
-            return None
-        # Keep ARC's scale limit; pending demand is deducted once by the selector.
-        running = status.get("runningEphemeralRunners", 0)
-        if type(running) is not int or running < 0:
-            return None
-        current = max(current, running + pending_count)
-        slots = min(slots, max(0, limit - current) + pending)
+    if limit is not None:
+        slots = min(slots, max(0, limit - bound))
     return {"pool": pool, "slots": slots, "pending": min(MAX_BUCKET, pending)}
 
 
@@ -152,7 +170,7 @@ def collect_site(site, get_items):
             all(d["status"].get("topology", {}).get(req["key"]) in req["values"]
                 for req in term["matchLabelExpressions"])
             for term in terms)]
-    pending = get_items(CI_PODS_PATH, {"fieldSelector": "status.phase=Pending"})
+    ephemeral_sets = get_items(ERS_PATH, {})
     rows = []
     for ars in scales:
         pool = ars["metadata"]["name"]
@@ -164,7 +182,7 @@ def collect_site(site, get_items):
         pods = get_items(PODS_PATH, {"fieldSelector": f"spec.nodeName={host},status.phase!=Succeeded,status.phase!=Failed"})
         active = [p for p in pods if p["spec"].get("nodeName") == host
                   and p["status"]["phase"] not in ("Succeeded", "Failed")]
-        if row := pool_offer(ars, nodes[host], drives, active, pending):
+        if row := pool_offer(ars, nodes[host], drives, active, ephemeral_sets):
             rows.append(row)
     return rows
 
