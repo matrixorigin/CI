@@ -1206,13 +1206,18 @@ class Queue(unittest.TestCase):
                 # outside the range representable by wall-clock floats.
                 self.assertEqual(s.first_cs_pool_plan(receipt(rows, captured), float(now)), ())
 
-    def test_equal_offers_rotate_by_parent_without_moving_the_two_groups_together(self):
+    def test_equal_offers_spread_by_parent_without_disturbing_higher_capacity_rank(self):
         first, second = "cs-mnl2-nc-n0-pr-v1", "cs-ruh-nc-n0-pr-v1"
-        receipt = json.dumps(dict(captured_at=1000, pools=[
-            dict(pool=pool, slots=1, pending=0) for pool in (first, second)]))
-        self.assertEqual(s.first_cs_pool_plan(receipt, 1000, parent=42), (first, second))
-        self.assertEqual(s.first_cs_pool_plan(receipt, 1000, parent=43), (second, first))
-        self.assertEqual(s.first_cs_pool_plan(receipt, 1001, parent=42), (first, second))
+        offers = [dict(pool=pool, slots=2, pending=0) for pool in (first, second)]
+        receipt = json.dumps(dict(captured_at=1000, pools=offers))
+        with_smaller_offer = json.dumps(dict(captured_at=1000, pools=[*offers,
+            dict(pool="cs-mnl2-nc-n1-pr-v1", slots=1, pending=0)]))
+        plans = set()
+        for parent in range(20):
+            plan = s.first_cs_pool_plan(receipt, 1000, parent=parent)
+            plans.add(plan)
+            self.assertEqual(s.first_cs_pool_plan(with_smaller_offer, 1001, parent=parent), plan)
+        self.assertEqual(plans, {(first, second), (second, first)})
 
     def test_first_pool_requires_exact_label_and_assigned_runner_prefix(self):
         pool = "cs-mnl2-nc-n2-pr-v1"
@@ -1353,8 +1358,8 @@ class Queue(unittest.TestCase):
 
     def test_stalled_exact_probe_falls_back_once_to_shared_after_confirmed_cancel(self):
         target = "cs-ruh-nc-n0-pr-v1"
-        timeline = [(self.q, 1), (self.q, 30), (self.q, 31), (self.q, 32), (self.active, 34)]
-        grant, events = self.run_site_sweep(timeline, exact=target, enabled=False)
+        timeline = [(self.q, 1), (self.q, 30), (self.q, 31), (self.q, 32), (self.q, 33), (self.active, 401)]
+        grant, events = self.run_site_sweep(timeline, exact=target)
         self.assertEqual(events, [("reserve", 1, "cs", target), ("cancel", 1), ("confirm", 1),
                                   ("reserve", 2, "cs", None)])
         self.assertEqual((grant["child"], grant["pool"]), (2, "cs"))
@@ -1375,9 +1380,22 @@ class Queue(unittest.TestCase):
 
     def test_exact_probe_does_not_replace_a_child_without_confirmed_cancel(self):
         _, events = self.run_site_sweep([(self.q, 1), (self.q, 31), (self.q, 32)],
-                                        exact="cs-ruh-nc-n0-pr-v1", after_cancel="failure",
-                                        expected_error=(ValueError, "did not acknowledge withdrawal"))
+                                        exact="cs-ruh-nc-n0-pr-v1",
+                                        after_cancel=ValueError("dedicated worker identity mismatch"),
+                                        expected_error=(ValueError, "worker identity mismatch"))
         self.assertEqual([e[0] for e in events], ["reserve", "cancel", "confirm"])
+
+    def test_exact_probe_ending_before_admission_falls_back_to_shared(self):
+        target = "cs-ruh-nc-n0-pr-v1"
+        ended = dict(self.q, status="completed", conclusion="failure")
+        for timeline in ([(ended, 1), (ended, 2), (self.active, 4)],
+                         [(self.q, 1), (self.q, 31), (ended, 32), (self.active, 34)]):
+            with self.subTest(timeline=timeline):
+                grant, events = self.run_site_sweep(timeline, exact=target, cancel_code=409, after_cancel="failure")
+                self.assertEqual(events, [("reserve", 1, "cs", target), ("cancel", 1), ("confirm", 1),
+                                          ("reserve", 2, "cs", None)])
+                self.assertEqual(grant["child"], 2)
+                self.assertNotIn("scale_set", grant["ticket"])
 
     def test_failed_exact_probe_is_revocable_without_child_output(self):
         target = "cs-ruh-nc-n0-pr-v1"

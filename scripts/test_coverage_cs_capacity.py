@@ -3,6 +3,7 @@ import json
 import os
 import re
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -52,18 +53,26 @@ def site_reader(site, free, *, pending=0, pod_cpu="0", pod_mem="0", ready=True, 
     return get
 
 
+def fixture_reader(config):
+    if config.get("stall"):
+        time.sleep(60)
+    if error := config.get("error"):
+        raise OSError(error)
+    return site_reader(**config)
+
+
 class Capacity(unittest.TestCase):
     def test_disk_must_fit_whole_claim_and_not_block_other_sites(self):
-        inventory = {"jed": site_reader("jed", [34]), "mnl2": site_reader("mnl2", [159]),
-                     "ruh": site_reader("ruh", [80, 79])}
-        receipt = cap.snapshot(inventory, reader=lambda get: get)
+        inventory = {site: dict(site=site, free=space)
+                     for site, space in (("jed", [34]), ("mnl2", [159]), ("ruh", [80, 79]))}
+        receipt = cap.snapshot(inventory, reader=fixture_reader)
         self.assertEqual(receipt["pools"], [
             {"pool": "cs-jed-nc-n1-pr-v1", "slots": 0, "pending": 0},
             {"pool": "cs-mnl2-nc-n1-pr-v1", "slots": 1, "pending": 0},
             {"pool": "cs-ruh-nc-n1-pr-v1", "slots": 1, "pending": 0},
         ])
-        self.assertEqual(standby.first_cs_pool_plan(json.dumps(receipt), receipt["captured_at"]),
-                         ("cs-mnl2-nc-n1-pr-v1", "cs-ruh-nc-n1-pr-v1"))
+        self.assertCountEqual(standby.first_cs_pool_plan(json.dumps(receipt), receipt["captured_at"]),
+                              ("cs-mnl2-nc-n1-pr-v1", "cs-ruh-nc-n1-pr-v1"))
         row, = cap.collect_site("jed", site_reader("jed", [63, 73]))
         self.assertEqual(row["slots"], 0)
 
@@ -100,14 +109,20 @@ class Capacity(unittest.TestCase):
         self.assertEqual(row["slots"], 0)
 
     def test_missing_or_unreachable_sites_do_not_emit_credentials(self):
-        def unavailable(config):
-            raise OSError("test-sensitive connection information")
-
         with patch("builtins.print") as out:
-            receipt = cap.snapshot({"mty": {}}, reader=unavailable)
+            receipt = cap.snapshot({"mty": {"error": "test-sensitive connection information"}}, reader=fixture_reader)
         self.assertEqual(receipt["pools"], [])
+        out.assert_called_once()
         self.assertNotIn("test-sensitive", str(out.call_args_list))
         self.assertEqual(standby.first_cs_pool_plan(json.dumps(receipt), receipt["captured_at"]), ())
+
+    def test_stalled_site_keeps_healthy_offer_at_snapshot_deadline(self):
+        inventory = {"mty": {"stall": True}, "jed": {"site": "jed", "free": [80]}}
+        start = time.monotonic()
+        with patch.object(cap, "SNAPSHOT_SECONDS", 3):
+            receipt = cap.snapshot(inventory, reader=fixture_reader)
+        self.assertLess(time.monotonic() - start, 12)
+        self.assertEqual(receipt["pools"], [{"pool": "cs-jed-nc-n1-pr-v1", "slots": 1, "pending": 0}])
 
     def test_output_is_aggregate_only_and_empty_credentials_keep_shared_queue(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -149,7 +164,7 @@ class Capacity(unittest.TestCase):
         self.assertNotIn("CS_COVERAGE_CAPACITY_READ", selector)
         self.assertNotIn("CS_COVERAGE_CAPACITY_READ", worker)
         self.assertIn("COVERAGE_CS_FIRST_POOL_SNAPSHOT: ${{ inputs.first_pool_snapshot }}", selector)
-        self.assertIn("inputs.enable_cs_site_retry && !inputs.enable_cs_first_pool", selector)
+        self.assertIn("COVERAGE_CS_SITE_RETRY: ${{ inputs.enable_cs_site_retry }}", selector)
         self.assertIn("github.actor == 'github-actions[bot]'", worker)
         self.assertIn("fromJSON(inputs.ticket || '{}').attempt == 1", worker)
         self.assertNotIn("32922", worker)

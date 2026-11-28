@@ -507,13 +507,11 @@ def first_cs_pool_plan(raw, now, *, parent=0):
                 or not 0 <= slots <= 128 or not 0 <= pending <= 128):
             return ()
         offers[name] = slots - pending
-    eligible = sorted(p for p, n in offers.items() if n > 0)
-    if len(eligible) < 2:
-        return tuple(eligible)
-    # Stable within a parent (including the recheck before POST), but avoid
-    # directing simultaneous PRs with equally good offers to one pool first.
-    offset = parent % len(eligible)
-    ranked = sorted(eligible[offset:] + eligible[:offset], key=lambda p: -offers[p])
+    # Break ties within each capacity rank, independently of lower offers.
+    ranked = sorted((p for p, n in offers.items() if n > 0), key=lambda p: (
+        -offers[p], hashlib.sha256(f"{parent}:{p}".encode("ascii")).digest()))
+    if len(ranked) < 2:
+        return tuple(ranked)
     first = ranked[0]
     # Prefer distinct sites when possible; never nominate the same pool for
     # both groups of the parent.
@@ -596,7 +594,7 @@ def observe(r, t, pool, expect_visible=False, *, cache=None):
     return job, now
 
 
-def decide(job, now, since):
+def decide(job, now, since, *, exact_probe=False):
     if job is None:
         check(since is None, "previously queued job disappeared")
         return None, None
@@ -610,6 +608,8 @@ def decide(job, now, since):
             return None, since
         since = now if since is None else since
         return ("idc" if now - since >= WAIT else None), since
+    if exact_probe and job["status"] == "completed":
+        return "shared", since  # The optional probe has never received a grant.
     check(job["status"] in ("requested", "waiting", "pending"), "not a queue timeout")
     return None, since
 
@@ -825,7 +825,8 @@ def withdraw_cs(r, t, rev, deadline):
             break
         m = read_worker(f"confirming CS worker {r} cancellation", child_meta, r, t, "cs", rev, deadline=deadline)
         if m["status"] == "completed":
-            check(m["conclusion"] == "cancelled", "CS did not acknowledge withdrawal")
+            check(m["conclusion"] == "cancelled" or "scale_set" in t,
+                  "CS did not acknowledge withdrawal")
             return
         if poll + 1 == HANDOFF_POLLS or time.monotonic() + HANDOFF_POLL_SECONDS >= deadline:
             break
@@ -840,38 +841,38 @@ def select_cs(t, enable_site_retry, deadline):
     r, rev, nonce, (j, now) = reserve(t, "cs", deadline)
     cache = {}
     target = t.get("scale_set")
-    remaining_sites = [*CS_SITES[offset:], *CS_SITES[:offset], None] if enable_site_retry else []
+    remaining_sites = [*CS_SITES[offset:], *CS_SITES[:offset], None] if enable_site_retry and not target else []
     first_queued = queued_here = last_queue_report = None
     if target:
         print(f"Group {t['group']}: first CS reservation targets {target} — {run_url(r)}", flush=True)
     else:
         print(f"Group {t['group']}: requesting a CS runner — {run_url(r)}", flush=True)
     while time.monotonic() < deadline:
-        route, queued_here = decide(j, now, queued_here)
+        exact_probe = "scale_set" in t
+        route, queued_here = decide(j, now, queued_here, exact_probe=exact_probe)
         if first_queued is None:
             first_queued = queued_here
         if unassigned(j) and now - first_queued >= WAIT:
             route = "idc"
-        if route:
+        if route in ("cs", "idc"):
             print(f"group={t['group']} CS_job={j['id']} first_queued_utc={first_queued} decision_utc={now} route={route}", flush=True)
             return r, rev, nonce, route, first_queued
-        exact_probe = "scale_set" in t
         threshold = CS_SITE_PROBE_WAIT if "site" in t else CS_SITE_RETRY_AFTER
         if exact_probe:
             threshold = FIRST_POOL_PROBE_WAIT
-        if (exact_probe or remaining_sites) and unassigned(j) and now - queued_here >= threshold:
+        if route == "shared" or ((exact_probe or remaining_sites) and unassigned(j) and now - queued_here >= threshold):
             j, now = read_worker(f"CS worker {r} handoff", observe_cs_handoff, r, t, rev, deadline=deadline)
-            route, queued_here = decide(j, now, queued_here)
+            route, queued_here = decide(j, now, queued_here, exact_probe=exact_probe)
             if route == "cs":
                 return r, rev, nonce, route, first_queued
-            if unassigned(j):
-                if now - first_queued >= WAIT:
+            if route == "shared" or unassigned(j):
+                if unassigned(j) and first_queued is not None and now - first_queued >= WAIT:
                     return r, rev, nonce, "idc", first_queued
                 withdraw_cs(r, t, rev, deadline)
                 check(time.monotonic() < deadline, "CS selection deadline exceeded before replacement")
                 if exact_probe:
                     old_pool = t.pop("scale_set")
-                    notice = f"{old_pool} did not pick up the reservation; requesting the shared CS queue"
+                    notice = f"{old_pool} ended without a grant; requesting the shared CS queue"
                 elif (next_site := remaining_sites.pop(0)) is None:
                     del t["site"]
                     notice = "no CS site picked up the reservation in time; returning to the shared CS queue"

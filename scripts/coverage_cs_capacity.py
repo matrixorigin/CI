@@ -1,7 +1,8 @@
 """Read bounded, non-secret CS placement offers using a dedicated read-only identity."""
 
-import concurrent.futures
+import http.client
 import json
+import multiprocessing
 import os
 import re
 import ssl
@@ -18,6 +19,7 @@ WORK_CLASS = "directpv-min-io-ephemeral"
 GIB = 1024 ** 3
 MAX_BUCKET = 128  # The selector rejects out-of-range receipts.
 MAX_PAGE_BYTES = 8 * 1024 * 1024
+SNAPSHOT_SECONDS = 15
 ARS_PATH = "/apis/actions.github.com/v1alpha1/namespaces/cicd/autoscalingrunnersets"
 DRIVES_PATH = "/apis/directpv.min.io/v1beta1/directpvdrives"
 CLASSES_PATH = "/apis/storage.k8s.io/v1/storageclasses"
@@ -182,7 +184,7 @@ def kube_reader(config):
     ctx = ssl.create_default_context(cadata=config.get("ca_pem"))
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
                                           urllib.request.HTTPSHandler(context=ctx), NoRedirect())
-    deadline = time.monotonic() + 40
+    deadline = time.monotonic() + SNAPSHOT_SECONDS
 
     def get_items(path, filters):
         items, cursor = [], None
@@ -209,22 +211,34 @@ def kube_reader(config):
     return get_items
 
 
-def snapshot(configs, reader=kube_reader):
-    captured_at = int(time.time())
-    rows = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(SITES)) as pool:
-        def offer(site):
-            return collect_site(site, reader(configs[site]))
+def site_offer(site, config, reader):
+    try:
+        return collect_site(site, reader(config))
+    except (ValueError, TypeError, KeyError, AttributeError, ArithmeticError, OSError, http.client.HTTPException):
+        # Connection errors can include endpoints and headers. Return no details.
+        return None
 
-        futures = {site: pool.submit(offer, site)
-                   for site in SITES if site in configs}
-        for site, future in futures.items():
+
+def snapshot(configs, reader=kube_reader):
+    receipt = {"captured_at": int(time.time()), "pools": []}
+    sites = [site for site in SITES if site in configs]
+    if not sites:
+        return receipt
+    deadline = time.monotonic() + SNAPSHOT_SECONDS
+    # The hosted step is on the critical path for both groups. Terminate any
+    # unfinished site reads at exit, even if DNS or a streaming body is stuck.
+    with multiprocessing.get_context("spawn").Pool(len(sites)) as pool:
+        reads = [(site, pool.apply_async(site_offer, (site, configs[site], reader))) for site in sites]
+        for site, result in reads:
             try:
-                rows.extend(future.result())
-            except (ValueError, TypeError, KeyError, AttributeError, ArithmeticError, OSError):
-                # Exceptions from urllib and subprocess may contain endpoints or headers.
+                rows = result.get(timeout=max(0, deadline - time.monotonic()))
+            except multiprocessing.TimeoutError:
+                rows = None
+            if rows is None:
                 print(f"Capacity unavailable for {site.upper()}; will not target its pools.", flush=True)
-    return {"captured_at": captured_at, "pools": rows}
+            else:
+                receipt["pools"].extend(rows)
+    return receipt
 
 
 def main():

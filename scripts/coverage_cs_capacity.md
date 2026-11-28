@@ -24,16 +24,17 @@ or pending `cicd` pods.
 No credential or Kubernetes resource body is passed to selectors or workers.
 Only a timestamp and numerical capacity counts for allowlisted pools are
 passed. Missing credentials, inaccessible data, stale data and insufficient
-resources fall back to the shared queue. Partial data may only nominate a pool
-whose capacity was observed. Each initial parent run reads at most one bounded
-snapshot for both groups. Tie-breaking rotates between equally suitable pools
-by parent run ID; pending demand is deducted, but no capacity is reserved
-across PRs. Validate collector reachability, API load and real allocations
-before enabling the repository setting.
+resources fall back to the shared queue. Each initial parent run shares one
+15-second collection budget for both groups. A slow or unavailable site is
+omitted while other completed reads remain usable. Equally suitable pools are
+spread by parent run ID. Pending demand is deducted from the advisory capacity
+estimate. Validate collector reachability, API load and real allocations before
+enabling the repository setting.
 
 An exact probe uses an approved CS scale set and a worker dispatched by GitHub
 Actions. The worker still needs the exact parent grant before checking out PR
-code. If the probe is still unassigned, it returns to the normal shared CS queue
-only after cancellation is confirmed. The capacity-aware mode does not add the
-legacy site sweep. The 1-hour Shanghai timer is measured from the first observed
-CS queue wait and is not reset by the probe. Assigned workers are not moved.
+code. After 30 seconds unassigned, or if the probe ends before a grant, the
+selector confirms that exact worker is terminal before dispatching one shared
+CS reservation. An attempt without a usable pool hint follows the existing
+queue policy. The one-hour Shanghai timer starts at the first observed CS
+queue wait. A verified assignment at handoff wins.

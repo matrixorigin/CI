@@ -85,9 +85,7 @@ jobs:
         GROUP: ${{ inputs.group }}
         HEAD: ${{ inputs.head }}
         SOURCE: ${{ inputs.source }}
-        # The capacity-aware path makes one exact probe, then goes straight
-        # back to the shared queue instead of stacking the old site sweep.
-        COVERAGE_CS_SITE_RETRY: ${{ inputs.enable_cs_site_retry && !inputs.enable_cs_first_pool }}
+        COVERAGE_CS_SITE_RETRY: ${{ inputs.enable_cs_site_retry }}
         COVERAGE_CS_FIRST_POOL_ENABLED: ${{ inputs.enable_cs_first_pool }}
         COVERAGE_CS_FIRST_POOL_SNAPSHOT: ${{ inputs.first_pool_snapshot }}
         COVERAGE_ENABLE_4_2_DEV: ${{ inputs.enable_4_2_dev }}
