@@ -32,7 +32,9 @@ jobs:
         repository: matrixorigin/CI
         ref: ${{ job.workflow_sha }}
         path: .standby
-        sparse-checkout: scripts/coverage_standby.py
+        sparse-checkout: |
+          scripts/coverage_standby.py
+          scripts/idc_coverage_s3.sh
         sparse-checkout-cone-mode: false
         persist-credentials: false
     - name: Wait for an exclusive grant for this exact run before PR checkout
@@ -46,6 +48,8 @@ jobs:
         GROUP: ${{ inputs.group }}
         POOL: idc
       run: python3 -I .standby/scripts/coverage_standby.py admit
+    - name: Preserve the trusted IDC S3 helper
+      run: install -m 0444 .standby/scripts/idc_coverage_s3.sh "$RUNNER_TEMP/idc_coverage_s3.sh"
     - name: Check direct worker before loading PR source
       env:
         ASSIGNED: ${{ runner.name }}
@@ -105,20 +109,9 @@ jobs:
       run: |
         set -euo pipefail
         cd "$GITHUB_WORKSPACE"
-        # Same approved test-store fields as the existing Shanghai x86 UT.
-        # Use only the prefix-scoped fixture. Never log the serialized spec.
-        TEST_S3FS_CS="$(python3 - <<'PY'
-        import os
-        fields = [(k,os.environ[v]) for k,v in (("endpoint","IDC_ENDPOINT"),("region","IDC_REGION"),("bucket","IDC_BUCKET"),("key-id","IDC_KEY"),("key-secret","IDC_SECRET"))]
-        if any(not v or any(c in v for c in ",\r\n") for k,v in fields):
-            raise SystemExit("Missing or unsupported ordinary UT test-store field")
-        print("name=cs,is-minio=true," + ",".join(k+"="+v for k,v in fields))
-        PY
-        )"
-        export TEST_S3FS_CS
-        unset IDC_ENDPOINT IDC_REGION IDC_BUCKET IDC_KEY IDC_SECRET
-        export MO_CI_S3_PREFIX="ci-ut/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/group-${COVERAGE_GROUP}"
-        unset endpoint region apikey apisecret bucket TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD CS_NODE_CACHE_STATE
+        source "$RUNNER_TEMP/idc_coverage_s3.sh"
+        configure_idc_coverage_s3 "group-${COVERAGE_GROUP}"
+        unset CS_NODE_CACHE_STATE
         coverage_profile="${RUNNER_TEMP}/ut-coverage.out"
         coverage_report="${RUNNER_TEMP}/ut-coverage-report.json"
         coverage_progress="${RUNNER_TEMP}/ut-coverage-progress.txt"
@@ -447,12 +440,7 @@ jobs:
         test -s "${coverage_report}"
         test -s "${coverage_profile}"
         if [[ "${COVERAGE_GROUP}" == '0' ]]; then
-          for required in 'TestObjectStorages/cs-s3/minio/basic' 'TestS3FSFromSpecs/cs-s3/streaming_write'; do
-            jq -e --arg test_name "$required" 'select(.Action == "pass" and .Package == "github.com/matrixorigin/matrixone/pkg/fileservice" and .Test == $test_name)' "${coverage_report}" >/dev/null || {
-              echo "::error::Required CS S3 test did not pass: ${required}"
-              exit 1
-            }
-          done
+          require_idc_coverage_s3_tests "$coverage_report"
         fi
         phase_start compact_profile
         # -coverpkg repeats instrumented blocks for every test package. The

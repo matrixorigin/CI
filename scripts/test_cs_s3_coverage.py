@@ -14,6 +14,7 @@ DIRECTORY = Path(__file__).parents[1] / ".github/workflows"
 ENTRY = (DIRECTORY / "coverage-ut.yaml").read_text()
 WORKFLOW = (DIRECTORY / "coverage-worker-cs.yaml").read_text()
 STANDBY = (DIRECTORY / "coverage-ut-standby.yaml").read_text()
+OSS_COS = (DIRECTORY / "oss-cos-check.yaml").read_text()
 STACKS = ("mty", "mnl2", "jed", "ruh")
 CONFIGS = tuple(f"CS_S3_{stack.upper()}_CONFIG" for stack in STACKS)
 
@@ -107,19 +108,84 @@ class CSS3CoverageTest(unittest.TestCase):
                         self.assertIn(f"ci-ut/123-{attempt}", summary.read_text())
                         self.assertNotIn(config, summary.read_text() + result.stdout + result.stderr)
 
-    def test_release_storage_uses_shanghai_and_the_authorized_head(self):
-        job = STANDBY.split("\n  release-storage-coverage:\n")[1].split("\n  merge-coverage-groups:\n")[0]
-        self.assertIn("runs-on: amd64-mo-shanghai-ut-safe", job)
-        self.assertIn("github.base_ref == '4.2-dev' && inputs.enable_4_2_dev", job)
-        self.assertIn("needs.check_coverage_eligibility.outputs.allowed == 'true'", job)
-        self.assertIn("ref: ${{ needs.check_coverage_eligibility.outputs.head_sha }}", job)
-        self.assertLess(job.index("Verify Shanghai runner isolation"), job.index("Checkout authorized MatrixOne head"))
-        self.assertLess(job.index("coverage_pr_entry.py\n        grep"), job.index("Checkout authorized MatrixOne head"))
-        self.assertIn("profile: ${{ steps.profile.outputs.artifact-id }}", job)
-        self.assertIn("artifact-ids: ${{ needs.release-storage-coverage.outputs.profile }}", STANDBY)
+    def test_oss_cos_workflow_is_manual_and_uses_the_release_branch(self):
+        self.assertIn("github.event_name == 'workflow_dispatch'", OSS_COS)
+        self.assertIn("/oss-cos-check.yaml@refs/heads/main", OSS_COS)
+        self.assertIn("runs-on: amd64-mo-shanghai-ut-safe", OSS_COS)
+        self.assertIn("ref: refs/heads/4.2-dev", OSS_COS)
+        self.assertLess(OSS_COS.index("Verify Shanghai runner isolation"), OSS_COS.index("Checkout 4.2-dev"))
+        self.assertNotIn("oss-cos-check.yaml", STANDBY)
+        self.assertNotIn("release-storage-coverage", STANDBY)
 
-    def test_release_provider_coverage_requires_actual_provider_passes(self):
-        script = step_script("test_storage_providers", STANDBY)
+    def test_manual_provider_config_is_checked_before_checkout(self):
+        self.assertLess(OSS_COS.index("Verify Shanghai runner isolation"), OSS_COS.index("- id: check_provider_config"))
+        self.assertLess(OSS_COS.index("- id: check_provider_config"), OSS_COS.index("Checkout 4.2-dev"))
+        script = step_script("check_provider_config", OSS_COS)
+        configs = dict(TEST_S3FS_ALIYUN="opaque_oss", TEST_S3FS_QCLOUD="opaque_cos")
+        for missing in ((), ("TEST_S3FS_ALIYUN",), ("TEST_S3FS_QCLOUD",), tuple(configs)):
+            with self.subTest(missing=missing):
+                env = dict(PATH=os.environ["PATH"], **{key: value for key, value in configs.items() if key not in missing})
+                result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, int(bool(missing)), result.stderr)
+                diagnostic = f"::error::Missing provider test configuration: {' '.join(missing)}\n" if missing else ""
+                self.assertEqual(result.stdout, diagnostic)
+
+    def test_shanghai_legacy_coverage_requires_only_idc_s3(self):
+        source = (DIRECTORY / "coverage-ut-pre-cutover.yaml").read_text()
+        script = step_script("check_coverage_secrets", source)
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "output"
+            env = dict(PATH=os.environ["PATH"], GITHUB_OUTPUT=str(output), S3ENDPOINT="idc",
+                       S3REGION="test", S3APIKEY="key", S3APISECRET="secret", S3BUCKET="bucket")
+            for branch in ("main", "4.2-dev", "v4.2.8-hotfix"):
+                with self.subTest(branch=branch):
+                    output.write_text("")
+                    subprocess.run(["bash", "-c", script], check=True, capture_output=True,
+                                   env={**env, "GITHUB_BASE_REF": branch})
+                    self.assertEqual(output.read_text(), "ready=true\n" if branch in ("main", "4.2-dev") else "ready=false\n")
+            output.write_text("")
+            subprocess.run(["bash", "-c", script], check=True, capture_output=True,
+                           env={**env, "GITHUB_BASE_REF": "4.2-dev", "S3BUCKET": ""})
+            self.assertEqual(output.read_text(), "ready=false\n")
+
+    def test_idc_legacy_and_standby_share_the_scoped_fixture_and_pass_gate(self):
+        for file in ("coverage-ut-pre-cutover.yaml", "coverage-worker-idc.yaml"):
+            src = (DIRECTORY / file).read_text()
+            self.assertIn('source "$RUNNER_TEMP/idc_coverage_s3.sh"', src)
+            self.assertIn('require_idc_coverage_s3_tests "$coverage_report"', src)
+            self.assertLess(src.index("Preserve the trusted IDC S3 helper"), src.index("ref: ${{ " +
+                ("github.event.pull_request.head.sha" if file == "coverage-ut-pre-cutover.yaml" else "inputs.head") + " }}"))
+        helper = DIRECTORY.parents[1] / "scripts/idc_coverage_s3.sh"
+        command = 'source "$1"; configure_idc_coverage_s3 group-0; printf "%s\n" "$MO_CI_S3_PREFIX"; ' \
+                  '[[ "$TEST_S3FS_CS" == name=cs,is-minio=true,endpoint=http://idc,* && ! -v IDC_SECRET && ! -v TEST_S3FS_ALIYUN ]]'
+        values = dict(PATH=os.environ["PATH"], IDC_ENDPOINT="http://idc", IDC_REGION="test",
+                      IDC_BUCKET="bucket", IDC_KEY="key", IDC_SECRET="opaque-value", TEST_S3FS_ALIYUN="old",
+                      GITHUB_RUN_ID="12", GITHUB_RUN_ATTEMPT="2")
+        result = subprocess.run(["bash", "-ec", command, "bash", helper],
+                                env=values, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "ci-ut/12-2/group-0\n")
+        result = subprocess.run(["bash", "-ec", command, "bash", helper],
+                                env={**values, "IDC_BUCKET": ""}, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("opaque-value", result.stdout + result.stderr)
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "report.json"
+            tests = ["TestObjectStorages/cs-s3/minio/basic", "TestS3FSFromSpecs/cs-s3/streaming_write"]
+            command = 'source "$1"; require_idc_coverage_s3_tests "$2"'
+            for result_name in ("pass", "skip"):
+                events = [dict(Action="pass" if i == 0 else result_name, Test=name,
+                               Package="github.com/matrixorigin/matrixone/pkg/fileservice")
+                          for i, name in enumerate(tests)]
+                report.write_text("\n".join(map(json.dumps, events)))
+                result = subprocess.run(["bash", "-ec", command, "bash", helper, report],
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode == 0, result_name == "pass")
+                if result_name == "skip":
+                    self.assertIn("update the PR branch", result.stdout)
+
+    def test_oss_cos_check_requires_actual_provider_passes(self):
+        script = step_script("test_storage_providers", OSS_COS)
         package = "github.com/matrixorigin/matrixone/pkg/fileservice"
         passed = [dict(Action="pass", Package=package, Test=name) for name in (
             "TestObjectStorages/oss_eu/storage/aliyun/basic",
@@ -132,15 +198,35 @@ class CSS3CoverageTest(unittest.TestCase):
         disk_only = [dict(Action="pass", Package=package, Test="TestObjectStorages/test/disk/basic")]
         cos_skipped = passed[:-1] + [dict(passed[-1], Action="skip")]
         wrong_fixture = passed[:-1] + [dict(passed[-1], Test="TestS3FSFromSpecs/test/streaming_write")]
-        for name, missing, test_exit, events, expected in (
-                ("both providers passed", None, 0, passed, 0),
-                ("missing OSS config", "TEST_S3FS_ALIYUN", 0, passed, 1),
-                ("missing COS config", "TEST_S3FS_QCLOUD", 0, passed, 1),
-                ("Go test failed", None, 7, passed, 7),
-                ("disk only", None, 0, disk_only, 1),
-                ("only COS passed", None, 0, passed[1::2], 1),
-                ("unrelated streaming fixture passed", None, 0, wrong_fixture, 1),
-                ("COS streaming skipped", None, 0, cos_skipped, 1)):
+        for name, test_exit, events, expected, diagnostics in (
+                ("both providers passed", 0, passed, 0, ()),
+                ("OSS SDK failed", 7, [dict(passed[0], Action="fail")], 7, ("aliyun/basic",)),
+                ("COS stream failed", 7, [
+                    passed[1], dict(passed[3], Action="fail"),
+                    dict(Action="fail", Test="TestS3FSFromSpecs/TencentCOS"),
+                ], 7, ("qcloud/streaming_write",)),
+                ("OSS tree failed", 7, [
+                    passed[0], dict(Action="output", Output="private SDK data marker containing panic: test timed out after 20m"),
+                    dict(Action="fail", Test="TestS3FSFromSpecs/oss_eu/storage/tree"),
+                    dict(Action="fail", Test="TestS3FSFromSpecs/oss_eu/storage"),
+                ], 7, ("aliyun/s3fs",)),
+                ("nested test with overlapping fixture names", 7, [
+                    passed[0],
+                    dict(Action="fail", Test="TestS3FSFromSpecs/oss_eu/storage/cos/tree/nested"),
+                    dict(Action="fail", Test="TestS3FSFromSpecs/oss_eu/storages/tree"),
+                    dict(passed[1], Test="TestObjectStorages/oss_eu/storage/cos/qcloud/basic"),
+                ], 7, ("qcloud/s3fs",)),
+                ("COS fixture failed before children ran", 7, [
+                    passed[1], dict(Action="fail", Test="TestS3FSFromSpecs/TencentCOS"),
+                ], 7, ("qcloud/s3fs",)),
+                ("Go test timed out", 1, [
+                    passed[0], dict(Action="output", Test=passed[2]["Test"],
+                                    Output="panic: test timed out after 20m\nprivate SDK data marker"),
+                ], 1, ()),
+                ("disk only", 0, disk_only, 1, ()),
+                ("only COS passed", 0, passed[1::2], 1, ()),
+                ("unrelated streaming fixture passed", 0, wrong_fixture, 1, ()),
+                ("COS streaming skipped", 0, cos_skipped, 1, ())):
             with self.subTest(name=name), \
                  tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
@@ -157,32 +243,20 @@ class CSS3CoverageTest(unittest.TestCase):
                            TEST_S3FS_ALIYUN=oss_spec, TEST_S3FS_QCLOUD=cos_spec,
                            OSS_SPEC=oss_spec, COS_SPEC=cos_spec, TEST_EXIT=str(test_exit),
                            TEST_S3FS_CS="unexpected", endpoint="unexpected")
-                if missing:
-                    env[missing] = ""
                 result = subprocess.run(["bash", "-c", script], cwd=tmp, env=env, capture_output=True)
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
-                if not missing:
-                    args = (root / "args").read_text().splitlines()
-                    self.assertEqual(args[-1], "./pkg/fileservice")
-                    self.assertIn("-covermode=set", args)
-                else:
-                    self.assertFalse((root / "args").exists())
+                reported = tuple(line.removeprefix("OSS/COS failed case: ") for line in result.stdout.decode().splitlines()
+                                 if line.startswith("OSS/COS failed case: "))
+                self.assertEqual(reported, diagnostics)
+                self.assertEqual(b"OSS/COS failure signal: go_test_timeout" in result.stdout, name == "Go test timed out")
+                for private in (b"oss_eu/storage", b"TencentCOS", b"private SDK data marker"):
+                    self.assertNotIn(private, result.stdout + result.stderr)
+                args = (root / "args").read_text().splitlines()
+                self.assertEqual(args[-1], "./pkg/fileservice")
+                self.assertEqual(args[-2], "^(TestObjectStorages|TestS3FSFromSpecs|TestQCloudSDK)$")
+                self.assertFalse(any(arg.startswith("-cover") for arg in args))
 
-    def test_release_merge_requires_and_includes_provider_coverage(self):
-        require = step_script("validate_release_storage", STANDBY)
-        for status, profile, expected in (
-                ("success", "123", True), ("success", "", False),
-                ("skipped", "123", False), ("failure", "123", False)):
-            with self.subTest(status=status, profile=profile):
-                result = subprocess.run(["bash", "-c", require], capture_output=True,
-                                        env=dict(PATH=os.environ["PATH"], STORAGE_RESULT=status, STORAGE_PROFILE=profile))
-                self.assertEqual(result.returncode == 0, expected)
-
-        download = STANDBY.split("    - name: Download the selected release provider profile\n", 1)[1]
-        download = download.split("    - id: merge_profiles\n", 1)[0]
-        # The pinned action nests downloads by artifact ID unless flattening is enabled.
-        self.assertRegex(download, r"(?m)^        merge-multiple: true$")
-        storage_dir = re.search(r"(?m)^        path: (.+)$", download)[1]
+    def test_coverage_merge_uses_both_group_profiles(self):
         merge = step_script("merge_profiles", STANDBY)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -193,27 +267,81 @@ class CSS3CoverageTest(unittest.TestCase):
             go = root / "go"
             go.write_text("#!/bin/bash\nexit 0\n")
             go.chmod(0o755)
-            for folder, name in (("selected/profiles/0", "group0"), ("selected/profiles/1", "group1"),
-                                 (storage_dir, "oss-cos")):
-                profile = root / folder / "ut-coverage.out"
+            for group in (0, 1):
+                profile = root / "selected/profiles" / str(group) / "ut-coverage.out"
                 profile.parent.mkdir(parents=True)
-                profile.write_text(f"mode: set\n{name}:1.1,1.2 1 1\n")
+                profile.write_text(f"mode: set\ngroup{group}:1.1,1.2 1 1\n")
             env = dict(PATH=f"{root}:{os.environ['PATH']}", RUNNER_TEMP=tmp, EXPECTED_HEAD_SHA="a"*40,
                        GROUP_COUNT="2", GITHUB_RUN_ID="42")
-            for required in ("false", "true"):
-                with self.subTest(required=required):
-                    result = subprocess.run(["bash", "-c", merge], cwd=tmp, capture_output=True,
-                                            env={**env, "RELEASE_STORAGE_REQUIRED": required})
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    contents = (root / "ut-coverage.out").read_text()
-                    self.assertEqual(contents.count("mode: set"), 1)
-                    self.assertIn("group0:", contents)
-                    self.assertIn("group1:", contents)
-                    self.assertEqual("oss-cos:" in contents, required == "true")
-            (root / storage_dir / "ut-coverage.out").unlink()
-            result = subprocess.run(["bash", "-c", merge], cwd=tmp, capture_output=True,
-                                    env={**env, "RELEASE_STORAGE_REQUIRED": "true"})
+            subprocess.run(["bash", "-c", merge], cwd=tmp, check=True, capture_output=True, env=env)
+            self.assertEqual((root / "ut-coverage.out").read_text(),
+                             "mode: set\ngroup0:1.1,1.2 1 1\ngroup1:1.1,1.2 1 1\n")
+            (root / "selected/profiles/1/ut-coverage.out").unlink()
+            result = subprocess.run(["bash", "-c", merge], cwd=tmp, capture_output=True, env=env)
             self.assertNotEqual(result.returncode, 0)
+
+    def test_smoke_requires_pass_events_and_preserves_safe_failure_details(self):
+        script = step_script("coverage_ut").split("\nphase_start cs_s3_smoke\n", 1)[1]
+        script = script.split("\nphase_name=launch_coverage_suite", 1)[0]
+        script = """set -euo pipefail
+cgo_cflags= cgo_ldflags=
+phase_failure="$RUNNER_TEMP/failure"
+phase_end() { printf 'phase=cs_s3_smoke status=%s\\n' "$1" > "$phase_failure"; }
+""" + script
+        names = ("TestCSStoragePrefixScopedInitialization", "TestObjectStorages/cs-s3/minio/basic",
+                 "TestS3FSFromSpecs/cs-s3/streaming_write")
+        passes = [dict(Action="pass", Test=name) for name in names]
+        fixture_test = "TestS3FSFromSpecs/cs-s3"
+        cleanup_output = ("    object_storage_arguments_test.go:111: "
+                          "CS S3 remove fixture object failed (HTTP 0, code DeadlineExceeded, type *url.Error)\n")
+        cases = (
+            ("success", passes, 0, 0, []),
+            ("missing", passes[:-1], 0, 1, [f"smoke_missing_test_pass={names[-1]}"]),
+            ("assertion", [
+                dict(Action="output", Test=names[1], Output="assertion failed: credential-marker"),
+                dict(Action="fail", Test=names[1]),
+                dict(Action="fail", Test=names[1]),
+                dict(Action="fail", Test="TestObjectStorages/cs-s3/minio"),
+                dict(Action="fail", Test=names[1] + "/credential-marker"),
+                dict(Action="fail", Test="TestCITestS3FixtureSafety"),
+                dict(Action="fail"),
+            ], 7, 7, ["smoke_failed_test=TestCITestS3FixtureSafety", f"smoke_failed_test={names[1]}"]),
+            ("cleanup_deadline", [
+                dict(Action="output", Test=names[-1], Output="PUT credential-marker: context deadline exceeded"),
+                dict(Action="fail", Test=names[-1]),
+                dict(Action="output", Test=fixture_test, Output=cleanup_output),
+                dict(Action="output", Output="panic: test timed out after 5m0s\n"),
+            ], 7, 7, ["smoke_operation=remove_fixture_object smoke_http_status=0 smoke_error_code=DeadlineExceeded",
+                      f"smoke_failed_test={names[-1]}"]),
+            ("missing_bucket", [dict(Action="output", Test=fixture_test, Output=
+                "CS S3 list fixture prefix failed (HTTP 404, code NoSuchBucket, type minio.ErrorResponse)\n")],
+             7, 7, ["smoke_operation=list_fixture_prefix smoke_http_status=404 smoke_error_code=NoSuchBucket"]),
+            ("go_timeout", [dict(Action="output", Output="panic: test timed out after 5m0s\n")],
+             7, 7, ["smoke_signal=go_test_timeout"]),
+            ("untrusted_output", [
+                dict(Action="output", Test=names[0], Output=cleanup_output),
+                dict(Action="output", Test=fixture_test, Output=cleanup_output.rstrip() + " credential-marker"),
+            ], 7, 7, ["smoke_signal=unknown"]),
+        )
+        for mode, events, go_exit, expected_exit, diagnostics in cases:
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "events").write_text("\n".join(map(json.dumps, events)) + "\n")
+                go = root / "go"
+                go.write_text('#!/bin/sh\ncat "$RUNNER_TEMP/events"\nexit "$TEST_EXIT"\n')
+                go.chmod(0o755)
+                env = dict(PATH=f"{root}:{os.environ['PATH']}", RUNNER_TEMP=directory,
+                           TEST_EXIT=str(go_exit), GITHUB_STEP_SUMMARY=str(root / "summary"))
+                result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, expected_exit, result.stderr)
+                self.assertNotIn("credential-marker", result.stdout + result.stderr)
+                if diagnostics:
+                    self.assertEqual((root / "failure").read_text().splitlines(),
+                                     [f"phase=cs_s3_smoke status={expected_exit}", *diagnostics])
+                if mode == "missing":
+                    self.assertIn(f"Required CS S3 smoke test did not pass: {names[-1]}", result.stdout)
+                elif expected_exit:
+                    self.assertEqual(result.stdout.splitlines(), ["CS S3 smoke failure", *diagnostics])
 
     def test_required_s3_tests_cannot_be_missing_skipped_or_failed(self):
         script = step_script("coverage_ut")

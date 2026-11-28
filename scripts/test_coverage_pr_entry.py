@@ -486,13 +486,13 @@ class EntryTest(unittest.TestCase):
         label = "      name: Configure reviewed node cache with private incremental writes\n"
         self.assertEqual(body.count(label), 1)
         body = body.replace(label, label+"      if: ${{ true }}\n")
-        # Includes the audited producer status and report guards. Test
-        # commands, artifact identities, and the merge handoff are unchanged.
-        self.assertEqual(hashlib.sha256(body.encode()).hexdigest(), "cf822d41b5acdfae3b58100d73021f1e75da7fdae5daf58cd5c1794477377498")
+        # Includes the restricted S3 smoke selection, the full test command,
+        # producer status guards and artifact handoff.
+        self.assertEqual(hashlib.sha256(body.encode()).hexdigest(), "5320d042b6c1e76b01bb8b55296547eb469544c99195b83f914a1275c0df655c")
         for field in ("coverage_ready:", "coverage_status:", "bvt_generation:", "cache_seed:"):
             self.assertIn(field, src.split("jobs:\n")[0])
 
-    def test_fallback_keeps_the_legacy_body_with_updated_runner_placement(self):
+    def test_fallback_keeps_the_legacy_body_with_updated_runner_and_storage_policy(self):
         s = (ROOT/".github/workflows/coverage-ut-pre-cutover.yaml").read_text()
         checkout = "repository: matrixorigin/CI\n          ref: "+LEGACY_HELPER_SHA
         self.assertEqual(s.count(checkout), 1)
@@ -507,4 +507,4 @@ class EntryTest(unittest.TestCase):
         b = s.replace(checkout, "repository: ${{ job.workflow_repository }}\n          ref: ${{ job.workflow_sha }}").replace(
             runner, original_runner).encode()
         self.assertEqual(hashlib.sha1(b"blob "+str(len(b)).encode()+b"\0"+b).hexdigest(),
-                         "52b9213fa50e4de5184b9089ef15f13f82cf8a54")
+                         "5432058725db3ffb471a798dd7c2f19ef343390f")

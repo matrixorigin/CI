@@ -383,23 +383,72 @@ jobs:
         fi
         cgo_ldflags="-L${GITHUB_WORKSPACE}/cgo -lmo -Wl,-rpath,${GITHUB_WORKSPACE}/cgo -L${thirdparties_install_dir}/lib -lusearch_c -Wl,-rpath,${thirdparties_install_dir}/lib -lm"
 
-        # Fail early on the real restricted-account SDK path before the suite.
+        # Probe the restricted account before either group starts. The full
+        # fileservice suite, including tree traversal, runs in group 0.
         phase_start cs_s3_smoke
+        smoke_report="${RUNNER_TEMP}/cs-s3-smoke.json"
+        required_smoke_tests=(
+          'TestObjectStorages/cs-s3/minio/basic'
+          'TestS3FSFromSpecs/cs-s3/streaming_write'
+          'TestCSStoragePrefixScopedInitialization'
+        )
+        smoke_tests=(
+          "${required_smoke_tests[@]}"
+          'TestCITestS3ErrorRedactsDetails'
+          'TestCSStorageArgumentsPreservePrefix'
+          'TestCITestS3FixtureSafety'
+          'TestValidCITestS3Prefix'
+        )
+        smoke_selector=''
+        for smoke_test in "${smoke_tests[@]}"; do
+          # go test matches each slash-delimited component separately.
+          smoke_selector="${smoke_selector:+${smoke_selector}|}^${smoke_test//\//\$/^}\$"
+        done
         set +e
         env CGO_CFLAGS="${cgo_cflags}" CGO_LDFLAGS="${cgo_ldflags}" \
           go test -mod=readonly -count=1 -json -short -tags matrixone_test -timeout=5m \
-          ./pkg/fileservice -run '^(TestCSStoragePrefixScopedInitialization|TestCITestS3ErrorRedactsDetails|TestCSStorageArgumentsPreservePrefix|TestCITestS3FixtureSafety|TestValidCITestS3Prefix|TestObjectStorages|TestS3FSFromSpecs)$' \
-          > "$RUNNER_TEMP/cs-s3-smoke.json"
+          ./pkg/fileservice -run "$smoke_selector" > "$smoke_report"
         smoke_status=$?
         set -e
-        phase_end "${smoke_status}"
         if (( smoke_status != 0 )); then
-          jq -r 'select(.Action == "fail" or (.Action == "output" and (.Output | contains("CS S3"))))' "$RUNNER_TEMP/cs-s3-smoke.json"
+          phase_end "${smoke_status}"
+          # Publish only selected test names and the fixture's redacted error fields.
+          smoke_diagnostic=$(jq -nr --args '
+            def diagnostic:
+              if (.Output // "" | startswith("panic: test timed out after ")) then
+                "smoke_signal=go_test_timeout"
+              elif (.Test // "" | test("^(TestObjectStorages|TestS3FSFromSpecs)/cs-s3(/|$)")) then
+                (.Output // "") | capture(
+                  "CS S3 (?<operation>initialize fixture|list fixture prefix|remove fixture object) failed " +
+                  "\\(HTTP (?<status>[0-9]{1,3}), code " +
+                  "(?<code>AccessDenied|InvalidAccessKeyId|SignatureDoesNotMatch|NoSuchBucket|RequestTimeTooSkewed|AuthorizationHeaderMalformed|InvalidRequest|DeadlineExceeded|Canceled|unknown)" +
+                  ", type [*a-zA-Z0-9_.]+\\)[[:space:]]*$"
+                ) |
+                "smoke_operation=\(.operation | gsub(" "; "_")) smoke_http_status=\(.status) smoke_error_code=\(.code)"
+              else empty end;
+            reduce inputs as $event ({reason: null, tests: []};
+              if $event.Action == "fail" and ($ARGS.positional | index($event.Test)) != null then
+                .tests |= (. + [$event.Test] | unique)
+              elif .reason == null and $event.Action == "output" then
+                .reason = ($event | first(diagnostic, null))
+              else . end
+            ) |
+            (.reason // (if .tests == [] then "smoke_signal=unknown" else empty end)),
+            (.tests[] | "smoke_failed_test=\(.)")
+          ' "${smoke_tests[@]}" < "$smoke_report") || smoke_diagnostic=smoke_signal=unknown
+          printf 'CS S3 smoke failure\n%s\n' "$smoke_diagnostic"
+          printf '%s\n' "$smoke_diagnostic" >> "$phase_failure"
           exit "${smoke_status}"
         fi
-        for required in 'TestObjectStorages/cs-s3/minio/basic' 'TestS3FSFromSpecs/cs-s3/streaming_write' 'TestCSStoragePrefixScopedInitialization'; do
-          jq -e --arg test_name "$required" 'select(.Action == "pass" and .Test == $test_name)' "$RUNNER_TEMP/cs-s3-smoke.json" >/dev/null || exit 1
+        for required in "${required_smoke_tests[@]}"; do
+          jq -e --arg test_name "$required" 'select(.Action == "pass" and .Test == $test_name)' "$smoke_report" >/dev/null || {
+            phase_end 1
+            printf 'smoke_missing_test_pass=%s\n' "$required" >> "$phase_failure"
+            echo "::error::Required CS S3 smoke test did not pass: ${required}"
+            exit 1
+          }
         done
+        phase_end 0
         echo '- Restricted-account S3 initialization, basic and streaming smoke passed.' >> "$GITHUB_STEP_SUMMARY"
 
         phase_name=launch_coverage_suite
