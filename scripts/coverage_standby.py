@@ -28,6 +28,10 @@ ENTRY = ".github/workflows/entrypoint.yaml"
 RECEIPT_BASE_REFS = frozenset({"main", "4.2-dev"})
 POOLS = {"cs": "cs-node-cache-7c14g", "idc": "amd64-mo-shanghai-ut-safe"}
 CS_SITES = ("mty", "jed", "mnl2", "ruh")
+FIRST_POOL_MAX_AGE = 180
+FIRST_POOL_PROBE_WAIT = 30
+FIRST_CS_POOLS = frozenset(f"cs-{site}-nc-n{node}-pr-v1"
+                           for site in ("mnl2", "ruh") for node in range(3))
 CS_SITE_RETRY_AFTER = 300
 CS_SITE_PROBE_WAIT = 90
 WAIT = 3600
@@ -473,7 +477,61 @@ def assigned(job, pool):
             and runner_matches_pool(job.get("runner_name") or "", pool))
 
 
-def worker_labels(pool, site=None):
+def first_cs_pool_plan(raw, now):
+    """Choose up to two distinct pools from a fresh trusted capacity receipt.
+
+    slots is the number of whole CPU+memory+work-PVC placements on that node;
+    pending is outstanding demand in that pool not yet charged to the node.
+    This is a single-parent pilot, not a reservation across different PRs.
+    """
+    if not raw or len(raw) > 4096:
+        return ()
+    try:
+        receipt = json.loads(raw)
+    except ValueError:
+        return ()
+    if not isinstance(receipt, dict):
+        return ()
+    captured, pools = receipt.get("captured_at"), receipt.get("pools")
+    if (type(captured) is not int or not now - FIRST_POOL_MAX_AGE <= captured <= now
+            or not isinstance(pools, list) or len(pools) > len(FIRST_CS_POOLS)):
+        return ()
+    offers = {}
+    for row in pools:
+        if not isinstance(row, dict):
+            return ()
+        name, slots, pending = row.get("pool"), row.get("slots"), row.get("pending")
+        if (not isinstance(name, str) or name not in FIRST_CS_POOLS or name in offers
+                or type(slots) is not int or type(pending) is not int
+                or not 0 <= slots <= 128 or not 0 <= pending <= 128):
+            return ()
+        offers[name] = slots - pending
+    ranked = sorted((p for p, n in offers.items() if n > 0), key=lambda p: (-offers[p], p))
+    if len(ranked) < 2:
+        return tuple(ranked)
+    first = ranked[0]
+    # Exercise both sites if both have an offer, without using the same node
+    # for the two groups. These hosts and their local work disks are distinct.
+    second = next((p for p in ranked[1:] if p.split("-")[1] != first.split("-")[1]), ranked[1])
+    return first, second
+
+
+def choose_initial_scale_set(t):
+    # No production caller, release branch, or rerun can consume this pilot.
+    if (t["pr"], t["attempt"], os.environ.get("GITHUB_EVENT_NAME"), os.environ.get("GITHUB_WORKFLOW_REF")) != (
+        32922, 1, "push",
+        f"{REPO}/.github/workflows/coverage-standby-pr32922.yaml@refs/heads/weilu-runner-test",
+    ):
+        return None
+    plan = first_cs_pool_plan(os.environ.get("COVERAGE_CS_FIRST_POOL_SNAPSHOT"), time.time())
+    return plan[t["group"]] if t["group"] < len(plan) else None
+
+
+def worker_labels(pool, site=None, scale_set=None):
+    if scale_set is not None:
+        check(pool == "cs" and site is None and isinstance(scale_set, str)
+              and scale_set in FIRST_CS_POOLS, "invalid exact CS pool")
+        return [scale_set]
     labels = [POOLS[pool]]
     if site is not None:
         check(pool == "cs" and site in CS_SITES, "invalid CS site")
@@ -496,11 +554,11 @@ def observe(r, t, pool, expect_visible=False, *, cache=None):
         raise WorkerIdentityPending("worker attempt jobs lookup returned HTTP 404") from error
     check(len(data["jobs"]) == data["total_count"], "incomplete jobs response")
     target = []
-    site = t.get("site")
+    site, scale_set = t.get("site"), t.get("scale_set")
     for j in data["jobs"]:
         check(j["run_id"] == r and j["run_attempt"] == 1, "wrong job identity")
         if j["name"].split(" / ")[-1] == f"Coverage reservation {pool.upper()} group {t['group']}":
-            check(sorted(j["labels"]) == sorted(worker_labels(pool, site)), "wrong worker label")
+            check(sorted(j["labels"]) == sorted(worker_labels(pool, site, scale_set)), "wrong worker label")
             target.append(j)
         else:
             # The dispatcher has two mutually exclusive reusable calls. GitHub can
@@ -514,6 +572,8 @@ def observe(r, t, pool, expect_visible=False, *, cache=None):
         name = job.get("runner_name")
         if name and site is not None:
             check(name.startswith(f"cs-{site}-"), "runner is outside requested CS site")
+        if name and scale_set is not None:
+            check(name.startswith(f"{scale_set}-"), "runner is outside requested CS pool")
         if not name or not job.get("runner_id"):
             check(not name or runner_matches_pool(name, pool), "unverified CS assignment")
             # GitHub can expose in_progress before indexing both runner fields.
@@ -543,6 +603,10 @@ def dispatch(t, pool, revision, deadline, *, remember):
     """Return the exact dispatched ID and its first CS observation (IDC: None)."""
     parent_meta(t, deadline=deadline)
     check(time.monotonic() < deadline, "selection deadline exceeded before dispatch")
+    # Worker-ref and parent reads can outlive the capacity receipt. Finalize
+    # the placement before sending the ticket, never after a worker exists.
+    if pool == "cs" and "scale_set" in t and choose_initial_scale_set(t) != t["scale_set"]:
+        del t["scale_set"]
     # At most one POST. If the response is lost, fail closed; no blind retries.
     body, dispatched_at = api(f"/actions/workflows/{WORKER}/dispatches", {
         "ref": WORKER_REF, "return_run_details": True,
@@ -758,11 +822,15 @@ def select_cs(t, enable_site_retry, deadline):
     # Rotate the first choice on retries, without pinning normal work to any
     # site. A queued reservation is not proof that a site is out of capacity.
     offset = (t["parent"] + t["group"]) % len(CS_SITES)
-    remaining_sites = [*CS_SITES[offset:], *CS_SITES[:offset], None] if enable_site_retry else []
-    first_queued = queued_here = last_queue_report = None
     r, rev, nonce, (j, now) = reserve(t, "cs", deadline)
     cache = {}
-    print(f"Group {t['group']}: requesting a CS runner — {run_url(r)}", flush=True)
+    target = t.get("scale_set")
+    remaining_sites = [*CS_SITES[offset:], *CS_SITES[:offset], None] if enable_site_retry else []
+    first_queued = queued_here = last_queue_report = None
+    if target:
+        print(f"Group {t['group']}: first CS reservation targets {target} — {run_url(r)}", flush=True)
+    else:
+        print(f"Group {t['group']}: requesting a CS runner — {run_url(r)}", flush=True)
     while time.monotonic() < deadline:
         route, queued_here = decide(j, now, queued_here)
         if first_queued is None:
@@ -772,8 +840,11 @@ def select_cs(t, enable_site_retry, deadline):
         if route:
             print(f"group={t['group']} CS_job={j['id']} first_queued_utc={first_queued} decision_utc={now} route={route}", flush=True)
             return r, rev, nonce, route, first_queued
+        exact_probe = "scale_set" in t
         threshold = CS_SITE_PROBE_WAIT if "site" in t else CS_SITE_RETRY_AFTER
-        if remaining_sites and unassigned(j) and now - queued_here >= threshold:
+        if exact_probe:
+            threshold = FIRST_POOL_PROBE_WAIT
+        if (exact_probe or remaining_sites) and unassigned(j) and now - queued_here >= threshold:
             j, now = read_worker(f"CS worker {r} handoff", observe_cs_handoff, r, t, rev, deadline=deadline)
             route, queued_here = decide(j, now, queued_here)
             if route == "cs":
@@ -783,8 +854,10 @@ def select_cs(t, enable_site_retry, deadline):
                     return r, rev, nonce, "idc", first_queued
                 withdraw_cs(r, t, rev, deadline)
                 check(time.monotonic() < deadline, "CS selection deadline exceeded before replacement")
-                next_site = remaining_sites.pop(0)
-                if next_site is None:
+                if exact_probe:
+                    old_pool = t.pop("scale_set")
+                    notice = f"{old_pool} did not pick up the reservation; requesting the shared CS queue"
+                elif (next_site := remaining_sites.pop(0)) is None:
                     del t["site"]
                     notice = "no CS site picked up the reservation in time; returning to the shared CS queue"
                 else:
@@ -827,6 +900,8 @@ def choose():
     # A pull_request_target run reports the PR head; a workflow_dispatch run
     # reports the workflow branch head. These are not the same commit.
     pool = "cs"
+    if initial_pool := choose_initial_scale_set(t):
+        t["scale_set"] = initial_pool
     check(time.monotonic() < deadline, "selection deadline exceeded before CS reservation")
     r, rev, nonce, route, since = select_cs(t, os.environ.get("COVERAGE_CS_SITE_RETRY") == "true", deadline)
     if route == "idc":
@@ -850,6 +925,7 @@ def choose():
             withdraw_cs(r, t, rev, deadline)
             check(time.monotonic() < deadline, "selection deadline exceeded before Shanghai reservation")
             t.pop("site", None)
+            t.pop("scale_set", None)
             pool = "idc"
             r, rev, nonce, _ = reserve(t, pool, deadline)
             print(f"Group {t['group']}: switched to Shanghai standby — {run_url(r)}", flush=True)
@@ -859,7 +935,8 @@ def choose():
     check(time.monotonic() < deadline, "selection deadline exceeded before publishing a grant")
     Path(os.environ["RUNNER_TEMP"], "grant.json").write_text(json.dumps(
         dict(ticket=t, child=r, pool=pool, nonce=nonce)))
-    output(child=r, pool=pool, site=t.get("site", ""))
+    placement = {"scale_set": t["scale_set"]} if "scale_set" in t else {}
+    output(child=r, pool=pool, site=t.get("site", ""), **placement)
 
 
 def artifact(parent, name, filename):
@@ -1058,7 +1135,11 @@ def admit():
           and type(t["attempt"]) is int and 0 < t["attempt"] < 1_000_000
           and type(t["parent"]) is int and type(t["pr"]) is int and re.fullmatch("[a-f0-9]{64}", t["key"]),
           "invalid worker ticket")
-    site = t.get("site")
+    site, scale_set = t.get("site"), t.get("scale_set")
+    if scale_set is not None:
+        worker_labels(pool, site, scale_set)
+        check((os.environ.get("RUNNER_NAME") or "").startswith(f"{scale_set}-"),
+              "runner is outside requested CS pool")
     if site is not None:
         worker_labels(pool, site)
         check((os.environ.get("RUNNER_NAME") or "").startswith(f"cs-{site}-"), "runner is outside requested CS site")
@@ -1152,6 +1233,8 @@ def worker_progress(r, group, pool, *, cache=None):
     t = {"group": group}
     if site := os.environ.get("COVERAGE_CS_SITE"):
         t["site"] = site
+    if scale_set := os.environ.get("COVERAGE_CS_SCALE_SET"):
+        t["scale_set"] = scale_set
     target, _ = observe(r, t, pool, cache=cache)
     if not target:
         return "waiting for the worker job", run_url(r)

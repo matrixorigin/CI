@@ -1187,6 +1187,208 @@ class Queue(unittest.TestCase):
         with self.assertRaises(ValueError):
             s.decide(dict(self.q, status='completed'), 3670, 50)
 
+    def test_first_pool_plan_is_fresh_distinct_and_accounts_for_pending_work(self):
+        now = 1000
+        m0, m1, r0 = ("cs-mnl2-nc-n0-pr-v1", "cs-mnl2-nc-n1-pr-v1", "cs-ruh-nc-n0-pr-v1")
+        rows = [dict(pool=m0, slots=3, pending=1), dict(pool=m1, slots=2, pending=1),
+                dict(pool=r0, slots=1, pending=0)]
+        receipt = lambda choices, captured=now: json.dumps(dict(captured_at=captured, pools=choices))
+        self.assertEqual(s.first_cs_pool_plan(receipt(rows), now), (m0, r0))
+        self.assertEqual(s.first_cs_pool_plan(receipt([dict(rows[0], pending=3), rows[1]]), now), (m1,))
+        for bad in (None, "{}", receipt(rows, captured=now - 181), receipt(rows, captured=now + 1),
+                    receipt(rows + [rows[0]]), receipt([dict(rows[0], slots=True)]),
+                    receipt([dict(rows[0], pool="ubuntu-latest")])):
+            self.assertEqual(s.first_cs_pool_plan(bad, now), ())
+
+        for captured in (10**1000, -(10**1000)):
+            with self.subTest(positive=captured > 0):
+                # A valid receipt well under 4 KiB can still contain an integer
+                # outside the range representable by wall-clock floats.
+                self.assertEqual(s.first_cs_pool_plan(receipt(rows, captured), float(now)), ())
+
+    def test_first_pool_is_ignored_without_exact_isolated_pin(self):
+        target = "cs-ruh-nc-n0-pr-v1"
+        ticket = {"pr": 32922, "attempt": 1, "group": 0}
+        env = {"GITHUB_EVENT_NAME": "push", "GITHUB_WORKFLOW_REF":
+               f"{s.REPO}/.github/workflows/coverage-standby-pr32922.yaml@refs/heads/weilu-runner-test"}
+        with patch.dict(os.environ, env), patch.object(s, "first_cs_pool_plan", return_value=(target,)):
+            self.assertEqual(s.choose_initial_scale_set(ticket), target)
+            self.assertIsNone(s.choose_initial_scale_set(dict(ticket, group=1)))
+            self.assertIsNone(s.choose_initial_scale_set(dict(ticket, pr=33401)))
+            self.assertIsNone(s.choose_initial_scale_set(dict(ticket, attempt=2)))
+            with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "pull_request_target"}):
+                self.assertIsNone(s.choose_initial_scale_set(ticket))
+
+    def test_first_pool_requires_exact_label_and_assigned_runner_prefix(self):
+        pool = "cs-mnl2-nc-n2-pr-v1"
+        ticket = {"group": 0, "scale_set": pool}
+        name = "Coverage reservation CS group 0"
+        row = dict(self.active, labels=[pool], runner_name=pool + "-abc-runner-def",
+                   name=name, run_id=12, run_attempt=1)
+        with patch.object(s, "api", return_value=({"total_count": 1, "jobs": [row]}, 2)):
+            self.assertEqual(s.observe(12, ticket, "cs"), (row, 2))
+        for wrong in (dict(row, labels=[s.POOLS["cs"]]),
+                      dict(row, runner_name="cs-mnl2-nc-n0-pr-v1-abc-runner-def")):
+            with patch.object(s, "api", return_value=({"total_count": 1, "jobs": [wrong]}, 2)):
+                with self.assertRaisesRegex(ValueError, "outside requested CS pool|wrong worker label"):
+                    s.observe(12, ticket, "cs")
+        for invalid in ("ubuntu-latest", [], 5):
+            with self.assertRaisesRegex(ValueError, "invalid exact CS pool"):
+                s.worker_labels("cs", scale_set=invalid)
+
+    def test_exact_pool_retries_partial_runner_metadata_without_redispatch(self):
+        pool = "cs-mnl2-nc-n2-pr-v1"
+        ticket = dict(parent=42, group=0, scale_set=pool)
+        row = dict(self.active, name="Coverage reservation CS group 0", run_id=12,
+                   run_attempt=1, labels=[pool], runner_name=pool + "-abc-runner-def")
+        initial = (dict(row, status="queued", runner_id=0, runner_name=""), 1)
+        for missing in ({"runner_id": 0}, {"runner_name": None}):
+            with self.subTest(missing=missing), \
+                 patch.object(s, "reserve", return_value=(12, "b"*40, "nonce", initial)) as reserve, \
+                 patch.object(s, "api", side_effect=[
+                     ({"total_count": 1, "jobs": [dict(row, **missing)]}, 31),
+                     ({"total_count": 1, "jobs": [row]}, 36),
+                 ]) as requests, patch.object(s.time, "sleep"), patch.object(s, "withdraw_cs") as withdraw:
+                result = s.select_cs(ticket, False, s.time.monotonic() + 60)
+            self.assertEqual(result, (12, "b"*40, "nonce", "cs", 1))
+            reserve.assert_called_once()
+            withdraw.assert_not_called()
+            self.assertEqual(requests.call_count, 2)
+            self.assertIs(requests.call_args_list[0].kwargs["cache"], requests.call_args_list[1].kwargs["cache"])
+
+    def test_exact_pool_freshness_at_dispatch_matches_receipt_grant_and_output(self):
+        target = "cs-ruh-nc-n0-pr-v1"
+        snapshot = json.dumps(dict(captured_at=1000, pools=[dict(pool=target, slots=1, pending=0)]))
+        for post_age, expected in ((180, target), (183, None)):
+            with self.subTest(post_age=post_age), tempfile.TemporaryDirectory() as tmp:
+                wall = [1179]  # Fresh when choose() starts.
+                sent = []
+
+                def parent_meta(ticket, *, deadline):
+                    if "key" in ticket:  # Last identity read before dispatch, or final grant check.
+                        wall[0] = 1300 if sent else 1000 + post_age
+
+                def post(path, data):
+                    self.assertEqual(path, f"/actions/workflows/{s.WORKER}/dispatches")
+                    self.assertEqual(wall[0], 1000 + post_age)
+                    sent.append(json.loads(data["inputs"]["ticket"]))
+                    return {"workflow_run_id": 111}, wall[0]
+
+                env = dict(self.env, RUNNER_TEMP=tmp, GITHUB_EVENT_NAME="push",
+                           GITHUB_WORKFLOW_REF=f"{s.REPO}/.github/workflows/coverage-standby-pr32922.yaml@refs/heads/weilu-runner-test",
+                           COVERAGE_CS_FIRST_POOL_SNAPSHOT=snapshot)
+                with patch.dict(os.environ, env), patch.object(s.time, "time", side_effect=lambda: wall[0]), \
+                     patch.object(s, "parent_meta", side_effect=parent_meta), patch.object(s, "api", side_effect=post), \
+                     patch.object(s, "one", return_value={"object": {"sha": "b"*40}}), \
+                     patch.object(s, "reconcile_child_meta"), patch.object(s, "output") as output, \
+                     patch.object(s, "observe", return_value=(dict(self.active, runner_name=target+"-abc-runner-def"), 0)):
+                    s.choose()
+                self.assertEqual(len(sent), 1)
+                self.assertEqual(sent[0].get("scale_set"), expected)
+                for filename in ("reservation.json", "grant.json"):
+                    self.assertEqual(json.loads(Path(tmp, filename).read_text())["ticket"], sent[0])
+                placement = {"scale_set": expected} if expected else {}
+                output.assert_called_once_with(child=111, pool="cs", site="", **placement)
+
+    def test_expired_exact_target_restores_shared_queue_site_retry(self):
+        ticket = dict(parent=42, group=0, scale_set="cs-ruh-nc-n0-pr-v1")
+        first_site = s.CS_SITES[ticket["parent"] % len(s.CS_SITES)]
+
+        def reserve(t, pool, deadline):
+            if "site" not in t:
+                del t["scale_set"]  # The receipt expired before the first POST.
+                return 111, "b"*40, "first", (self.q, 50)
+            self.assertNotIn("scale_set", t)
+            self.assertEqual(t["site"], first_site)
+            job = dict(self.active, runner_name=f"cs-{first_site}-nc-n0-pr-v1-abc-runner-def")
+            return 222, "c"*40, "second", (job, 351)
+
+        with patch.object(s, "reserve", side_effect=reserve), patch.object(s.time, "sleep"), \
+             patch.object(s, "observe", side_effect=[(self.q, 350), (self.q, 3650)]), \
+             patch.object(s, "observe_cs_handoff", return_value=(self.q, 350)), \
+             patch.object(s, "withdraw_cs") as withdraw:
+            result = s.select_cs(ticket, True, float("inf"))
+        withdraw.assert_called_once()
+        self.assertEqual(withdraw.call_args.args[0], 111)
+        self.assertEqual(result, (222, "c"*40, "second", "cs", 50))
+
+    def test_stalled_exact_probe_falls_back_once_to_shared_after_confirmed_cancel(self):
+        target = "cs-ruh-nc-n0-pr-v1"
+        timeline = [(self.q, 1), (self.q, 30), (self.q, 31), (self.q, 32), (self.active, 34)]
+        grant, events = self.run_site_sweep(timeline, exact=target, enabled=False)
+        self.assertEqual(events, [("reserve", 1, "cs", target), ("cancel", 1), ("confirm", 1),
+                                  ("reserve", 2, "cs", None)])
+        self.assertEqual((grant["child"], grant["pool"]), (2, "cs"))
+        self.assertNotIn("scale_set", grant["ticket"])
+
+    def test_exact_probe_keeps_assignment_visible_at_handoff(self):
+        target = "cs-ruh-nc-n0-pr-v1"
+        assigned = dict(self.active, runner_name=target + "-abc-runner-def")
+        with patch.object(s, "observe_cs_handoff") as handoff_read:
+            grant, _ = self.run_site_sweep([(self.q, 1), (self.q, 30), (assigned, 31)], exact=target)
+            handoff_read.assert_not_called()
+            self.assertEqual(grant["child"], 1)
+        for handoff in ([(assigned, 32)], [(dict(self.q, runner_id=123), 32), (assigned, 62)]):
+            with self.subTest(handoff=handoff):
+                grant, events = self.run_site_sweep([(self.q, 1), (self.q, 31), *handoff], exact=target)
+                self.assertEqual(events, [("reserve", 1, "cs", target)])
+                self.assertEqual((grant["child"], grant["ticket"]["scale_set"]), (1, target))
+
+    def test_exact_probe_does_not_replace_a_child_without_confirmed_cancel(self):
+        _, events = self.run_site_sweep([(self.q, 1), (self.q, 31), (self.q, 32)],
+                                        exact="cs-ruh-nc-n0-pr-v1", after_cancel="failure",
+                                        expected_error=(ValueError, "did not acknowledge withdrawal"))
+        self.assertEqual([e[0] for e in events], ["reserve", "cancel", "confirm"])
+
+    def test_failed_exact_probe_is_revocable_without_child_output(self):
+        target = "cs-ruh-nc-n0-pr-v1"
+        posts = []
+        ticket = {}
+
+        def post(path, data):
+            posts.append(path)
+            if path == f"/actions/workflows/{s.WORKER}/dispatches":
+                ticket.update(json.loads(data["inputs"]["ticket"]))
+                return {"workflow_run_id": 111}, 50
+            self.assertEqual((path, data), ("/actions/runs/111/cancel", {}))
+            if posts.count(path) == 1:
+                raise urllib.error.HTTPError(path, 503, "temporary failure", None, None)
+            return {}, 81
+
+        def worker(run_id):
+            self.assertEqual(run_id, 111)
+            return dict(id=111, repository={"full_name": s.REPO}, run_attempt=1, status="queued",
+                        path=".github/workflows/" + s.WORKER, event="workflow_dispatch",
+                        head_branch=s.WORKER_REF, head_sha=ticket["revision"], display_title=s.title(ticket, "cs"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = {**self.env, "RUNNER_TEMP": tmp, "GITHUB_OUTPUT": str(root / "outputs"), "CHILD": ""}
+            with patch.dict(os.environ, env), patch.object(s, "choose_initial_scale_set", return_value=target), \
+                 patch.object(s, "parent_meta"), patch.object(s, "one", return_value={"object": {"sha": "b"*40}}), \
+                 patch.object(s, "run", side_effect=worker), patch.object(s.time, "sleep"), \
+                 patch.object(s, "observe", side_effect=[(self.q, 50), (self.q, 80), (self.q, 81)]), \
+                 patch.object(s, "api", side_effect=post):
+                with self.assertRaisesRegex(urllib.error.HTTPError, "503"):
+                    s.choose()
+                self.assertEqual(json.loads((root / "reservation.json").read_text())["ticket"], ticket)
+                self.assertFalse((root / "grant.json").exists())
+                self.assertFalse((root / "outputs").exists())
+                s.revoke()
+        self.assertEqual(posts, [f"/actions/workflows/{s.WORKER}/dispatches", "/actions/runs/111/cancel",
+                                 "/actions/runs/111/cancel"])
+
+    def test_shared_replacement_keeps_original_shanghai_deadline(self):
+        target = "cs-ruh-nc-n0-pr-v1"
+        timeline = [(self.q, 50), (self.q, 80), (self.q, 81), (self.q, 100),
+                    (self.q, 3649), (self.q, 3650), (self.q, 3651)]
+        grant, events = self.run_site_sweep(timeline, exact=target, enabled=False)
+        self.assertEqual(events, [("reserve", 1, "cs", target), ("cancel", 1), ("confirm", 1),
+                                  ("reserve", 2, "cs", None), ("cancel", 2), ("confirm", 2),
+                                  ("reserve", 3, "idc", None)])
+        self.assertEqual((grant["child"], grant["pool"]), (3, "idc"))
+        self.assertNotIn("scale_set", grant["ticket"])
+
     def scenario(self, observations, cancellation, count, selected, *, attempt='1', revisions=None):
         import tempfile, os, json
         from pathlib import Path
@@ -1397,7 +1599,7 @@ class Queue(unittest.TestCase):
         self.scenario([(self.active,2)],False,1,('cs',111))
 
     def run_site_sweep(self, observations, *, cancel_code=None, after_cancel="cancelled",
-                       expected_error=None, enabled=True):
+                       expected_error=None, enabled=True, exact=None):
         events = []
         withdrawn = set()
         rev = "b" * 40
@@ -1405,7 +1607,7 @@ class Queue(unittest.TestCase):
 
         def reserve(ticket, pool, deadline):
             run_id = 1 + sum(event[0] == "reserve" for event in events)
-            events.append(("reserve", run_id, pool, ticket.get("site")))
+            events.append(("reserve", run_id, pool, ticket.get("scale_set") or ticket.get("site")))
             ticket.update(revision=rev, key=s.digest(f"test-nonce-{run_id}"))
             return run_id, rev, f"test-nonce-{run_id}", next(snapshots) if pool == "cs" else None
 
@@ -1432,7 +1634,8 @@ class Queue(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {
                 **self.env, "RUNNER_TEMP": tmp, "COVERAGE_CS_SITE_RETRY": "true" if enabled else "false",
-        }), patch.object(s, "reserve", side_effect=reserve), patch.object(s, "observe", side_effect=lambda *_, **__: next(snapshots)), \
+        }), patch.object(s, "choose_initial_scale_set", return_value=exact), patch.object(s, "reserve", side_effect=reserve), \
+             patch.object(s, "observe", side_effect=lambda *_, **__: next(snapshots)), \
              patch.object(s, "parent_meta"), patch.object(s, "child_meta", side_effect=metadata), \
              patch.object(s, "api", side_effect=cancel), patch.object(s, "output"), patch.object(s.time, "sleep"):
             if expected_error is not None:
