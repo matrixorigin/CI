@@ -46,6 +46,7 @@ HANDOFF_POLLS = 60
 HANDOFF_POLL_SECONDS = 5
 DISPATCH_METADATA_POLLS = 24
 WORKER_METADATA_POLL_SECONDS = 5
+FIRST_POOL_ASSIGNMENT_GRACE = 2 * WORKER_METADATA_POLL_SECONDS
 # One deadline for both identity and grant, inside the workflow's 20-minute step.
 WORKER_ADMISSION_SECONDS = 19 * 60
 ADMISSION_ARTIFACT_POLLS = 4
@@ -556,23 +557,43 @@ def unassigned(job):
     return job is not None and job["status"] == "queued" and not (job.get("runner_id") or job.get("runner_name"))
 
 
+def assignment_pending(job):
+    if job is None:
+        return False
+    if job["status"] == "queued":
+        return not unassigned(job)
+    return job["status"] == "in_progress" and not (job.get("runner_id") and job.get("runner_name"))
+
+
 def observe(r, t, pool, expect_visible=False, *, cache=None):
+    site, scale_set = t.get("site"), t.get("scale_set")
     get = api if cache is None else partial(api, cache=cache)
     try:
         data, now = get(f"/actions/runs/{r}/attempts/1/jobs?per_page=100")
     except urllib.error.HTTPError as error:
+        # A verified exact child can still be withdrawn without a job record.
+        if (scale_set is not None and (error.code in (404, 408) or 500 <= error.code <= 599)
+                and not (error.headers or {}).get("Retry-After")):
+            error.close()
+            return None, None
         if error.code != 404:
             raise
         error.close()
         raise WorkerIdentityPending("worker attempt jobs lookup returned HTTP 404") from error
+    except OSError:
+        if scale_set is not None:
+            return None, None
+        raise
     check(len(data["jobs"]) == data["total_count"], "incomplete jobs response")
     target = []
-    site, scale_set = t.get("site"), t.get("scale_set")
     for j in data["jobs"]:
         check(j["run_id"] == r and j["run_attempt"] == 1, "wrong job identity")
         if j["name"].split(" / ")[-1] == f"Coverage reservation {pool.upper()} group {t['group']}":
-            check(sorted(j["labels"]) == sorted(worker_labels(pool, site, scale_set)), "wrong worker label")
-            target.append(j)
+            if scale_set is not None and not j.get("labels"):
+                target.append(None)  # Job labels are not indexed yet.
+            else:
+                check(sorted(j["labels"]) == sorted(worker_labels(pool, site, scale_set)), "wrong worker label")
+                target.append(j)
         else:
             # The dispatcher has two mutually exclusive reusable calls. GitHub can
             # surface the non-selected call as a skipped placeholder.
@@ -581,13 +602,16 @@ def observe(r, t, pool, expect_visible=False, *, cache=None):
     if expect_visible and not target:
         raise WorkerIdentityPending("previously seen reservation job is not visible")
     job = target[0] if target else None
-    if pool == "cs" and job is not None and job["status"] == "in_progress":
+    if pool == "cs" and job is not None and (job["status"] == "in_progress" or scale_set is not None):
         name = job.get("runner_name")
         if name and site is not None:
             check(name.startswith(f"cs-{site}-"), "runner is outside requested CS site")
-        if name and scale_set is not None:
-            check(name.startswith(f"{scale_set}-"), "runner is outside requested CS pool")
-        if not name or not job.get("runner_id"):
+        if scale_set is not None:
+            check(not name or (name.startswith(f"{scale_set}-") and runner_matches_pool(name, pool)),
+                  "runner is outside requested CS pool")
+            runner_id = job.get("runner_id")
+            check(runner_id is None or (type(runner_id) is int and runner_id >= 0), "invalid CS runner ID")
+        elif not name or not job.get("runner_id"):
             check(not name or runner_matches_pool(name, pool), "unverified CS assignment")
             # GitHub can expose in_progress before indexing both runner fields.
             raise WorkerIdentityPending("CS runner assignment is not yet visible")
@@ -597,6 +621,8 @@ def observe(r, t, pool, expect_visible=False, *, cache=None):
 def decide(job, now, since, *, exact_probe=False):
     if job is None:
         check(since is None or exact_probe, "previously queued job disappeared")
+        return None, since
+    if exact_probe and assignment_pending(job):
         return None, since
     if job["status"] == "in_progress":
         check(assigned(job, "cs"), "unverified CS assignment")
@@ -669,8 +695,8 @@ def dispatch(t, pool, revision, deadline, *, remember):
         if r:
             try:
                 reconcile_child_meta(r, t, pool, revision, wait_for_display_title=(r == returned_id))
-                # A legacy full title can be indexed before its attempt jobs.
-                # Keep the first CS observation in this same read-only budget.
+                # Shared placement still retries incomplete assignment metadata.
+                # An exact child leaves identity reconciliation with any job observation.
                 first_observation = observe(r, t, pool) if pool == "cs" else None
             except (OSError, WorkerIdentityPending) as error:
                 delay, _ = metadata_read_retry(error)
@@ -801,14 +827,14 @@ def read_worker(phase, read, *args, deadline=float("inf"), retry_pending=True,
         return result
 
 
-def observe_cs_handoff(r, t, rev):
+def observe_cs_handoff(r, t, rev, *, assignment_deadline=None):
     parent_meta(t)
     meta = child_meta(r, t, "cs", rev)
     exact = "scale_set" in t
     if exact and meta["status"] == "completed":
         return None, None, True
     job, now = observe(r, t, "cs", not exact)
-    if exact and job and job["status"] == "queued" and not unassigned(job):
+    if assignment_deadline is not None and assignment_pending(job) and time.monotonic() < assignment_deadline:
         raise WorkerIdentityPending("CS runner assignment is not yet settled")
     return job, now, False
 
@@ -899,7 +925,11 @@ def select_cs(t, enable_site_retry, deadline):
         site_due = remaining_sites and unassigned(j) and now - queued_here >= threshold
         if probe_due or site_due:
             handoff_deadline = min(deadline, time.monotonic() + HANDOFF_POLLS * HANDOFF_POLL_SECONDS)
-            j, now, ended = read_worker(f"CS worker {r} handoff", observe_cs_handoff, r, t, rev,
+            handoff = observe_cs_handoff
+            if exact_probe:
+                assignment_deadline = min(probe_deadline + FIRST_POOL_ASSIGNMENT_GRACE, handoff_deadline)
+                handoff = partial(handoff, assignment_deadline=assignment_deadline)
+            j, now, ended = read_worker(f"CS worker {r} handoff", handoff, r, t, rev,
                                         deadline=handoff_deadline)
             if not ended:
                 route, queued_here = decide(j, now, queued_here, exact_probe=exact_probe)
@@ -928,7 +958,7 @@ def select_cs(t, enable_site_retry, deadline):
                 cache.clear()
                 print(f"Group {t['group']}: {notice} — {run_url(r)}", flush=True)
                 continue
-        if first_queued is not None and (last_queue_report is None or now - last_queue_report >= PROGRESS_INTERVAL):
+        if now is not None and first_queued is not None and (last_queue_report is None or now - last_queue_report >= PROGRESS_INTERVAL):
             print(f"Group {t['group']}: queued for a CS runner ({int(max(0, now - first_queued))}s) — {run_url(r)}", flush=True)
             last_queue_report = now
         wake = min(deadline, probe_deadline) if exact_probe else deadline

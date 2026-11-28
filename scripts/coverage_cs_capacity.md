@@ -39,9 +39,11 @@ An exact probe uses an approved CS scale set and a worker dispatched by GitHub
 Actions. The worker still needs the exact parent grant before checking out PR
 code. The selector starts the 30-second probe budget when it initiates the
 reservation, including time in `pending`, `requested` or `waiting`. It then
-checks the exact worker's assignment and run state. A verified assignment
-wins. Otherwise it confirms that worker is terminal before dispatching one
-shared CS reservation. Cancellation and identity checks use the bounded
-handoff window. An attempt without a usable pool hint follows the existing
-queue policy. The one-hour Shanghai timer starts at the first observed CS
-queue wait.
+checks the exact worker's assignment and run state. When GitHub starts
+reporting an assignment, up to ten more seconds are available for runner
+metadata to settle. A verified assignment wins. Otherwise the selector confirms
+that worker is terminal before dispatching one shared CS reservation. Run
+identity verification remains a prerequisite for withdrawal, and the handoff
+window bounds cancellation. An attempt without a usable pool hint follows the
+existing queue policy. The one-hour Shanghai timer starts at the first observed
+CS queue wait.

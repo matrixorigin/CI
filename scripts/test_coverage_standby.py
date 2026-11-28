@@ -1228,13 +1228,40 @@ class Queue(unittest.TestCase):
         with patch.object(s, "api", return_value=({"total_count": 1, "jobs": [row]}, 2)):
             self.assertEqual(s.observe(12, ticket, "cs"), (row, 2))
         for wrong in (dict(row, labels=[s.POOLS["cs"]]),
-                      dict(row, runner_name="cs-mnl2-nc-n0-pr-v1-abc-runner-def")):
+                      dict(row, status="queued", runner_name="cs-mnl2-nc-n0-pr-v1-abc-runner-def"),
+                      dict(row, runner_id=True), dict(row, run_attempt=2)):
             with patch.object(s, "api", return_value=({"total_count": 1, "jobs": [wrong]}, 2)):
-                with self.assertRaisesRegex(ValueError, "outside requested CS pool|wrong worker label"):
+                with self.assertRaisesRegex(ValueError, "outside requested CS pool|wrong worker label|runner ID|job identity"):
                     s.observe(12, ticket, "cs")
         for invalid in ("ubuntu-latest", [], 5):
             with self.assertRaisesRegex(ValueError, "invalid exact CS pool"):
                 s.worker_labels("cs", scale_set=invalid)
+
+    def test_exact_observation_leaves_missing_assignment_fields_to_the_probe(self):
+        pool = "cs-mnl2-nc-n2-pr-v1"
+        ticket = {"group": 0, "scale_set": pool}
+        row = dict(self.active, labels=[pool], runner_name=pool + "-abc-runner-def",
+                   name="Coverage reservation CS group 0", run_id=12, run_attempt=1)
+        for change in ({"runner_id": 0}, {"runner_name": None}, {"labels": []}):
+            with self.subTest(change=change):
+                observed = dict(row, **change)
+                with patch.object(s, "api", return_value=({"total_count": 1, "jobs": [observed]}, 2)):
+                    job, now = s.observe(12, ticket, "cs")
+                self.assertEqual(job, observed if observed["labels"] else None)
+                self.assertEqual(s.decide(job, now, 1, exact_probe=True), (None, 1))
+
+    def test_exact_observation_can_defer_an_unavailable_job_read(self):
+        ticket = {"group": 0, "scale_set": "cs-mnl2-nc-n2-pr-v1"}
+        path = "/actions/runs/12/attempts/1/jobs?per_page=100"
+        for code, headers, can_defer in ((404, {}, True), (503, {}, True),
+                                         (403, {}, False), (429, {}, False), (503, {"Retry-After": "60"}, False)):
+            error = urllib.error.HTTPError(path, code, "injected", headers, None)
+            with self.subTest(code=code, headers=headers), patch.object(s, "api", side_effect=error):
+                if can_defer:
+                    self.assertEqual(s.observe(12, ticket, "cs"), (None, None))
+                else:
+                    with self.assertRaises(urllib.error.HTTPError):
+                        s.observe(12, ticket, "cs")
 
     def test_formal_first_pool_supports_distinct_prs_on_main_and_4_2_dev(self):
         targets = ("cs-ruh-nc-n0-pr-v1", "cs-mnl2-nc-n0-pr-v1")
@@ -1377,6 +1404,16 @@ class Queue(unittest.TestCase):
                 grant, events = self.run_site_sweep([(self.q, 1), *handoff], exact=target)
                 self.assertEqual(events, [("reserve", 1, "cs", target)])
                 self.assertEqual((grant["child"], grant["ticket"]["scale_set"]), (1, target))
+
+    def test_exact_probe_falls_back_if_assignment_never_settles(self):
+        target = "cs-ruh-nc-n0-pr-v1"
+        for partial_job in (dict(self.q, runner_id=123), dict(self.q, status="in_progress", runner_id=123)):
+            with self.subTest(job=partial_job):
+                timeline = [(partial_job, 1), (partial_job, 31), (partial_job, 36), (partial_job, 41), (self.active, 43)]
+                grant, events = self.run_site_sweep(timeline, exact=target)
+                self.assertEqual(events, [("reserve", 1, "cs", target), ("cancel", 1), ("confirm", 1),
+                                          ("reserve", 2, "cs", None)])
+                self.assertEqual(grant["child"], 2)
 
     def test_exact_probe_does_not_replace_a_child_without_confirmed_cancel(self):
         _, events = self.run_site_sweep([(self.q, 1), (self.q, 31)],
