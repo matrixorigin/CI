@@ -134,13 +134,16 @@ def pool_offer(ars, node, drives, active_pods, ephemeral_sets):
     # Never add fractions across drives: the whole PVC must fit one eligible drive.
     disk_slots = 0
     for drive in drives:
-        labels, capacity = drive["metadata"]["labels"], drive["status"]
-        if (labels.get("directpv.min.io/node") == host and labels.get("directpv.min.io/tier") == "ephemeral"
-                and capacity.get("status") == "Ready"):
-            free = capacity["freeCapacity"]
-            if type(free) is not int or free < 0:
-                raise ValueError("invalid work-disk capacity")
-            disk_slots += int(free // work_size)
+        metadata, capacity = drive["metadata"], drive["status"]
+        labels = metadata["labels"]
+        if (labels.get("directpv.min.io/node") != host or labels.get("directpv.min.io/tier") != "ephemeral"
+                or capacity.get("status") != "Ready" or metadata.get("deletionTimestamp")
+                or drive.get("spec", {}).get("unschedulable")):
+            continue
+        free = capacity["freeCapacity"]
+        if type(free) is not int or free < 0:
+            raise ValueError("invalid work-disk capacity")
+        disk_slots += int(free // work_size)
     # ARC derives pod names from the owned set. Bound pods already consume the
     # node's resources, so only the remaining desired replicas claim new slots.
     prefix = active_set["metadata"]["name"] + "-runner-"

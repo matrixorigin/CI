@@ -146,17 +146,25 @@ class Capacity(unittest.TestCase):
                 ], "overhead": {"cpu": "45m"}}
         self.assertEqual(cap.pod_request(spec, "cpu"), 3245)
 
-    def test_excludes_drive_outside_work_volume_topology(self):
-        inventory = site_reader("jed", [180])
+    def test_only_provisionable_drives_offer_slots(self):
+        healthy = cap.collect_site("mnl2", site_reader("mnl2", [80]))
+        for name, section, fields in (
+            ("outside topology", "status", {"topology": {"directpv.min.io/identity": "wrong"}}),
+            ("cordoned", "spec", {"unschedulable": True}),
+            ("terminating", "metadata", {"deletionTimestamp": "2026-11-20T00:00:00Z"}),
+        ):
+            with self.subTest(drive=name):
+                inventory = site_reader("jed", [160])
 
-        def get(path, filters):
-            items = inventory(path, filters)
-            if path == cap.DRIVES_PATH:
-                items[0]["status"]["topology"]["directpv.min.io/identity"] = "wrong"
-            return items
+                def get(path, filters):
+                    items = inventory(path, filters)
+                    if path == cap.DRIVES_PATH:
+                        items[0].setdefault(section, {}).update(fields)
+                    return items
 
-        row, = cap.collect_site("jed", get)
-        self.assertEqual(row["slots"], 0)
+                pools = cap.collect_site("jed", get) + healthy
+                receipt = json.dumps({"captured_at": 100, "pools": pools})
+                self.assertEqual(standby.first_cs_pool_plan(receipt, 100), ("cs-mnl2-nc-n1-pr-v1",))
 
     def test_missing_or_unreachable_sites_do_not_emit_credentials(self):
         with patch("builtins.print") as out:

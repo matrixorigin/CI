@@ -35,6 +35,9 @@ toward that target and already consume the node's resources. The remaining
 desired replicas reduce the offer. Validate read access, S3 fixture health and
 real allocations at the configured sites before enabling the repository setting.
 
+Cordoned and terminating DirectPV drives contribute no work slots, even when
+their status is `Ready`.
+
 An exact probe uses an approved CS scale set and a worker dispatched by GitHub
 Actions. The worker still needs the exact parent grant before checking out PR
 code. The selector starts the 30-second probe budget when it initiates the
