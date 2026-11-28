@@ -34,8 +34,10 @@ WAIT = 3600
 # Leave time to report a selection failure before the 85-minute workflow step ends.
 SELECTOR_RESERVATION_SECONDS = 84 * 60
 WORKER_READ_RECOVERY_SECONDS = 90
+# A primary GitHub quota resets hourly. Selection and cleanup have their own
+# earlier deadlines. This budget only applies after a confirmed throttle.
+WORKER_RATE_LIMIT_RECOVERY_SECONDS = 60 * 60
 PROGRESS_INTERVAL = 300
-JOB_DETAIL_INTERVAL = 120
 HANDOFF_POLLS = 60
 HANDOFF_POLL_SECONDS = 5
 DISPATCH_METADATA_POLLS = 24
@@ -101,17 +103,37 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def api(path, data=None):
+def api(path, data=None, *, cache=None):
     check(path.startswith("/") and ".." not in path, "invalid API path")
-    req = urllib.request.Request(API + path, headers={
+    check(cache is None or data is None, "conditional requests are read-only")
+    headers = {
         "Authorization": "Bearer " + os.environ["ACTIONS_TOKEN"],
-        "Accept": "application/vnd.github+json", "Content-Type": "application/json"},
+        "Accept": "application/vnd.github+json", "Content-Type": "application/json"}
+    cached = cache.get(path) if cache is not None else None
+    if cached is not None:
+        headers["If-None-Match"] = cached[0]
+    req = urllib.request.Request(API + path, headers=headers,
         data=None if data is None else json.dumps(data).encode())
-    with urllib.request.build_opener(NoRedirect()).open(req, timeout=min(30, admission_remaining())) as res:
+    try:
+        response = urllib.request.build_opener(NoRedirect()).open(req, timeout=min(30, admission_remaining()))
+    except urllib.error.HTTPError as error:
+        if error.code != 304 or cached is None:
+            raise
+        with error:
+            admission_remaining()
+            return cached[1], parsedate_to_datetime(error.headers["Date"]).timestamp()
+    with response as res:
         admission_remaining()
         raw = res.read()
         admission_remaining()
-        return json.loads(raw) if raw else {}, parsedate_to_datetime(res.headers["Date"]).timestamp()
+        payload = json.loads(raw) if raw else {}
+        if cache is not None:
+            etag = res.headers.get("ETag")
+            if etag:
+                cache[path] = (etag, payload)
+            else:
+                cache.pop(path, None)
+        return payload, parsedate_to_datetime(res.headers["Date"]).timestamp()
 
 
 def one(path):
@@ -279,8 +301,10 @@ def confirmed_rate_limit_delay(error):
             return None
         admission_remaining()
         message = payload.get("message") if isinstance(payload, dict) else None
-        if isinstance(message, str) and "secondary rate limit" in message.casefold():
-            return SELECTOR_RATE_LIMIT_FALLBACK_SECONDS
+        if isinstance(message, str):
+            reason = message.casefold()
+            if reason.startswith("api rate limit exceeded") or "secondary rate limit" in reason:
+                return SELECTOR_RATE_LIMIT_FALLBACK_SECONDS
     return None
 
 
@@ -415,11 +439,16 @@ def reconcile_child_meta(r, t, pool, revision, *, wait_for_display_title):
         raise WorkerIdentityPending(str(error)) from error
 
 
-def assigned(job, pool):
+def runner_matches_pool(name, pool):
     regex = (r"cs-(?:mty|mnl2|jed|ruh)-nc-n[012]-pr-v1-[a-z0-9]+-runner-[a-z0-9]+"
              if pool == "cs" else r"amd64-mo-shanghai-ut-safe-[a-z0-9]+-runner-[a-z0-9]+")
-    return bool(job.get("runner_id") and re.fullmatch(regex, job.get("runner_name") or "")
-                and not (job.get("runner_name") or "").startswith("cs-mty-nc-n2-"))
+    return bool(re.fullmatch(regex, name) and not name.startswith("cs-mty-nc-n2-"))
+
+
+def assigned(job, pool):
+    runner_id = job.get("runner_id")
+    return (type(runner_id) is int and runner_id > 0
+            and runner_matches_pool(job.get("runner_name") or "", pool))
 
 
 def worker_labels(pool, site=None):
@@ -434,9 +463,10 @@ def unassigned(job):
     return job is not None and job["status"] == "queued" and not (job.get("runner_id") or job.get("runner_name"))
 
 
-def observe(r, t, pool, expect_visible=False):
+def observe(r, t, pool, expect_visible=False, *, cache=None):
+    get = api if cache is None else partial(api, cache=cache)
     try:
-        data, now = api(f"/actions/runs/{r}/attempts/1/jobs?per_page=100")
+        data, now = get(f"/actions/runs/{r}/attempts/1/jobs?per_page=100")
     except urllib.error.HTTPError as error:
         if error.code != 404:
             raise
@@ -444,13 +474,11 @@ def observe(r, t, pool, expect_visible=False):
         raise WorkerIdentityPending("worker attempt jobs lookup returned HTTP 404") from error
     check(len(data["jobs"]) == data["total_count"], "incomplete jobs response")
     target = []
+    site = t.get("site")
     for j in data["jobs"]:
         check(j["run_id"] == r and j["run_attempt"] == 1, "wrong job identity")
         if j["name"].split(" / ")[-1] == f"Coverage reservation {pool.upper()} group {t['group']}":
-            site = t.get("site")
             check(sorted(j["labels"]) == sorted(worker_labels(pool, site)), "wrong worker label")
-            if site is not None and j["status"] == "in_progress":
-                check((j.get("runner_name") or "").startswith(f"cs-{site}-"), "runner is outside requested CS site")
             target.append(j)
         else:
             # The dispatcher has two mutually exclusive reusable calls. GitHub can
@@ -459,7 +487,16 @@ def observe(r, t, pool, expect_visible=False):
     check(len(target) <= 1, "ambiguous reservation")
     if expect_visible and not target:
         raise WorkerIdentityPending("previously seen reservation job is not visible")
-    return (target[0] if target else None), now
+    job = target[0] if target else None
+    if pool == "cs" and job is not None and job["status"] == "in_progress":
+        name = job.get("runner_name")
+        if name and site is not None:
+            check(name.startswith(f"cs-{site}-"), "runner is outside requested CS site")
+        if not name or not job.get("runner_id"):
+            check(not name or runner_matches_pool(name, pool), "unverified CS assignment")
+            # GitHub can expose in_progress before indexing both runner fields.
+            raise WorkerIdentityPending("CS runner assignment is not yet visible")
+    return job, now
 
 
 def decide(job, now, since):
@@ -535,7 +572,7 @@ def dispatch(t, pool, revision, deadline, *, remember):
                 # Keep the first CS observation in this same read-only budget.
                 first_observation = observe(r, t, pool) if pool == "cs" else None
             except (OSError, WorkerIdentityPending) as error:
-                delay = metadata_read_delay(error)
+                delay, _ = metadata_read_retry(error)
                 if isinstance(error, WorkerIdentityPending):
                     pending = str(error)
                 elif isinstance(error, urllib.error.HTTPError):
@@ -615,27 +652,40 @@ def reserve(t, pool, deadline):
 def read_worker(phase, read, *args, deadline=float("inf"), retry_pending=True):
     """Retry the same metadata read within one outage and phase budget."""
     retryable = (OSError, WorkerIdentityPending) if retry_pending else OSError
-    retry_until = None
+    retry_started = None
+    ordinary_deadline = None
     backoff = 0
+    rate_backoff = 0
     while True:
         if deadline != float("inf") and time.monotonic() >= deadline:
             raise TimeoutError(f"{phase}: phase deadline exceeded")
         try:
             result = read(*args)
         except retryable as error:
-            delay = metadata_read_delay(error)
-            # Indexing lag is expected after dispatch. Poll through the
-            # recovery window without backing off as if the API were down.
-            if isinstance(error, WorkerIdentityPending) or (
-                    isinstance(error, urllib.error.HTTPError) and error.code == 404):
-                backoff = 0
-            else:
-                delay = max(backoff, delay)
-                backoff = min(30, delay * 2)
+            delay, rate_limited = metadata_read_retry(error)
             now = time.monotonic()
-            if retry_until is None:
-                retry_until = min(deadline, now + WORKER_READ_RECOVERY_SECONDS)
-                print(f"{phase}: metadata temporarily unavailable; retrying read", flush=True)
+            if retry_started is None:
+                retry_started = now
+                if not rate_limited:
+                    print(f"{phase}: metadata temporarily unavailable; retrying read", flush=True)
+            retry_until = min(deadline, retry_started + WORKER_RATE_LIMIT_RECOVERY_SECONDS)
+            if rate_limited:
+                if not rate_backoff:
+                    print(f"{phase}: GitHub API throttled; waiting for the quota", flush=True)
+                ordinary_deadline = None
+                delay = max(delay, rate_backoff)
+                rate_backoff = delay * 2
+            else:
+                if ordinary_deadline is None:
+                    ordinary_deadline = now + WORKER_READ_RECOVERY_SECONDS
+                retry_until = min(retry_until, ordinary_deadline)
+                # Indexing lag gets steady polls within the ordinary read budget.
+                if isinstance(error, WorkerIdentityPending) or (
+                        isinstance(error, urllib.error.HTTPError) and error.code == 404):
+                    backoff = 0
+                else:
+                    delay = max(backoff, delay)
+                    backoff = min(30, delay * 2)
             if now + delay < retry_until:
                 time.sleep(delay)
                 if time.monotonic() < retry_until:
@@ -685,6 +735,7 @@ def select_cs(t, enable_site_retry, deadline):
     remaining_sites = [*CS_SITES[offset:], *CS_SITES[:offset], None] if enable_site_retry else []
     first_queued = queued_here = last_queue_report = None
     r, rev, nonce, (j, now) = reserve(t, "cs", deadline)
+    cache = {}
     print(f"Group {t['group']}: requesting a CS runner — {run_url(r)}", flush=True)
     while time.monotonic() < deadline:
         route, queued_here = decide(j, now, queued_here)
@@ -716,6 +767,7 @@ def select_cs(t, enable_site_retry, deadline):
                 # Keep first_queued across the entire sweep and the shared wait.
                 queued_here = None
                 r, rev, nonce, (j, now) = reserve(t, "cs", deadline)
+                cache.clear()
                 print(f"Group {t['group']}: {notice} — {run_url(r)}", flush=True)
                 continue
         if first_queued is not None and (last_queue_report is None or now - last_queue_report >= PROGRESS_INTERVAL):
@@ -726,7 +778,8 @@ def select_cs(t, enable_site_retry, deadline):
             break
         time.sleep(min(30, remaining))
         if time.monotonic() < deadline:
-            j, now = read_worker(f"CS reservation {r}", observe, r, t, "cs", queued_here is not None,
+            j, now = read_worker(f"CS reservation {r}", partial(observe, cache=cache),
+                                 r, t, "cs", queued_here is not None,
                                  deadline=deadline)
     status = j["status"] if j is not None else "job metadata unavailable"
     raise TimeoutError(f"CS reservation {r}: selection deadline exceeded ({status})")
@@ -812,16 +865,20 @@ def artifact(parent, name, filename):
         return json.loads(z.read(filename))
 
 
-def metadata_read_delay(error):
+def metadata_read_retry(error):
     if isinstance(error, WorkerIdentityPending):
-        return PARENT_POLL_SECONDS
+        return PARENT_POLL_SECONDS, False
     if isinstance(error, urllib.error.HTTPError):
-        delay = PARENT_POLL_SECONDS if error.code == 404 else confirmed_rate_limit_delay(error)
-        if delay is None:
-            delay = parent_retry_delay(error)
-        error.close()
-        return delay
-    return parent_retry_delay(error)
+        try:
+            delay = confirmed_rate_limit_delay(error)
+            if delay is not None:
+                return delay, True
+            if error.code == 404:
+                return PARENT_POLL_SECONDS, False
+            return parent_retry_delay(error), False
+        finally:
+            error.close()
+    return parent_retry_delay(error), False
 
 
 def admission_artifact(t, name, filename):
@@ -831,7 +888,7 @@ def admission_artifact(t, name, filename):
         try:
             return required_admission_read(artifact, t["parent"], name, filename)
         except OSError as error:
-            delay = metadata_read_delay(error)
+            delay, _ = metadata_read_retry(error)
             if poll + 1 == ADMISSION_ARTIFACT_POLLS or time.monotonic() + delay > deadline:
                 raise ValueError("parent admission artifact read unavailable; no PR code executed") from None
             time.sleep(delay)
@@ -850,7 +907,7 @@ def check_grant_selector(t):
         # mandatory selector check after the grant still fails closed.
         cooldown = isinstance(error, urllib.error.HTTPError) and error.code in (403, 429)
         try:
-            delay = metadata_read_delay(error)
+            delay, _ = metadata_read_retry(error)
         except urllib.error.HTTPError:
             error.close()
             delay = SELECTOR_RATE_LIMIT_FALLBACK_SECONDS if cooldown else GRANT_SELECTOR_POLL_SECONDS
@@ -867,8 +924,9 @@ def check_grant_selector(t):
     return GRANT_SELECTOR_POLL_SECONDS, False
 
 
-def worker_attempt(r):
-    return one(f"/actions/runs/{r}/attempts/1")
+def worker_attempt(r, cache=None):
+    path = f"/actions/runs/{r}/attempts/1"
+    return one(path) if cache is None else api(path, cache=cache)[0]
 
 
 def read_previous_grant(r):
@@ -1090,27 +1148,24 @@ def wait():
     pool = os.environ["POOL"]
     group = int(os.environ["GROUP"])
     print(f"Group {group}: open worker for live UT logs — {run_url(r)}", flush=True)
-    previous = None
-    last_report = None
-    next_details = None
+    next_progress_at = None
+    # Poll cheaply. Dispatch, authorization and handoff use separate reads.
+    cache = {}
     while True:
-        m = read_worker(f"{pool} worker {r} result", worker_attempt, r)
+        m = read_worker(f"{pool} worker {r} result", worker_attempt, r, cache)
         check(m["id"] == r and m["run_attempt"] == 1, "selected worker attempt identity mismatch")
         if m["status"] == "completed":
             check(m["conclusion"] == "success", "selected coverage group did not pass")
             print(f"Group {group}: Coverage UT passed — {run_url(r)}", flush=True)
             return
         now = time.monotonic()
-        if next_details is None or now >= next_details:
-            next_details = now + JOB_DETAIL_INTERVAL
+        if next_progress_at is None or now >= next_progress_at:
+            next_progress_at = now + PROGRESS_INTERVAL
             try:
-                progress = worker_progress(r, group, pool)
+                phase, url = worker_progress(r, group, pool)
             except (OSError, ValueError, KeyError, TypeError, AttributeError):
-                progress = ("worker details temporarily unavailable; still waiting", run_url(r))
-            if progress != previous or last_report is None or now - last_report >= PROGRESS_INTERVAL:
-                phase, url = progress
-                print(f"Group {group}: {phase} — {url}", flush=True)
-                previous, last_report = progress, now
+                phase, url = "worker details temporarily unavailable; still waiting", run_url(r)
+            print(f"Group {group}: {phase} — {url}", flush=True)
         time.sleep(30)
 
 

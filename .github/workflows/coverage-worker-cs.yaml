@@ -99,6 +99,33 @@ jobs:
       run: |
         set -euo pipefail
         python3 .ci-toolchain/scripts/node_cache_toolchain_store.py --catalog .ci-toolchain/config/node-compile-cache-catalog.json --lock .ci-toolchain/config/node-toolchain-lock.json --destination "$RUNNER_TEMP/node-toolchain-install" --report "$RUNNER_TEMP/persistent-toolchain.json"
+    - name: Check the restored Go version against go.mod
+      id: go_toolchain
+      run: |
+        set -euo pipefail
+        required=$(awk '$1 == "go" { print $2; exit }' go.mod)
+        test -n "$required"
+        installed=$(GOTOOLCHAIN=local go env GOVERSION)
+        if [[ "$installed" == "go$required" ]]; then
+          echo 'matches=true' >> "$GITHUB_OUTPUT"
+        fi
+    - name: Set up the Go version declared by the source
+      if: steps.go_toolchain.outputs.matches != 'true'
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      timeout-minutes: 5
+      env:
+        GOROOT: ''
+        GOTOOLCHAIN: local
+      with:
+        go-version-file: go.mod
+        cache: false
+    - name: Export the selected Go root for the build and cache
+      if: steps.go_toolchain.outputs.matches != 'true'
+      run: |
+        set -euo pipefail
+        # setup-go adds its bin to PATH. Infer its root without the PVC Go's GOROOT.
+        selected=$(env -u GOROOT GOTOOLCHAIN=local go env GOROOT)
+        printf 'GOROOT=%s\n' "$selected" >> "$GITHUB_ENV"
     - name: Prepare Python UDF contract tests
       if: ${{ hashFiles('pkg/udf/python/worker/requirements.txt') != '' }}
       timeout-minutes: 5
