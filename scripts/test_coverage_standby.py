@@ -207,6 +207,56 @@ class ParentAdmission(unittest.TestCase):
             read.assert_called_once()
             sleep.assert_not_called()
 
+    def test_choose_rechecks_the_same_parent_after_grant_read_throttle(self):
+        def select(ticket, *_):
+            ticket.update(revision=self.t['revision'], key=self.t['key'])
+            return 51, self.t['revision'], self.grant['nonce'], 'cs', 0
+
+        for scenario, cooldown, selection_limit, failure in (
+            ('active', 120, s.SELECTOR_RESERVATION_SECONDS, None),
+            ('rerun', 120, s.SELECTOR_RESERVATION_SECONDS, (ValueError, 'identity mismatch: run_attempt')),
+            ('selection deadline', 120, 100, (s.AdmissionDeadlineExceeded, 'cooldown exceeds')),
+            ('handoff deadline', 301, s.SELECTOR_RESERVATION_SECONDS, (s.AdmissionDeadlineExceeded, 'cooldown exceeds')),
+        ):
+            now = 0
+            reads = []
+            error = urllib.error.HTTPError('/actions/runs/42', 429, 'throttled',
+                                           {'Retry-After': str(cooldown)}, None)
+            after = dict(self.p, run_attempt=2) if scenario == 'rerun' else self.p
+            responses = iter([self.p, error, after])
+
+            def read(run_id):
+                reads.append((run_id, now))
+                response = next(responses)
+                if isinstance(response, Exception):
+                    raise response
+                return response
+
+            def sleep(seconds):
+                nonlocal now
+                now += seconds
+
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as tmp, \
+                 patch.dict(os.environ, {**self.selector_env, 'RUNNER_TEMP': tmp,
+                                         'GITHUB_OUTPUT': str(Path(tmp, 'outputs'))}), \
+                 patch.object(s, 'SELECTOR_RESERVATION_SECONDS', selection_limit), \
+                 patch.object(s, 'select_cs', side_effect=select) as reserve, patch.object(s, 'run', side_effect=read), \
+                 patch.object(s.time, 'monotonic', side_effect=lambda: now), patch.object(s.time, 'sleep', side_effect=sleep):
+                grant = Path(tmp, 'grant.json')
+                if failure is None:
+                    s.choose()
+                    self.assertEqual(json.loads(grant.read_text()),
+                                     dict(self.grant, ticket=dict(self.t, title_version=2)))
+                else:
+                    with self.assertRaisesRegex(*failure):
+                        s.choose()
+                    self.assertFalse(grant.exists())
+                    self.assertFalse(Path(tmp, 'outputs').exists())
+                reserve.assert_called_once()
+                expected_times = [0, 0, 120] if scenario in ('active', 'rerun') else [0, 0]
+                self.assertEqual(reads, [(42, t) for t in expected_times])
+                self.assertEqual(now, expected_times[-1])
+
     def test_queued_parent_dispatch_requires_its_active_selector(self):
         env = dict(GITHUB_RUN_ATTEMPT='1',GITHUB_RUN_ID='42',GROUP='0',HEAD=self.sha,
                    SOURCE=self.src,PR='32922')
@@ -610,6 +660,27 @@ class ParentAdmission(unittest.TestCase):
             self.assertEqual(sleeps, [60, 70])
             self.assertEqual(now, 130)
 
+    def test_grant_polling_checks_parent_at_selector_cadence(self):
+        now = 0
+        parents, selectors, grants = [], [], []
+
+        def sleep(seconds):
+            nonlocal now
+            now += seconds
+
+        def grant(*_):
+            grants.append(now)
+            return self.grant if now >= 65 else None
+
+        with patch.object(s, 'parent_meta', side_effect=lambda *_: parents.append(now)), \
+             patch.object(s, 'reconcile_child_meta'), patch.object(s, 'admission_artifact', side_effect=grant), \
+             patch.object(s, 'selector_job', side_effect=lambda *_, **__: selectors.append(now)), \
+             patch.object(s.time, 'monotonic', side_effect=lambda: now), patch.object(s.time, 'sleep', side_effect=sleep):
+            s.wait_for_grant(self.t, 51, 'cs')
+        self.assertEqual(grants, list(range(0, 71, 10)))
+        self.assertEqual(parents, [0, 0, 30, 60])
+        self.assertEqual(selectors, [0, 30, 60])
+
     def test_admission_backoff_grows_until_read_succeeds(self):
         env = dict(TICKET=json.dumps(self.t), GROUP='0', HEAD=self.sha, SOURCE=self.src, POOL='cs',
                    GITHUB_RUN_ATTEMPT='1', GITHUB_RUN_ID='51')
@@ -896,6 +967,50 @@ class ParentAdmission(unittest.TestCase):
                     s.revoke()
                     self.assertEqual(api.call_count, len(responses))
                     sleep.assert_called_once_with(2)
+
+    def test_revoke_waits_for_cooldown_and_revalidates_before_retry(self):
+        for scenario, code, cooldown, after, failure in (
+            ('active', 429, 25, self.worker, None),
+            ('completed', 403, 25, dict(self.worker, status='completed'), None),
+            ('rerun', 429, 25, dict(self.worker, run_attempt=2), (ValueError, 'dedicated worker identity mismatch')),
+            ('outside budget', 429, 91, self.worker, (urllib.error.HTTPError, '429')),
+        ):
+            now = 0
+            reads, posts = [], []
+            headers = {'Retry-After': str(cooldown)} if code == 429 else {
+                'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': str(1000 + cooldown),
+            }
+
+            def run(run_id):
+                reads.append((run_id, now))
+                return self.worker if now == 0 else after
+
+            def cancel(path, data):
+                self.assertEqual((path, data), ('/actions/runs/51/cancel', {}))
+                posts.append(now)
+                if now == 0:
+                    raise urllib.error.HTTPError(path, code, 'throttled', headers, None)
+                return {}, now
+
+            def sleep(seconds):
+                nonlocal now
+                now += seconds
+
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as tmp, \
+                 patch.dict(os.environ, {**self.selector_env, 'RUNNER_TEMP': tmp}), \
+                 patch.object(s, 'run', side_effect=run), patch.object(s, 'api', side_effect=cancel), \
+                 patch.object(s.time, 'time', side_effect=lambda: 1000 + now), \
+                 patch.object(s.time, 'monotonic', side_effect=lambda: now), patch.object(s.time, 'sleep', side_effect=sleep):
+                Path(tmp, 'grant.json').write_text(json.dumps(self.grant))
+                if failure is None:
+                    s.revoke()
+                else:
+                    with self.assertRaisesRegex(*failure):
+                        s.revoke()
+            expected_reads = [0] if scenario == 'outside budget' else [0, 25]
+            self.assertEqual(reads, [(51, t) for t in expected_reads])
+            self.assertEqual(posts, [0, 25] if scenario == 'active' else [0])
+            self.assertEqual(now, expected_reads[-1])
 
     def test_revoke_retries_lookup_and_surfaces_cancellation_failure(self):
         for scenario in ('lookup_transient', 'cancel_denied', 'cancel_exhausted'):
@@ -1317,7 +1432,7 @@ class Queue(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {
                 **self.env, "RUNNER_TEMP": tmp, "COVERAGE_CS_SITE_RETRY": "true" if enabled else "false",
-        }), patch.object(s, "reserve", side_effect=reserve), patch.object(s, "observe", side_effect=lambda *_: next(snapshots)), \
+        }), patch.object(s, "reserve", side_effect=reserve), patch.object(s, "observe", side_effect=lambda *_, **__: next(snapshots)), \
              patch.object(s, "parent_meta"), patch.object(s, "child_meta", side_effect=metadata), \
              patch.object(s, "api", side_effect=cancel), patch.object(s, "output"), patch.object(s.time, "sleep"):
             if expected_error is not None:
@@ -1405,6 +1520,53 @@ class Queue(unittest.TestCase):
                         s.observe(12, ticket, "cs")
         with self.assertRaisesRegex(ValueError, "invalid CS site"):
             s.worker_labels("cs", "other")
+
+    def test_cs_assignment_waits_for_both_runner_fields_on_the_same_job(self):
+        ticket = {"parent": 42, "group": 0, "site": "jed"}
+        row = dict(self.active, name="cs / Coverage reservation CS group 0", run_id=12, run_attempt=1,
+                   labels=s.worker_labels("cs", "jed"))
+        initial = (dict(row, status="queued", runner_id=0, runner_name=""), 1)
+        for missing in ({"runner_id": 0}, {"runner_name": None}):
+            with self.subTest(missing=missing), \
+                 patch.object(s, "reserve", return_value=(12, "b"*40, "nonce", initial)) as reserve, \
+                 patch.object(s, "api", side_effect=[
+                     ({"total_count": 1, "jobs": [dict(row, **missing)]}, 31),
+                     ({"total_count": 1, "jobs": [row]}, 36),
+                 ]) as requests, patch.object(s.time, "sleep") as sleep:
+                result = s.select_cs(ticket, False, s.time.monotonic() + 60)
+            self.assertEqual(result, (12, "b"*40, "nonce", "cs", 1))
+            reserve.assert_called_once()
+            self.assertEqual(sleep.call_count, 2)
+            self.assertEqual([call.args for call in requests.call_args_list],
+                             [("/actions/runs/12/attempts/1/jobs?per_page=100",)] * 2)
+
+        # A present runner from the wrong site is a verified mismatch even
+        # when its ID is still missing.
+        row.update(runner_id=0, runner_name="cs-ruh-nc-n0-pr-v1-abc-runner-def")
+        with patch.object(s, "api", return_value=({"total_count": 1, "jobs": [row]}, 31)), \
+             patch.object(s.time, "sleep") as sleep:
+            with self.assertRaisesRegex(ValueError, "outside requested CS site"):
+                s.read_worker("CS reservation", s.observe, 12, ticket, "cs")
+        sleep.assert_not_called()
+
+    def test_unchanged_cs_queue_uses_the_current_server_date_for_timeout(self):
+        ticket = {"parent": 42, "group": 0}
+        row = dict(self.q, name="cs / Coverage reservation CS group 0", run_id=12, run_attempt=1,
+                   labels=s.worker_labels("cs"))
+        path = "/actions/runs/12/attempts/1/jobs?per_page=100"
+        original = "Sat, 28 Nov 2026 00:00:00 GMT"
+        queued_at = s.parsedate_to_datetime(original).timestamp()
+        response = BytesIO(json.dumps({"total_count": 1, "jobs": [row]}).encode())
+        response.headers = {"Date": original, "ETag": '"queued"'}
+        opener = Mock()
+        opener.open.side_effect = [response, urllib.error.HTTPError(
+            path, 304, "Not Modified", {"Date": "Sat, 28 Nov 2026 01:00:00 GMT"}, None)]
+        with patch.dict(os.environ, ACTIONS_TOKEN="test-token"), \
+             patch.object(s, "reserve", return_value=(12, "b"*40, "nonce", (row, queued_at))), \
+             patch.object(s.urllib.request, "build_opener", return_value=opener), patch.object(s.time, "sleep"):
+            self.assertEqual(s.select_cs(ticket, False, s.time.monotonic() + 60),
+                             (12, "b"*40, "nonce", "idc", queued_at))
+        self.assertEqual(opener.open.call_args.args[0].get_header("If-none-match"), '"queued"')
 
     def test_empty_dispatch_response_reconciles_on_same_worker_ref_without_second_post(self):
         t = dict(parent=1, attempt=1, group=1, head='a'*40, key='b'*64)
@@ -1524,19 +1686,43 @@ class Queue(unittest.TestCase):
 class Progress(unittest.TestCase):
     def test_wait_recovers_status_on_the_original_attempt(self):
         path = "/actions/runs/123/attempts/1"
-        ready = dict(id=123, status="completed", run_attempt=1, conclusion="success")
-        errors = [urllib.error.HTTPError(path, code, "not available", None, None) for code in (404, 503)]
-        with patch.dict(os.environ, dict(CHILD="123", GROUP="1", POOL="cs")), \
-             patch.object(s, "one", side_effect=[*errors, ready]) as read, \
-             patch.object(s.time, "sleep") as sleep:
+        date = "Sat, 28 Nov 2026 00:00:00 GMT"
+
+        def result(status, **extra):
+            response = BytesIO(json.dumps(dict(id=123, status=status, run_attempt=1, **extra)).encode())
+            response.headers = {"Date": date, "ETag": f'"{status}"'}
+            return response
+
+        now = [0]
+        opener = Mock()
+        opener.open.side_effect = [
+            result("in_progress"),
+            urllib.error.HTTPError(path, 304, "Not Modified", {"Date": date}, None),
+            urllib.error.HTTPError(path, 403, "Forbidden",
+                                   {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "2560"}, None),
+            urllib.error.HTTPError(path, 403, "Forbidden",
+                                   {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "2565"}, None),
+            result("completed", conclusion="success"),
+        ]
+        with patch.dict(os.environ, dict(CHILD="123", GROUP="1", POOL="cs", ACTIONS_TOKEN="test-token")), \
+             patch.object(s.urllib.request, "build_opener", return_value=opener), \
+             patch.object(s, "worker_progress", return_value=("running", s.run_url(123))), \
+             patch.object(s.time, "monotonic", side_effect=lambda: now[0]), \
+             patch.object(s.time, "time", side_effect=lambda: 1000 + now[0]), \
+             patch.object(s.time, "sleep", side_effect=lambda delay: now.__setitem__(0, now[0] + delay)) as sleep:
             s.wait()
-        self.assertEqual([call.args for call in read.call_args_list], [(path,)] * 3)
-        self.assertEqual(sleep.call_count, 2)
+        requests = [call.args[0] for call in opener.open.call_args_list]
+        self.assertEqual([(req.get_method(), req.full_url, req.get_header("Authorization")) for req in requests],
+                         [("GET", s.API + path, "Bearer test-token")] * 5)
+        self.assertEqual([req.get_header("If-none-match") for req in requests], [None] + ['"in_progress"'] * 4)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [30, 30, 1500, 5])
 
     def test_worker_read_honors_rate_limit_and_phase_deadline(self):
         path = "/actions/runs/123/attempts/1"
         for code, headers, deadline, success, expected_sleep in (
             (429, {"Retry-After": "60"}, 85, True, [60]),
+            (429, {"Retry-After": "120"}, 130, True, [120]),
+            (429, {"Retry-After": "1800"}, s.SELECTOR_RESERVATION_SECONDS, False, []),
             (429, {"Retry-After": "60"}, 50, False, []),
             (403, {}, 85, False, []),
             (503, {}, 24, False, [5, 10]),
@@ -1580,7 +1766,7 @@ class Progress(unittest.TestCase):
                 with self.subTest(pool=pool, status=status), patch.object(s, "observe", return_value=(target, 1)) as read:
                     self.assertEqual(s.worker_progress(123, 1, pool),
                                      (f"{site}: {phase}", f"https://github.com/{s.REPO}/actions/runs/123/job/312"))
-                    read.assert_called_once_with(123, {"group": 1}, pool)
+                    read.assert_called_once_with(123, {"group": 1}, pool, cache=None)
 
     def test_progress_is_best_effort_and_child_result_is_authoritative(self):
         env = dict(CHILD="123", GROUP="1", POOL="cs")
@@ -1599,7 +1785,7 @@ class Progress(unittest.TestCase):
                 self.assertNotIn("do not print API details", str(out.call_args_list))
 
     def test_job_details_are_rate_limited_but_child_result_is_polled_each_time(self):
-        interval = s.JOB_DETAIL_INTERVAL
+        interval = s.PROGRESS_INTERVAL
         times = [0, interval-1, interval, interval+1]
         finish = dict(id=123, status="completed", run_attempt=1, conclusion="success")
         with patch.dict(os.environ, dict(CHILD="123", GROUP="1", POOL="cs")), \
@@ -1680,7 +1866,7 @@ class ShortWorkerTitle(unittest.TestCase):
              patch.object(s, "api") as post:
             with self.assertRaisesRegex(ValueError, "deadline exceeded before dispatch"):
                 self.dispatch(deadline=10)
-        parent.assert_called_once_with(self.ticket)
+        parent.assert_called_once_with(self.ticket, deadline=10)
         post.assert_not_called()
         self.remember.assert_not_called()
 
