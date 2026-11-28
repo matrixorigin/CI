@@ -17,6 +17,10 @@ on:
         description: "Try individual CS sites when the shared queue stalls; requires matching worker pin"
         type: boolean
         default: false
+      enable_cs_first_pool:
+        description: "Try capacity-aware first placement for authorized main and 4.2-dev Coverage UTs"
+        type: boolean
+        default: false
       enable_4_2_dev:
         description: "Opt the trusted 4.2-dev caller into Coverage standby after fixture backport"
         required: false
@@ -30,6 +34,9 @@ on:
         description: "Terminal UT coverage producer status"
         value: ${{ jobs['coverage-final-status'].outputs.status || jobs.legacy.outputs.coverage_status }}
     secrets:
+      CS_COVERAGE_CAPACITY_READ:
+        description: "Optional read-only Kubernetes capacity connections for the trusted preflight only"
+        required: false
       CS_COVERAGE_CACHE_READ_TOKEN:
         required: false
       TEST_S3FS_ALIYUN:
@@ -80,6 +87,7 @@ jobs:
       allowed: ${{ steps.entry.outputs.allowed }}
       head_sha: ${{ steps.entry.outputs.head_sha }}
       head_repository: ${{ steps.entry.outputs.head_repository }}
+      first_pool_snapshot: ${{ steps.capacity.outputs.snapshot }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
@@ -89,6 +97,7 @@ jobs:
           sparse-checkout: |
             scripts/coverage_pr_entry.py
             scripts/coverage_cache_preflight.py
+            scripts/coverage_cs_capacity.py
           sparse-checkout-cone-mode: false
           persist-credentials: false
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
@@ -147,6 +156,22 @@ jobs:
           name: real-pr-snapshot-${{ github.run_id }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/real-pr-authorization.json
           if-no-files-found: error
+      - id: capacity
+        name: Read CS capacity before the first reservation
+        if: >-
+          inputs.enable_cs_first_pool && steps.entry.outputs.route == 'cache' &&
+          steps.entry.outputs.allowed == 'true' && github.run_attempt == 1 &&
+          github.repository == 'matrixorigin/matrixone' && github.event_name == 'pull_request_target' &&
+          (github.workflow_ref == 'matrixorigin/matrixone/.github/workflows/entrypoint.yaml@refs/heads/main' ||
+          (inputs.enable_4_2_dev && github.event.pull_request.base.ref == '4.2-dev' &&
+          github.workflow_ref == 'matrixorigin/matrixone/.github/workflows/entrypoint.yaml@refs/heads/4.2-dev')) &&
+          (github.event.pull_request.base.ref == 'main' ||
+          (inputs.enable_4_2_dev && github.event.pull_request.base.ref == '4.2-dev'))
+        timeout-minutes: 1
+        continue-on-error: true
+        env:
+          CS_COVERAGE_CAPACITY_READ: ${{ secrets.CS_COVERAGE_CAPACITY_READ }}
+        run: python3 -I entry/scripts/coverage_cs_capacity.py
   # For PRs outside the tested trust/base scope, keep the pre-cutover CI path.
   legacy:
     needs: check_coverage_eligibility
@@ -184,6 +209,8 @@ jobs:
       source: ${{ needs.check_coverage_eligibility.outputs.head_repository }}
       head: ${{ needs.check_coverage_eligibility.outputs.head_sha }}
       enable_cs_site_retry: ${{ inputs.enable_cs_site_retry }}
+      first_pool_snapshot: ${{ needs.check_coverage_eligibility.outputs.first_pool_snapshot }}
+      enable_cs_first_pool: ${{ inputs.enable_cs_first_pool }}
       enable_4_2_dev: ${{ inputs.enable_4_2_dev }}
   merge-coverage-groups:
     needs:
