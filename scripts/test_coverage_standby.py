@@ -1168,32 +1168,43 @@ class Queue(unittest.TestCase):
         self.assertEqual(withdraw.call_args.args[0], 111)
         self.assertEqual(result, (222, "c"*40, "second", "cs", 50))
 
-    def test_exact_first_dispatch_does_not_rotate_and_shanghai_deadline_is_unchanged(self):
+    def test_stalled_exact_probe_falls_back_once_to_shared_after_confirmed_cancel(self):
         target = "cs-ruh-nc-n0-pr-v1"
-        deadline = 10 + s.SELECTOR_RESERVATION_SECONDS
-        calls = []
-        def reserve(ticket, pool, received_deadline):
-            self.assertEqual(received_deadline, deadline)
-            calls.append(("reserve", pool, ticket.get("scale_set")))
-            return (111, "b"*40, "a", (self.q, 50)) if pool == "cs" else (222, "c"*40, "b", None)
-        def withdraw(r, ticket, revision, received_deadline):
-            self.assertEqual(received_deadline, deadline)
-            calls.append(("confirmed_cancel", r, ticket["scale_set"]))
-        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {
-            **self.env, "RUNNER_TEMP": tmp, "COVERAGE_CS_SITE_RETRY": "true",
-        }), patch.object(s, "choose_initial_scale_set", return_value=target), patch.object(s, "parent_meta"), \
-             patch.object(s, "child_meta"), patch.object(s, "reserve", side_effect=reserve), \
-             patch.object(s, "withdraw_cs", side_effect=withdraw), patch.object(s, "output"), \
-             patch.object(s.time, "monotonic", return_value=10), patch.object(s.time, "sleep"), \
-             patch.object(s, "observe", side_effect=[
-                 (self.q, 350), (self.q, 3649), (self.q, 3650), (self.q, 3651),
-             ]) as observe:
-            s.choose()
-            self.assertEqual(observe.call_count, 4)
-            grant = json.loads(Path(tmp, "grant.json").read_text())
-        self.assertEqual(calls, [("reserve", "cs", target), ("confirmed_cancel", 111, target),
-                                 ("reserve", "idc", None)])
-        self.assertEqual((grant["child"], grant["pool"]), (222, "idc"))
+        timeline = [(self.q, 1), (self.q, 30), (self.q, 31), (self.q, 32), (self.active, 34)]
+        grant, events = self.run_site_sweep(timeline, exact=target, enabled=False)
+        self.assertEqual(events, [("reserve", 1, "cs", target), ("cancel", 1), ("confirm", 1),
+                                  ("reserve", 2, "cs", None)])
+        self.assertEqual((grant["child"], grant["pool"]), (2, "cs"))
+        self.assertNotIn("scale_set", grant["ticket"])
+
+    def test_exact_probe_keeps_assignment_visible_at_handoff(self):
+        target = "cs-ruh-nc-n0-pr-v1"
+        assigned = dict(self.active, runner_name=target + "-abc-runner-def")
+        with patch.object(s, "observe_cs_handoff") as handoff_read:
+            grant, _ = self.run_site_sweep([(self.q, 1), (self.q, 30), (assigned, 31)], exact=target)
+            handoff_read.assert_not_called()
+            self.assertEqual(grant["child"], 1)
+        for handoff in ([(assigned, 32)], [(dict(self.q, runner_id=123), 32), (assigned, 62)]):
+            with self.subTest(handoff=handoff):
+                grant, events = self.run_site_sweep([(self.q, 1), (self.q, 31), *handoff], exact=target)
+                self.assertEqual(events, [("reserve", 1, "cs", target)])
+                self.assertEqual((grant["child"], grant["ticket"]["scale_set"]), (1, target))
+
+    def test_exact_probe_does_not_replace_a_child_without_confirmed_cancel(self):
+        _, events = self.run_site_sweep([(self.q, 1), (self.q, 31), (self.q, 32)],
+                                        exact="cs-ruh-nc-n0-pr-v1", after_cancel="failure",
+                                        expected_error=(ValueError, "did not acknowledge withdrawal"))
+        self.assertEqual([e[0] for e in events], ["reserve", "cancel", "confirm"])
+
+    def test_shared_replacement_keeps_original_shanghai_deadline(self):
+        target = "cs-ruh-nc-n0-pr-v1"
+        timeline = [(self.q, 50), (self.q, 80), (self.q, 81), (self.q, 100),
+                    (self.q, 3649), (self.q, 3650), (self.q, 3651)]
+        grant, events = self.run_site_sweep(timeline, exact=target, enabled=False)
+        self.assertEqual(events, [("reserve", 1, "cs", target), ("cancel", 1), ("confirm", 1),
+                                  ("reserve", 2, "cs", None), ("cancel", 2), ("confirm", 2),
+                                  ("reserve", 3, "idc", None)])
+        self.assertEqual((grant["child"], grant["pool"]), (3, "idc"))
         self.assertNotIn("scale_set", grant["ticket"])
 
     def scenario(self, observations, cancellation, count, selected, *, attempt='1', revisions=None):
@@ -1397,7 +1408,7 @@ class Queue(unittest.TestCase):
         self.scenario([(self.active,2)],False,1,('cs',111))
 
     def run_site_sweep(self, observations, *, cancel_code=None, after_cancel="cancelled",
-                       expected_error=None, enabled=True):
+                       expected_error=None, enabled=True, exact=None):
         events = []
         withdrawn = set()
         rev = "b" * 40
@@ -1405,7 +1416,7 @@ class Queue(unittest.TestCase):
 
         def reserve(ticket, pool, deadline):
             run_id = 1 + sum(event[0] == "reserve" for event in events)
-            events.append(("reserve", run_id, pool, ticket.get("site")))
+            events.append(("reserve", run_id, pool, ticket.get("scale_set") or ticket.get("site")))
             ticket.update(revision=rev, key=s.digest(f"test-nonce-{run_id}"))
             return run_id, rev, f"test-nonce-{run_id}", next(snapshots) if pool == "cs" else None
 
@@ -1432,7 +1443,8 @@ class Queue(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {
                 **self.env, "RUNNER_TEMP": tmp, "COVERAGE_CS_SITE_RETRY": "true" if enabled else "false",
-        }), patch.object(s, "reserve", side_effect=reserve), patch.object(s, "observe", side_effect=lambda *_: next(snapshots)), \
+        }), patch.object(s, "choose_initial_scale_set", return_value=exact), patch.object(s, "reserve", side_effect=reserve), \
+             patch.object(s, "observe", side_effect=lambda *_: next(snapshots)), \
              patch.object(s, "parent_meta"), patch.object(s, "child_meta", side_effect=metadata), \
              patch.object(s, "api", side_effect=cancel), patch.object(s, "output"), patch.object(s.time, "sleep"):
             if expected_error is not None:

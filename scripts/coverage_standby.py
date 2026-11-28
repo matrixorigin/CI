@@ -29,6 +29,7 @@ RECEIPT_BASE_REFS = frozenset({"main", "4.2-dev"})
 POOLS = {"cs": "cs-node-cache-7c14g", "idc": "amd64-mo-shanghai-ut-safe"}
 CS_SITES = ("mty", "jed", "mnl2", "ruh")
 FIRST_POOL_MAX_AGE = 180
+FIRST_POOL_PROBE_WAIT = 30
 FIRST_CS_POOLS = frozenset(f"cs-{site}-nc-n{node}-pr-v1"
                            for site in ("mnl2", "ruh") for node in range(3))
 CS_SITE_RETRY_AFTER = 300
@@ -739,7 +740,7 @@ def select_cs(t, enable_site_retry, deadline):
     offset = (t["parent"] + t["group"]) % len(CS_SITES)
     r, rev, nonce, (j, now) = reserve(t, "cs", deadline)
     target = t.get("scale_set")
-    remaining_sites = [*CS_SITES[offset:], *CS_SITES[:offset], None] if enable_site_retry and not target else []
+    remaining_sites = [*CS_SITES[offset:], *CS_SITES[:offset], None] if enable_site_retry else []
     first_queued = queued_here = last_queue_report = None
     if target:
         print(f"Group {t['group']}: first CS reservation targets {target} — {run_url(r)}", flush=True)
@@ -754,8 +755,11 @@ def select_cs(t, enable_site_retry, deadline):
         if route:
             print(f"group={t['group']} CS_job={j['id']} first_queued_utc={first_queued} decision_utc={now} route={route}", flush=True)
             return r, rev, nonce, route, first_queued
+        exact_probe = "scale_set" in t
         threshold = CS_SITE_PROBE_WAIT if "site" in t else CS_SITE_RETRY_AFTER
-        if remaining_sites and unassigned(j) and now - queued_here >= threshold:
+        if exact_probe:
+            threshold = FIRST_POOL_PROBE_WAIT
+        if (exact_probe or remaining_sites) and unassigned(j) and now - queued_here >= threshold:
             j, now = read_worker(f"CS worker {r} handoff", observe_cs_handoff, r, t, rev, deadline=deadline)
             route, queued_here = decide(j, now, queued_here)
             if route == "cs":
@@ -765,8 +769,10 @@ def select_cs(t, enable_site_retry, deadline):
                     return r, rev, nonce, "idc", first_queued
                 withdraw_cs(r, t, rev, deadline)
                 check(time.monotonic() < deadline, "CS selection deadline exceeded before replacement")
-                next_site = remaining_sites.pop(0)
-                if next_site is None:
+                if exact_probe:
+                    old_pool = t.pop("scale_set")
+                    notice = f"{old_pool} did not pick up the reservation; requesting the shared CS queue"
+                elif (next_site := remaining_sites.pop(0)) is None:
                     del t["site"]
                     notice = "no CS site picked up the reservation in time; returning to the shared CS queue"
                 else:
