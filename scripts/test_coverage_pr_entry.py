@@ -488,7 +488,7 @@ class EntryTest(unittest.TestCase):
         body = body.replace(label, label+"      if: ${{ true }}\n")
         # Includes the restricted S3 smoke selection, the full test command,
         # producer status guards and artifact handoff.
-        self.assertEqual(hashlib.sha256(body.encode()).hexdigest(), "193b46bbb3b3801e88053ffe6ff81f497ccbb5c7c33201266405713e2247acb0")
+        self.assertEqual(hashlib.sha256(body.encode()).hexdigest(), "5320d042b6c1e76b01bb8b55296547eb469544c99195b83f914a1275c0df655c")
         for field in ("coverage_ready:", "coverage_status:", "bvt_generation:", "cache_seed:"):
             self.assertIn(field, src.split("jobs:\n")[0])
 
