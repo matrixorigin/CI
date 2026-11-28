@@ -30,6 +30,21 @@ jobs:
             exit 1
           fi
         done
+    - id: check_provider_config
+      name: Require OSS and COS configuration before checkout
+      env:
+        TEST_S3FS_ALIYUN: ${{ secrets.TEST_S3FS_ALIYUN }}
+        TEST_S3FS_QCLOUD: ${{ secrets.TEST_S3FS_QCLOUD }}
+      run: |
+        set -euo pipefail
+        missing=()
+        for config in TEST_S3FS_ALIYUN TEST_S3FS_QCLOUD; do
+          if [[ -z "${!config:-}" ]]; then missing+=("$config"); fi
+        done
+        if (( ${#missing[@]} )); then
+          echo "::error::Missing provider test configuration: ${missing[*]}"
+          exit 1
+        fi
     - name: Checkout 4.2-dev
       uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
       timeout-minutes: 10
@@ -56,10 +71,6 @@ jobs:
         TEST_S3FS_QCLOUD: ${{ secrets.TEST_S3FS_QCLOUD }}
       run: |
         set -euo pipefail
-        if [[ -z "$TEST_S3FS_ALIYUN" || -z "$TEST_S3FS_QCLOUD" ]]; then
-          echo '::error::Configure both OSS and COS before running this check'
-          exit 1
-        fi
         unset endpoint region apikey apisecret bucket TEST_S3FS_CS
         export CGO_CFLAGS="-I$PWD/cgo -I$PWD/thirdparties/install/include"
         export CGO_LDFLAGS="-L$PWD/cgo -lmo -Wl,-rpath,$PWD/cgo -L$PWD/thirdparties/install/lib -lusearch_c -Wl,-rpath,$PWD/thirdparties/install/lib -lm"
@@ -74,7 +85,9 @@ jobs:
             reduce inputs as $event ({providers: {}, failed: {}, s3fs: []};
               ($event.Test // "") as $test |
               ([$test | capture("^TestObjectStorages/(?<fixture>.+)/(?<sdk>aliyun|qcloud)(?:/(?<leaf>.*))?$")][0]) as $sdk |
-              if $sdk then
+              if $event.Action == "output" and (($event.Output // "") | startswith("panic: test timed out after ")) then
+                .failed["go_test_timeout"] = true
+              elif $sdk then
                 .providers[$sdk.fixture] = $sdk.sdk |
                 if $event.Action == "fail" then
                   .failed[$sdk.sdk + (if $sdk.leaf == "basic" then "/basic" else "/sdk" end)] = true
@@ -97,7 +110,9 @@ jobs:
                 elif $case == "" and .[$stream] then .
                 else .[$fixture.value + "/s3fs"] = true end
               else . end
-            ) | keys[] | "OSS/COS failed case: \(.)"
+            ) | keys[] |
+            if . == "go_test_timeout" then "OSS/COS failure signal: \(.)"
+            else "OSS/COS failed case: \(.)" end
           ' "$report" 2>/dev/null || true
           exit "$status"
         }
