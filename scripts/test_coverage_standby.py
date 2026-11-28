@@ -1236,6 +1236,22 @@ class Queue(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "invalid exact CS pool"):
                 s.worker_labels("cs", scale_set=invalid)
 
+    def test_formal_first_pool_requires_opted_in_main_32922_initial_attempt(self):
+        target = "cs-ruh-nc-n0-pr-v1"
+        ticket = {"pr": 32922, "attempt": 1, "group": 0}
+        env = {"GITHUB_EVENT_NAME": "pull_request_target", "GITHUB_BASE_REF": "main",
+               "GITHUB_WORKFLOW_REF": f"{s.REPO}/{s.ENTRY}@refs/heads/main",
+               "COVERAGE_CS_FIRST_POOL_ENABLED": "true"}
+        with patch.dict(os.environ, env), patch.object(s, "first_cs_pool_plan", return_value=(target,)) as plan:
+            self.assertEqual(s.choose_initial_scale_set(ticket), target)
+            self.assertIsNone(s.choose_initial_scale_set(dict(ticket, pr=30102)))
+            self.assertIsNone(s.choose_initial_scale_set(dict(ticket, attempt=2)))
+            for change in ({"GITHUB_BASE_REF": "4.2-dev"}, {"GITHUB_WORKFLOW_REF": "untrusted"},
+                           {"COVERAGE_CS_FIRST_POOL_ENABLED": "false"}, {"GITHUB_EVENT_NAME": "workflow_dispatch"}):
+                with patch.dict(os.environ, change):
+                    self.assertIsNone(s.choose_initial_scale_set(ticket))
+            plan.assert_called_once()
+
     def test_exact_pool_retries_partial_runner_metadata_without_redispatch(self):
         pool = "cs-mnl2-nc-n2-pr-v1"
         ticket = dict(parent=42, group=0, scale_set=pool)

@@ -25,6 +25,8 @@ on:
       - 'scripts/test_coverage_cs_build_tools.py'
       - 'scripts/coverage_standby.py'
       - 'scripts/test_coverage_standby.py'
+      - 'scripts/coverage_cs_capacity.py'
+      - 'scripts/test_coverage_cs_capacity.py'
       - 'scripts/coverage_pr_entry.py'
       - 'scripts/test_coverage_pr_entry.py'
       - 'scripts/testdata/coverage_4_2_fixture.json'
@@ -136,7 +138,7 @@ jobs:
                    {key: .name, value: .sha}) | from_entries) == $expected'
       - name: Test CS S3 routing and PR entry / two-group handoff
         timeout-minutes: 3
-        run: python3 -m unittest scripts.test_cs_s3_coverage scripts.test_coverage_cs_build_tools scripts.test_coverage_pr_entry scripts.test_coverage_standby scripts.test_coverage_cache_preflight -v
+        run: python3 -m unittest scripts.test_cs_s3_coverage scripts.test_coverage_cs_build_tools scripts.test_coverage_pr_entry scripts.test_coverage_standby scripts.test_coverage_cs_capacity scripts.test_coverage_cache_preflight -v
       - name: Test Coverage UT failure display
         run: python3 -m unittest scripts.test_coverage_failure_display -v
       - name: Test TKE merge subject identity contract

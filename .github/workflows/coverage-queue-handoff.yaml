@@ -6,6 +6,8 @@ on:
       head: {type: string, required: true}
       source: {type: string, required: true}
       enable_cs_site_retry: {type: boolean, default: false}
+      enable_cs_first_pool: {type: boolean, default: false}
+      first_pool_snapshot: {type: string, default: ''}
       enable_4_2_dev: {type: boolean, required: false, default: false}
     secrets:
       TOKEN_ACTION: {required: false}
@@ -84,6 +86,8 @@ jobs:
         HEAD: ${{ inputs.head }}
         SOURCE: ${{ inputs.source }}
         COVERAGE_CS_SITE_RETRY: ${{ inputs.enable_cs_site_retry }}
+        COVERAGE_CS_FIRST_POOL_ENABLED: ${{ inputs.enable_cs_first_pool }}
+        COVERAGE_CS_FIRST_POOL_SNAPSHOT: ${{ inputs.first_pool_snapshot }}
         ACTIONS_TOKEN: ${{ github.token }}
       run: python3 -I scripts/coverage_standby.py choose
     - name: Release exactly one worker
@@ -102,6 +106,7 @@ jobs:
         POOL: ${{ steps.select.outputs.pool }}
         GROUP: ${{ inputs.group }}
         COVERAGE_CS_SITE: ${{ steps.select.outputs.site }}
+        COVERAGE_CS_SCALE_SET: ${{ steps.select.outputs.scale_set }}
         ACTIONS_TOKEN: ${{ github.token }}
       run: python3 -I scripts/coverage_standby.py wait
     - name: Cancel the selected worker if the selector stops

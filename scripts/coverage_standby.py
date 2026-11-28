@@ -31,7 +31,8 @@ CS_SITES = ("mty", "jed", "mnl2", "ruh")
 FIRST_POOL_MAX_AGE = 180
 FIRST_POOL_PROBE_WAIT = 30
 FIRST_CS_POOLS = frozenset(f"cs-{site}-nc-n{node}-pr-v1"
-                           for site in ("mnl2", "ruh") for node in range(3))
+                           for site in CS_SITES for node in range(3)
+                           if (site, node) != ("mty", 2))
 CS_SITE_RETRY_AFTER = 300
 CS_SITE_PROBE_WAIT = 90
 WAIT = 3600
@@ -517,11 +518,16 @@ def first_cs_pool_plan(raw, now):
 
 
 def choose_initial_scale_set(t):
-    # No production caller, release branch, or rerun can consume this pilot.
-    if (t["pr"], t["attempt"], os.environ.get("GITHUB_EVENT_NAME"), os.environ.get("GITHUB_WORKFLOW_REF")) != (
-        32922, 1, "push",
-        f"{REPO}/.github/workflows/coverage-standby-pr32922.yaml@refs/heads/weilu-runner-test",
-    ):
+    # No other PR, caller, base branch or rerun can consume this pilot.
+    if t["pr"] != 32922 or t["attempt"] != 1:
+        return None
+    event, workflow = os.environ.get("GITHUB_EVENT_NAME"), os.environ.get("GITHUB_WORKFLOW_REF")
+    isolated = event == "push" and workflow == (
+        f"{REPO}/.github/workflows/coverage-standby-pr32922.yaml@refs/heads/weilu-runner-test")
+    canary = (event == "pull_request_target" and workflow == f"{REPO}/{ENTRY}@refs/heads/main"
+              and os.environ.get("GITHUB_BASE_REF") == "main"
+              and os.environ.get("COVERAGE_CS_FIRST_POOL_ENABLED") == "true")
+    if not (isolated or canary):
         return None
     plan = first_cs_pool_plan(os.environ.get("COVERAGE_CS_FIRST_POOL_SNAPSHOT"), time.time())
     return plan[t["group"]] if t["group"] < len(plan) else None
