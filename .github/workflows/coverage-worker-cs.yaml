@@ -393,20 +393,23 @@ jobs:
         set -e
         phase_end "${smoke_status}"
         if (( smoke_status != 0 )); then
-          # SDK output can contain signed URLs. Report only a fixed error category.
-          smoke_signal=$(jq -nr '
-            first(inputs | select(.Action == "output" and
-              ((.Test // "") | test("^(TestObjectStorages|TestS3FSFromSpecs)/cs-s3(/|$)|^$"))) | .Output // "" |
-              if test("DeadlineExceeded|context deadline exceeded|i/o timeout|TLS handshake timeout|test timed out"; "i") then "timeout"
-              elif test("no such host|temporary failure in name resolution"; "i") then "dns"
-              elif test("connection refused|connection reset|network is unreachable"; "i") then "connection"
-              elif test("SlowDown|TooManyRequests|HTTP 429"; "i") then "throttled"
-              elif test("AccessDenied|SignatureDoesNotMatch|InvalidAccessKeyId|HTTP 40[13]"; "i") then "authorization"
-              elif test("ServiceUnavailable|HTTP 50[0234]"; "i") then "service_unavailable"
-              else empty end) // "unknown"
-          ' "$smoke_report") || smoke_signal=unknown
-          printf 'CS S3 smoke failure signal: %s\n' "$smoke_signal"
-          printf 'smoke_signal=%s\n' "$smoke_signal" >> "$phase_failure"
+          # Reuse the fixture's redacted error format and publish only fixed fields.
+          smoke_diagnostic=$(jq -nr '
+            first(inputs | select(.Action == "output") |
+              if (.Output // "" | startswith("panic: test timed out after ")) then
+                "smoke_signal=go_test_timeout"
+              elif (.Test // "" | test("^(TestObjectStorages|TestS3FSFromSpecs)/cs-s3(/|$)")) then
+                (.Output // "") | capture(
+                  "CS S3 (?<operation>initialize fixture|list fixture prefix|remove fixture object) failed " +
+                  "\\(HTTP (?<status>[0-9]{1,3}), code " +
+                  "(?<code>AccessDenied|InvalidAccessKeyId|SignatureDoesNotMatch|NoSuchBucket|RequestTimeTooSkewed|AuthorizationHeaderMalformed|InvalidRequest|DeadlineExceeded|Canceled|unknown)" +
+                  ", type [*a-zA-Z0-9_.]+\\)[[:space:]]*$"
+                ) |
+                "smoke_operation=\(.operation | gsub(" "; "_")) smoke_http_status=\(.status) smoke_error_code=\(.code)"
+              else empty end) // "smoke_signal=unknown"
+          ' "$smoke_report") || smoke_diagnostic=smoke_signal=unknown
+          printf 'CS S3 smoke failure: %s\n' "$smoke_diagnostic"
+          printf '%s\n' "$smoke_diagnostic" >> "$phase_failure"
           exit "${smoke_status}"
         fi
         for required in 'TestObjectStorages/cs-s3/minio/basic' 'TestS3FSFromSpecs/cs-s3/streaming_write' 'TestCSStoragePrefixScopedInitialization'; do
