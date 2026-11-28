@@ -18,7 +18,7 @@ on:
         type: boolean
         default: false
       enable_cs_first_pool:
-        description: "Allow only main PR #32922 to try capacity-aware first placement"
+        description: "Try capacity-aware first placement for authorized main and 4.2-dev Coverage UTs"
         type: boolean
         default: false
       enable_4_2_dev:
@@ -35,7 +35,7 @@ on:
         value: ${{ jobs['coverage-final-status'].outputs.status || jobs.legacy.outputs.coverage_status }}
     secrets:
       CS_COVERAGE_CAPACITY_READ:
-        description: "Optional read-only Kubernetes capacity connections; used only by PR 32922's trusted preflight"
+        description: "Optional read-only Kubernetes capacity connections for the trusted preflight only"
         required: false
       CS_COVERAGE_CACHE_READ_TOKEN:
         required: false
@@ -157,13 +157,16 @@ jobs:
           path: ${{ runner.temp }}/real-pr-authorization.json
           if-no-files-found: error
       - id: capacity
-        name: Read CS capacity for PR 32922
+        name: Read CS capacity before the first reservation
         if: >-
           inputs.enable_cs_first_pool && steps.entry.outputs.route == 'cache' &&
           steps.entry.outputs.allowed == 'true' && github.run_attempt == 1 &&
           github.repository == 'matrixorigin/matrixone' && github.event_name == 'pull_request_target' &&
-          github.workflow_ref == 'matrixorigin/matrixone/.github/workflows/entrypoint.yaml@refs/heads/main' &&
-          github.event.pull_request.base.ref == 'main' && github.event.pull_request.number == 32922
+          (github.workflow_ref == 'matrixorigin/matrixone/.github/workflows/entrypoint.yaml@refs/heads/main' ||
+          (inputs.enable_4_2_dev && github.event.pull_request.base.ref == '4.2-dev' &&
+          github.workflow_ref == 'matrixorigin/matrixone/.github/workflows/entrypoint.yaml@refs/heads/4.2-dev')) &&
+          (github.event.pull_request.base.ref == 'main' ||
+          (inputs.enable_4_2_dev && github.event.pull_request.base.ref == '4.2-dev'))
         timeout-minutes: 1
         continue-on-error: true
         env:

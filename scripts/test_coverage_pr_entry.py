@@ -320,7 +320,8 @@ class EntryTest(unittest.TestCase):
         self.assertIn(RELEASE_ENTRY, handoff)
         self.assertNotIn("enable_cs_site_retry", (workflows / "coverage-ut.yaml").read_text())
         self.assertIn("enable_cs_site_retry: ${{ inputs.enable_cs_site_retry }}", standby)
-        self.assertIn("COVERAGE_CS_SITE_RETRY: ${{ inputs.enable_cs_site_retry }}", handoff)
+        self.assertIn(
+            "COVERAGE_CS_SITE_RETRY: ${{ inputs.enable_cs_site_retry && !inputs.enable_cs_first_pool }}", handoff)
 
     def test_release_retry_checks_fixture_again_and_emits_exact_base(self):
         self.event["pull_request"]["base"]["ref"] = self.pr["base"]["ref"] = RELEASE_BASE

@@ -23,7 +23,8 @@ jobs:
       ((github.event_name == 'workflow_dispatch' && github.workflow_ref == 'matrixorigin/matrixone/.github/workflows/coverage-standby-worker.yaml@refs/heads/main' && inputs.ticket != '') || (github.event_name == 'pull_request_target' && github.workflow_ref == 'matrixorigin/matrixone/.github/workflows/entrypoint.yaml@refs/heads/main' && inputs.ticket == '')) &&
       (!fromJSON(inputs.ticket || '{}').site || contains(fromJSON('["mty","jed","mnl2","ruh"]'), fromJSON(inputs.ticket || '{}').site)) &&
       (!fromJSON(inputs.ticket || '{}').scale_set ||
-      (fromJSON(inputs.ticket || '{}').pr == 32922 && fromJSON(inputs.ticket || '{}').attempt == 1 && !fromJSON(inputs.ticket || '{}').site &&
+      (github.actor == 'github-actions[bot]' && fromJSON(inputs.ticket || '{}').pr > 0 && fromJSON(inputs.ticket || '{}').pr < 10000000 &&
+      fromJSON(inputs.ticket || '{}').attempt == 1 && !fromJSON(inputs.ticket || '{}').site &&
       contains(fromJSON('["cs-mty-nc-n0-pr-v1","cs-mty-nc-n1-pr-v1","cs-jed-nc-n0-pr-v1","cs-jed-nc-n1-pr-v1","cs-jed-nc-n2-pr-v1","cs-mnl2-nc-n0-pr-v1","cs-mnl2-nc-n1-pr-v1","cs-mnl2-nc-n2-pr-v1","cs-ruh-nc-n0-pr-v1","cs-ruh-nc-n1-pr-v1","cs-ruh-nc-n2-pr-v1"]'), fromJSON(inputs.ticket || '{}').scale_set)))
     runs-on: >-
       ${{ fromJSON(inputs.ticket || '{}').scale_set || fromJSON(fromJSON(inputs.ticket || '{}').site &&

@@ -1206,18 +1206,13 @@ class Queue(unittest.TestCase):
                 # outside the range representable by wall-clock floats.
                 self.assertEqual(s.first_cs_pool_plan(receipt(rows, captured), float(now)), ())
 
-    def test_first_pool_is_ignored_without_exact_isolated_pin(self):
-        target = "cs-ruh-nc-n0-pr-v1"
-        ticket = {"pr": 32922, "attempt": 1, "group": 0}
-        env = {"GITHUB_EVENT_NAME": "push", "GITHUB_WORKFLOW_REF":
-               f"{s.REPO}/.github/workflows/coverage-standby-pr32922.yaml@refs/heads/weilu-runner-test"}
-        with patch.dict(os.environ, env), patch.object(s, "first_cs_pool_plan", return_value=(target,)):
-            self.assertEqual(s.choose_initial_scale_set(ticket), target)
-            self.assertIsNone(s.choose_initial_scale_set(dict(ticket, group=1)))
-            self.assertIsNone(s.choose_initial_scale_set(dict(ticket, pr=33401)))
-            self.assertIsNone(s.choose_initial_scale_set(dict(ticket, attempt=2)))
-            with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "pull_request_target"}):
-                self.assertIsNone(s.choose_initial_scale_set(ticket))
+    def test_equal_offers_rotate_by_parent_without_moving_the_two_groups_together(self):
+        first, second = "cs-mnl2-nc-n0-pr-v1", "cs-ruh-nc-n0-pr-v1"
+        receipt = json.dumps(dict(captured_at=1000, pools=[
+            dict(pool=pool, slots=1, pending=0) for pool in (first, second)]))
+        self.assertEqual(s.first_cs_pool_plan(receipt, 1000, parent=42), (first, second))
+        self.assertEqual(s.first_cs_pool_plan(receipt, 1000, parent=43), (second, first))
+        self.assertEqual(s.first_cs_pool_plan(receipt, 1001, parent=42), (first, second))
 
     def test_first_pool_requires_exact_label_and_assigned_runner_prefix(self):
         pool = "cs-mnl2-nc-n2-pr-v1"
@@ -1236,21 +1231,47 @@ class Queue(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "invalid exact CS pool"):
                 s.worker_labels("cs", scale_set=invalid)
 
-    def test_formal_first_pool_requires_opted_in_main_32922_initial_attempt(self):
-        target = "cs-ruh-nc-n0-pr-v1"
-        ticket = {"pr": 32922, "attempt": 1, "group": 0}
-        env = {"GITHUB_EVENT_NAME": "pull_request_target", "GITHUB_BASE_REF": "main",
-               "GITHUB_WORKFLOW_REF": f"{s.REPO}/{s.ENTRY}@refs/heads/main",
-               "COVERAGE_CS_FIRST_POOL_ENABLED": "true"}
-        with patch.dict(os.environ, env), patch.object(s, "first_cs_pool_plan", return_value=(target,)) as plan:
-            self.assertEqual(s.choose_initial_scale_set(ticket), target)
-            self.assertIsNone(s.choose_initial_scale_set(dict(ticket, pr=30102)))
-            self.assertIsNone(s.choose_initial_scale_set(dict(ticket, attempt=2)))
-            for change in ({"GITHUB_BASE_REF": "4.2-dev"}, {"GITHUB_WORKFLOW_REF": "untrusted"},
-                           {"COVERAGE_CS_FIRST_POOL_ENABLED": "false"}, {"GITHUB_EVENT_NAME": "workflow_dispatch"}):
-                with patch.dict(os.environ, change):
+    def test_formal_first_pool_supports_distinct_prs_on_main_and_4_2_dev(self):
+        targets = ("cs-ruh-nc-n0-pr-v1", "cs-mnl2-nc-n0-pr-v1")
+        env = dict(GITHUB_REPOSITORY=s.REPO, GITHUB_EVENT_NAME="pull_request_target",
+                   COVERAGE_CS_FIRST_POOL_ENABLED="true", COVERAGE_ENABLE_4_2_DEV="true")
+        for base, caller in (("main", "main"), ("4.2-dev", "main"), ("4.2-dev", "4.2-dev")):
+            context = dict(env, GITHUB_BASE_REF=base, GITHUB_WORKFLOW_REF=f"{s.REPO}/{s.ENTRY}@refs/heads/{caller}")
+            for pr in (32922, 30102, 33401):
+                with self.subTest(base=base, caller=caller, pr=pr), \
+                     patch.dict(os.environ, context, clear=True), \
+                     patch.object(s, "first_cs_pool_plan", return_value=targets) as plan:
+                    ticket = dict(parent=42, pr=pr, attempt=1, group=0)
+                    self.assertEqual(s.choose_initial_scale_set(ticket), targets[0])
+                    self.assertEqual(s.choose_initial_scale_set(dict(ticket, group=1)), targets[1])
+                    self.assertTrue(all(call.kwargs == {"parent": 42} for call in plan.call_args_list))
+
+    def test_first_pool_rejects_disabled_untrusted_unsupported_and_retry_contexts(self):
+        main = f"{s.REPO}/{s.ENTRY}@refs/heads/main"
+        release = f"{s.REPO}/{s.ENTRY}@refs/heads/4.2-dev"
+        ticket = dict(parent=42, pr=30102, attempt=1, group=0)
+        env = dict(GITHUB_REPOSITORY=s.REPO, GITHUB_EVENT_NAME="pull_request_target",
+                   GITHUB_WORKFLOW_REF=main, GITHUB_BASE_REF="main", COVERAGE_CS_FIRST_POOL_ENABLED="true")
+        cases = (
+            dict(GITHUB_WORKFLOW_REF="untrusted"),
+            dict(GITHUB_WORKFLOW_REF=release),
+            dict(GITHUB_EVENT_NAME="push", GITHUB_WORKFLOW_REF=
+                 f"{s.REPO}/.github/workflows/coverage-standby-pr32922.yaml@refs/heads/weilu-runner-test"),
+            dict(GITHUB_EVENT_NAME="workflow_dispatch"),
+            dict(GITHUB_REPOSITORY="fork/matrixone"),
+            dict(GITHUB_BASE_REF="4.2-dev"),
+            dict(GITHUB_BASE_REF="4.1-dev", COVERAGE_ENABLE_4_2_DEV="true"),
+            dict(COVERAGE_CS_FIRST_POOL_ENABLED=""),
+            dict(COVERAGE_CS_FIRST_POOL_ENABLED="false"),
+        )
+        with patch.object(s, "first_cs_pool_plan") as plan:
+            for change in cases:
+                with self.subTest(change=change), patch.dict(os.environ, dict(env, **change), clear=True):
                     self.assertIsNone(s.choose_initial_scale_set(ticket))
-            plan.assert_called_once()
+            with patch.dict(os.environ, env, clear=True):
+                for change in (dict(attempt=2), dict(pr=0), dict(pr=True), dict(pr=10_000_000)):
+                    self.assertIsNone(s.choose_initial_scale_set(dict(ticket, **change)))
+            plan.assert_not_called()
 
     def test_exact_pool_retries_partial_runner_metadata_without_redispatch(self):
         pool = "cs-mnl2-nc-n2-pr-v1"
@@ -1290,8 +1311,10 @@ class Queue(unittest.TestCase):
                     sent.append(json.loads(data["inputs"]["ticket"]))
                     return {"workflow_run_id": 111}, wall[0]
 
-                env = dict(self.env, RUNNER_TEMP=tmp, GITHUB_EVENT_NAME="push",
-                           GITHUB_WORKFLOW_REF=f"{s.REPO}/.github/workflows/coverage-standby-pr32922.yaml@refs/heads/weilu-runner-test",
+                env = dict(self.env, RUNNER_TEMP=tmp, GITHUB_REPOSITORY=s.REPO,
+                           GITHUB_EVENT_NAME="pull_request_target", GITHUB_BASE_REF="4.2-dev", PR="33401",
+                           GITHUB_WORKFLOW_REF=f"{s.REPO}/{s.ENTRY}@refs/heads/main",
+                           COVERAGE_ENABLE_4_2_DEV="true", COVERAGE_CS_FIRST_POOL_ENABLED="true",
                            COVERAGE_CS_FIRST_POOL_SNAPSHOT=snapshot)
                 with patch.dict(os.environ, env), patch.object(s.time, "time", side_effect=lambda: wall[0]), \
                      patch.object(s, "parent_meta", side_effect=parent_meta), patch.object(s, "api", side_effect=post), \

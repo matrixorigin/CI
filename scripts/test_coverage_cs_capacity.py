@@ -149,6 +149,29 @@ class Capacity(unittest.TestCase):
         self.assertNotIn("CS_COVERAGE_CAPACITY_READ", selector)
         self.assertNotIn("CS_COVERAGE_CAPACITY_READ", worker)
         self.assertIn("COVERAGE_CS_FIRST_POOL_SNAPSHOT: ${{ inputs.first_pool_snapshot }}", selector)
+        self.assertIn("inputs.enable_cs_site_retry && !inputs.enable_cs_first_pool", selector)
+        self.assertIn("github.actor == 'github-actions[bot]'", worker)
+        self.assertIn("fromJSON(inputs.ticket || '{}').attempt == 1", worker)
+        self.assertNotIn("32922", worker)
+
+    def test_only_authorized_first_attempts_on_supported_bases_can_read_capacity(self):
+        workflows = Path(__file__).resolve().parents[1] / ".github/workflows"
+        entry = (workflows / "coverage-ut-standby.yaml").read_text()
+        before, capacity = entry.split("      - id: capacity\n", 1)
+        capacity = capacity.split("\n  legacy:", 1)[0]
+        self.assertIn("id: entry", before)
+        self.assertIn("Retain the authorized PR head receipt", before)
+        for gate in ("inputs.enable_cs_first_pool", "steps.entry.outputs.route == 'cache'",
+                     "steps.entry.outputs.allowed == 'true'", "github.run_attempt == 1",
+                     "github.repository == 'matrixorigin/matrixone'",
+                     "github.event_name == 'pull_request_target'",
+                     "entrypoint.yaml@refs/heads/main", "github.event.pull_request.base.ref == 'main'",
+                     "inputs.enable_4_2_dev && github.event.pull_request.base.ref == '4.2-dev'",
+                     "entrypoint.yaml@refs/heads/4.2-dev"):
+            self.assertIn(gate, capacity)
+        for unrelated_gate in ("32922", "pull_request.number", "pull_request.draft", "kind/test-ci"):
+            self.assertNotIn(unrelated_gate, capacity)
+        self.assertIn("CS_COVERAGE_CAPACITY_READ: ${{ secrets.CS_COVERAGE_CAPACITY_READ }}", capacity)
 
 
 if __name__ == "__main__":

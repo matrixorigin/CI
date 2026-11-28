@@ -478,12 +478,12 @@ def assigned(job, pool):
             and runner_matches_pool(job.get("runner_name") or "", pool))
 
 
-def first_cs_pool_plan(raw, now):
+def first_cs_pool_plan(raw, now, *, parent=0):
     """Choose up to two distinct pools from a fresh trusted capacity receipt.
 
     slots is the number of whole CPU+memory+work-PVC placements on that node;
     pending is outstanding demand in that pool not yet charged to the node.
-    This is a single-parent pilot, not a reservation across different PRs.
+    This is an advisory snapshot, not a reservation across different PRs.
     """
     if not raw or len(raw) > 4096:
         return ()
@@ -507,29 +507,38 @@ def first_cs_pool_plan(raw, now):
                 or not 0 <= slots <= 128 or not 0 <= pending <= 128):
             return ()
         offers[name] = slots - pending
-    ranked = sorted((p for p, n in offers.items() if n > 0), key=lambda p: (-offers[p], p))
-    if len(ranked) < 2:
-        return tuple(ranked)
+    eligible = sorted(p for p, n in offers.items() if n > 0)
+    if len(eligible) < 2:
+        return tuple(eligible)
+    # Stable within a parent (including the recheck before POST), but avoid
+    # directing simultaneous PRs with equally good offers to one pool first.
+    offset = parent % len(eligible)
+    ranked = sorted(eligible[offset:] + eligible[:offset], key=lambda p: -offers[p])
     first = ranked[0]
-    # Exercise both sites if both have an offer, without using the same node
-    # for the two groups. These hosts and their local work disks are distinct.
+    # Prefer distinct sites when possible; never nominate the same pool for
+    # both groups of the parent.
     second = next((p for p in ranked[1:] if p.split("-")[1] != first.split("-")[1]), ranked[1])
     return first, second
 
 
 def choose_initial_scale_set(t):
-    # No other PR, caller, base branch or rerun can consume this pilot.
-    if t["pr"] != 32922 or t["attempt"] != 1:
+    # Only the protected, opted-in Coverage selectors can use a receipt.
+    # The parent run check and the worker's independent grant/PR identity
+    # checks still apply; capacity is not permission to execute PR code.
+    if (type(t["pr"]) is not int or not 0 < t["pr"] < 10_000_000
+            or t["attempt"] != 1 or t["group"] not in (0, 1)
+            or os.environ.get("GITHUB_REPOSITORY") != REPO
+            or os.environ.get("GITHUB_EVENT_NAME") != "pull_request_target"
+            or os.environ.get("COVERAGE_CS_FIRST_POOL_ENABLED") != "true"):
         return None
-    event, workflow = os.environ.get("GITHUB_EVENT_NAME"), os.environ.get("GITHUB_WORKFLOW_REF")
-    isolated = event == "push" and workflow == (
-        f"{REPO}/.github/workflows/coverage-standby-pr32922.yaml@refs/heads/weilu-runner-test")
-    canary = (event == "pull_request_target" and workflow == f"{REPO}/{ENTRY}@refs/heads/main"
-              and os.environ.get("GITHUB_BASE_REF") == "main"
-              and os.environ.get("COVERAGE_CS_FIRST_POOL_ENABLED") == "true")
-    if not (isolated or canary):
+    base, workflow = os.environ.get("GITHUB_BASE_REF"), os.environ.get("GITHUB_WORKFLOW_REF")
+    main = f"{REPO}/{ENTRY}@refs/heads/main"
+    release = f"{REPO}/{ENTRY}@refs/heads/4.2-dev"
+    if not ((base == "main" and workflow == main) or
+            (base == "4.2-dev" and workflow in (main, release)
+             and os.environ.get("COVERAGE_ENABLE_4_2_DEV") == "true")):
         return None
-    plan = first_cs_pool_plan(os.environ.get("COVERAGE_CS_FIRST_POOL_SNAPSHOT"), time.time())
+    plan = first_cs_pool_plan(os.environ.get("COVERAGE_CS_FIRST_POOL_SNAPSHOT"), time.time(), parent=t["parent"])
     return plan[t["group"]] if t["group"] < len(plan) else None
 
 
