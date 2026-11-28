@@ -185,14 +185,149 @@ jobs:
       head: ${{ needs.check_coverage_eligibility.outputs.head_sha }}
       enable_cs_site_retry: ${{ inputs.enable_cs_site_retry }}
       enable_4_2_dev: ${{ inputs.enable_4_2_dev }}
+  release-storage-coverage:
+    name: OSS and COS Coverage on Shanghai IDC
+    needs: check_coverage_eligibility
+    if: ${{ github.base_ref == '4.2-dev' && inputs.enable_4_2_dev && needs.check_coverage_eligibility.outputs.allowed == 'true' }}
+    runs-on: amd64-mo-shanghai-ut-safe
+    timeout-minutes: 90
+    environment: ci
+    permissions:
+      contents: read
+    outputs:
+      profile: ${{ steps.profile.outputs.artifact-id }}
+    steps:
+    - name: Verify Shanghai runner isolation before checkout
+      env:
+        ASSIGNED: ${{ runner.name }}
+      run: |
+        set -eu
+        [[ "$ASSIGNED" == amd64-mo-shanghai-ut-safe-*-runner-* && "$(uname -m)" == x86_64 ]]
+        for path in /var/run/secrets/kubernetes.io/serviceaccount/token /var/run/docker.sock /run/containerd/containerd.sock; do
+          if test -e "$path" || test -L "$path"; then
+            echo "::error::Shanghai test runner exposes $path"
+            exit 1
+          fi
+        done
+    - if: github.run_attempt > 1
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      timeout-minutes: 5
+      with:
+        repository: matrixorigin/CI
+        ref: ${{ job.workflow_sha }}
+        path: coverage-tools
+        sparse-checkout: scripts/coverage_pr_entry.py
+        sparse-checkout-cone-mode: false
+        persist-credentials: false
+    - if: github.run_attempt > 1
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      timeout-minutes: 5
+      with:
+        repository: matrixorigin/CI
+        ref: 7a8cf1854da5ca4cc5ffb5a1f2cbc454162ad589
+        path: reviewed
+        sparse-checkout: |
+          scripts
+          config
+        persist-credentials: false
+    - name: Reauthorize the exact release PR before retrying
+      if: github.run_attempt > 1
+      timeout-minutes: 3
+      env:
+        CS_PR_METADATA_TOKEN: ${{ secrets.TOKEN_ACTION }}
+        CS_CACHE_READ_TOKEN: ${{ secrets.CS_COVERAGE_CACHE_READ_TOKEN || github.token }}
+        COVERAGE_ADMITTED_SOURCE: ${{ needs.check_coverage_eligibility.outputs.head_repository }}
+        COVERAGE_ADMITTED_HEAD: ${{ needs.check_coverage_eligibility.outputs.head_sha }}
+        COVERAGE_ENABLE_4_2_DEV: ${{ inputs.enable_4_2_dev }}
+      run: |
+        set -euo pipefail
+        PYTHONPATH="$GITHUB_WORKSPACE/reviewed/scripts" python3 coverage-tools/scripts/coverage_pr_entry.py
+        grep -Fxq 'allowed=true' "$GITHUB_OUTPUT"
+    - name: Checkout authorized MatrixOne head
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      timeout-minutes: 10
+      with:
+        repository: ${{ needs.check_coverage_eligibility.outputs.head_repository }}
+        ref: ${{ needs.check_coverage_eligibility.outputs.head_sha }}
+        path: matrixone
+        persist-credentials: false
+    - uses: matrixorigin/CI/actions/setup-env@5fc75d89bc2841e50ae1557d28ebd9aaec6ec3e2
+      timeout-minutes: 10
+      with:
+        setup-java: false
+        go-version-file: matrixone/go.mod
+    - name: Prepare Coverage CGo libraries
+      timeout-minutes: 30
+      working-directory: matrixone
+      run: make cgo
+    - id: test_storage_providers
+      name: Test OSS and COS
+      timeout-minutes: 22
+      working-directory: matrixone
+      env:
+        GOPROXY: http://goproxy.goproxy.svc.cluster.local|https://goproxy.cn|direct
+        TEST_S3FS_ALIYUN: ${{ secrets.TEST_S3FS_ALIYUN }}
+        TEST_S3FS_QCLOUD: ${{ secrets.TEST_S3FS_QCLOUD }}
+      run: |
+        set -euo pipefail
+        if [[ -z "$TEST_S3FS_ALIYUN" || -z "$TEST_S3FS_QCLOUD" ]]; then
+          echo '::error::Release Coverage requires both OSS and COS configurations'
+          exit 1
+        fi
+        unset endpoint region apikey apisecret bucket TEST_S3FS_CS
+        export CGO_CFLAGS="-I$PWD/cgo -I$PWD/thirdparties/install/include"
+        export CGO_LDFLAGS="-L$PWD/cgo -lmo -Wl,-rpath,$PWD/cgo -L$PWD/thirdparties/install/lib -lusearch_c -Wl,-rpath,$PWD/thirdparties/install/lib -lm"
+        report="$RUNNER_TEMP/release-storage-test.json"
+        go test -mod=readonly -count=1 -short -json -tags matrixone_test -timeout=20m \
+          -covermode=set -coverprofile="$RUNNER_TEMP/ut-coverage.out" ./pkg/fileservice > "$report" || {
+          status=$?
+          jq -r '.Output // empty' "$report" >&2 || true
+          exit "$status"
+        }
+        # The SDK pass identifies the provider and the tested fixture name.
+        # Match that same fixture in the S3FS tests regardless of its name.
+        for sdk in aliyun qcloud; do
+          jq -ne --arg sdk "$sdk" '
+            [inputs | select(.Action == "pass" and .Package == "github.com/matrixorigin/matrixone/pkg/fileservice")
+                    | .Test | strings] as $passed
+            | any($passed[] | capture("^TestObjectStorages/(?<fixture>.+)/" + $sdk + "/basic$");
+                  ("TestS3FSFromSpecs/" + .fixture + "/streaming_write") as $stream
+                  | ($passed | index($stream)) != null)
+          ' "$report" >/dev/null || {
+            echo "::error::Missing passing basic and streaming write tests for $sdk"
+            exit 1
+          }
+        done
+        echo 'OSS and COS basic and streaming write tests passed.'
+    - id: profile
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      timeout-minutes: 5
+      with:
+        name: ut-coverage-release-storage-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/ut-coverage.out
+        if-no-files-found: error
+        retention-days: 7
   merge-coverage-groups:
     needs:
     - check_coverage_eligibility
     - ut-coverage-linux-x86
-    if: ${{ needs.ut-coverage-linux-x86.result == 'success' }}
+    - release-storage-coverage
+    if: ${{ !cancelled() && needs.ut-coverage-linux-x86.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+    - id: validate_release_storage
+      name: Require the release provider profile
+      if: github.base_ref == '4.2-dev'
+      env:
+        STORAGE_RESULT: ${{ needs.release-storage-coverage.result }}
+        STORAGE_PROFILE: ${{ needs.release-storage-coverage.outputs.profile }}
+      run: |
+        set -euo pipefail
+        if [[ "$STORAGE_RESULT" != success || ! "$STORAGE_PROFILE" =~ ^[1-9][0-9]*$ ]]; then
+          echo '::error::Missing successful OSS and COS Coverage for this release PR'
+          exit 1
+        fi
     - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
       with:
         repository: matrixorigin/CI
@@ -216,10 +351,19 @@ jobs:
       with:
         pattern: ut-coverage-group-*-generation-${{ github.run_id }}-*
         path: raw/profiles
-    - name: Validate complete package evidence and merge profiles
+    - name: Download the selected release provider profile
+      if: github.base_ref == '4.2-dev'
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        artifact-ids: ${{ needs.release-storage-coverage.outputs.profile }}
+        path: raw/release-storage
+        merge-multiple: true
+    - id: merge_profiles
+      name: Validate complete package evidence and merge profiles
       env:
         EXPECTED_HEAD_SHA: ${{ needs.check_coverage_eligibility.outputs.head_sha }}
         GROUP_COUNT: ${{ 2 }}
+        RELEASE_STORAGE_REQUIRED: ${{ github.base_ref == '4.2-dev' }}
       run: |
         set -euo pipefail
         test -n "$EXPECTED_HEAD_SHA"
@@ -233,6 +377,11 @@ jobs:
             tail -n +2 "selected/profiles/$group/ut-coverage.out" >> "$RUNNER_TEMP/ut-coverage.out"
           fi
         done
+        if [[ "$RELEASE_STORAGE_REQUIRED" == true ]]; then
+          storage_profile=raw/release-storage/ut-coverage.out
+          test "$(head -n 1 "$storage_profile")" = 'mode: set'
+          tail -n +2 "$storage_profile" >> "$RUNNER_TEMP/ut-coverage.out"
+        fi
         go run scripts/compact_coverage_profile.go "$RUNNER_TEMP/ut-coverage.out"
     - name: Upload combined UT coverage for existing consumer
       uses: matrixorigin/CI/actions/upload-artifact-with-retry@main

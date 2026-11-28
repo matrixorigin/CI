@@ -358,6 +358,47 @@ class EntryTest(unittest.TestCase):
                 else:
                     self.assertFalse(receipt.exists())
 
+    def test_cs_go_selection_uses_the_reviewed_cache_only_for_matching_source(self):
+        worker = (ROOT/".github/workflows/coverage-worker-cs.yaml").read_text()
+        check = "    - name: Check the restored Go version against go.mod\n"
+        setup = "    - name: Set up the Go version declared by the source\n"
+        export = "    - name: Export the selected Go root for the build and cache\n"
+        gate = "if: steps.go_toolchain.outputs.matches != 'true'"
+        comparison = worker.split(check, 1)[1].split(setup, 1)[0]
+        installer = worker.split(setup, 1)[1].split(export, 1)[0]
+        exporter = worker.split(export, 1)[1].split("    - ", 1)[0]
+        self.assertIn(gate, installer)
+        self.assertIn("go-version-file: go.mod", installer)
+        self.assertIn("GOROOT: ''", installer)
+        self.assertIn(gate, exporter)
+        self.assertLess(worker.index(export), worker.index("    - id: node_cache\n"))
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            go = root/"go"
+            go.write_text(
+                "#!/bin/bash\nset -eu\n"
+                "test \"$GOTOOLCHAIN\" = local\n"
+                "case \"$2\" in\n"
+                "  GOVERSION) echo go1.27.1 ;;\n"
+                "  GOROOT) test -z \"${GOROOT+x}\"; echo /official/go ;;\n"
+                "  *) exit 1 ;;\n"
+                "esac\n"
+            )
+            go.chmod(0o755)
+            env = dict(os.environ, PATH=f"{root}:{os.environ['PATH']}",
+                       GITHUB_OUTPUT=str(root/"outputs"), GITHUB_ENV=str(root/"env"), GOROOT="/pvc/go")
+            for version, expected in (("1.27.1", "matches=true\n"), ("1.26.4", "")):
+                with self.subTest(version=version):
+                    (root/"go.mod").write_text(f"module example.com/test\n\ngo {version}\n")
+                    (root/"outputs").write_text("")
+                    subprocess.run(["bash", "-c", textwrap.dedent(comparison.split("run: |\n", 1)[1])],
+                                   cwd=root, env=env, check=True)
+                    self.assertEqual((root/"outputs").read_text(), expected)
+            subprocess.run(["bash", "-c", textwrap.dedent(exporter.split("run: |\n", 1)[1])],
+                           cwd=root, env=env, check=True)
+            self.assertEqual((root/"env").read_text(), "GOROOT=/official/go\n")
+
     def test_exact_measured_jobs_and_coverage_handoff(self):
         # Hash the complete three-job body from the measured immutable pin,
         # after undoing the production entry wiring and display-only diagnostics.
@@ -380,6 +421,11 @@ class EntryTest(unittest.TestCase):
             "          sudo apt-get -o Acquire::ForceIPv4=true install -y build-essential cmake pkg-config python3 python-is-python3\n"
             "        fi\n"
         ))
+        # Build and artifact steps retain the measured body. Go selection is
+        # checked separately against the restored and source-selected tools.
+        before, after = steps.split("    - name: Check the restored Go version against go.mod\n", 1)
+        marker = "    - name: Prepare Python UDF contract tests\n"
+        steps = before + marker + after.split(marker, 1)[1]
         # Undo only the review-time diagnostic reordering for the digest;
         # production writes the compact summary before optional analysis.
         marker_summary = (
@@ -446,10 +492,19 @@ class EntryTest(unittest.TestCase):
         for field in ("coverage_ready:", "coverage_status:", "bvt_generation:", "cache_seed:"):
             self.assertIn(field, src.split("jobs:\n")[0])
 
-    def test_fallback_matches_existing_default_blob(self):
+    def test_fallback_keeps_the_legacy_body_with_updated_runner_placement(self):
         s = (ROOT/".github/workflows/coverage-ut-pre-cutover.yaml").read_text()
         checkout = "repository: matrixorigin/CI\n          ref: "+LEGACY_HELPER_SHA
         self.assertEqual(s.count(checkout), 1)
-        b = s.replace(checkout, "repository: ${{ job.workflow_repository }}\n          ref: ${{ job.workflow_sha }}").encode()
+        runner = ("    # Keep both routes for main and 4.2-dev on the shared CS and Shanghai pools.\n"
+                  "    runs-on: ${{ (github.base_ref == 'main' || github.base_ref == '4.2-dev') && "
+                  "'amd64-mo-shanghai-ut-safe' || 'amd64-mo-guangzhou-2xlarge16' }}")
+        original_runner = ("    # Preserve the Guangzhou network path and capacity used by main's\n"
+                           "    # external Aliyun/QCloud coverage UT. This is intentionally larger than\n"
+                           "    # the UT-only minimum while we validate the external-storage timeout fix.\n"
+                           "    runs-on: amd64-mo-guangzhou-2xlarge16")
+        self.assertEqual(s.count(runner), 1)
+        b = s.replace(checkout, "repository: ${{ job.workflow_repository }}\n          ref: ${{ job.workflow_sha }}").replace(
+            runner, original_runner).encode()
         self.assertEqual(hashlib.sha1(b"blob "+str(len(b)).encode()+b"\0"+b).hexdigest(),
                          "52b9213fa50e4de5184b9089ef15f13f82cf8a54")
