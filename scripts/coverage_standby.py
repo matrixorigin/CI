@@ -61,14 +61,14 @@ class AdmissionDeadlineExceeded(RuntimeError):
 
 
 class AdmissionWindow:
-    def __init__(self):
-        self.deadline = time.monotonic() + WORKER_ADMISSION_SECONDS
+    def __init__(self, deadline):
+        self.deadline = deadline
         self.backoff = 0
 
     def remaining(self):
         remaining = self.deadline - time.monotonic()
         if remaining <= 0:
-            raise AdmissionDeadlineExceeded("worker admission deadline exceeded; no PR code executed")
+            raise AdmissionDeadlineExceeded("admission deadline exceeded; no PR code executed")
         return remaining
 
     def rate_backoff(self, hint):
@@ -77,14 +77,16 @@ class AdmissionWindow:
 
 
 @contextmanager
-def admission_window():
-    # Calls made by the worker share the deadline through the final authorization
-    # check. Selector-side reads and writes do not use this worker budget.
+def admission_window(deadline=None):
+    # Worker reads share one deadline through checkout authorization. The
+    # selector supplies a shorter deadline for its parent liveness check.
     window = ADMISSION_WINDOW.get()
     if window is not None:
         yield window
         return
-    window = AdmissionWindow()
+    if deadline is None:
+        deadline = time.monotonic() + WORKER_ADMISSION_SECONDS
+    window = AdmissionWindow(deadline)
     token = ADMISSION_WINDOW.set(window)
     try:
         yield window
@@ -337,8 +339,11 @@ def required_admission_read(read, *args, **kwargs):
                 raise
             error.close()
             delay = window.rate_backoff(hint)
+            if delay >= window.remaining():
+                raise AdmissionDeadlineExceeded(
+                    "GitHub cooldown exceeds the remaining admission budget; no PR code executed") from error
             print("GitHub throttled a required admission read; backing off", flush=True)
-            time.sleep(min(delay, window.remaining()))
+            time.sleep(delay)
         else:
             window.remaining()
             # A successful read ends the throttle streak across admission calls.
@@ -346,11 +351,14 @@ def required_admission_read(read, *args, **kwargs):
             return result
 
 
-def parent_meta(t, require_selector=False):
+def parent_meta(t, require_selector=False, *, deadline=None):
     """Validate the identity and liveness of the parent attempt."""
     # A throttle can interrupt the parent re-read after selector validation.
     # Retry the whole check so a stale selector cannot authorize checkout.
-    return required_admission_read(_parent_meta, t, require_selector)
+    if deadline is None:
+        return required_admission_read(_parent_meta, t, require_selector)
+    with admission_window(min(deadline, time.monotonic() + HANDOFF_POLLS * HANDOFF_POLL_SECONDS)):
+        return required_admission_read(_parent_meta, t, require_selector)
 
 
 def _parent_meta(t, require_selector):
@@ -383,7 +391,7 @@ def _parent_meta(t, require_selector):
         except OSError as exc:
             if (ADMISSION_WINDOW.get() is not None and isinstance(exc, urllib.error.HTTPError)
                     and exc.code in (403, 429)):
-                raise  # The admission window owns worker throttle handling.
+                raise  # The admission window owns throttle recovery.
             error = exc
             delay = parent_retry_delay(exc)
         if poll == 0:
@@ -533,7 +541,7 @@ def decide(job, now, since):
 
 def dispatch(t, pool, revision, deadline, *, remember):
     """Return the exact dispatched ID and its first CS observation (IDC: None)."""
-    parent_meta(t)
+    parent_meta(t, deadline=deadline)
     check(time.monotonic() < deadline, "selection deadline exceeded before dispatch")
     # At most one POST. If the response is lost, fail closed; no blind retries.
     body, dispatched_at = api(f"/actions/workflows/{WORKER}/dispatches", {
@@ -607,7 +615,7 @@ def dispatch(t, pool, revision, deadline, *, remember):
         time.sleep(delay)
         if time.monotonic() >= deadline:
             break
-        parent_meta(t)
+        parent_meta(t, deadline=deadline)
         if time.monotonic() >= deadline:
             break
     if pending is not None:
@@ -646,7 +654,7 @@ def reserve(t, pool, deadline):
             return r, rev, nonce, first_observation
         except DispatchRevisionChanged as changed:
             r = changed.child
-            parent_meta(t)
+            parent_meta(t, deadline=deadline)
             meta = child_meta(r, t, pool, changed.actual)
             if meta["status"] != "completed":
                 try:
@@ -810,7 +818,7 @@ def choose():
     t = dict(parent=int(os.environ["GITHUB_RUN_ID"]), attempt=attempt, group=int(os.environ["GROUP"]),
              head=os.environ["HEAD"], source=os.environ["SOURCE"], pr=int(os.environ["PR"]), title_version=2)
     check(t["group"] in (0, 1) and re.fullmatch("[a-f0-9]{40}", t["head"]), "invalid input")
-    parent_meta(t)
+    parent_meta(t, deadline=deadline)
     if attempt > 1:
         # A previous selector may have lost its connection after publishing a
         # grant. An old *ungranted* reservation cannot pass parent_meta; an
@@ -847,7 +855,7 @@ def choose():
             print(f"Group {t['group']}: switched to Shanghai standby — {run_url(r)}", flush=True)
     # Grant is immutable and costs no extra control token on the worker. Until
     # this point neither pool has been authorized to check out or run PR code.
-    parent_meta(t)
+    parent_meta(t, deadline=deadline)
     check(time.monotonic() < deadline, "selection deadline exceeded before publishing a grant")
     Path(os.environ["RUNNER_TEMP"], "grant.json").write_text(json.dumps(
         dict(ticket=t, child=r, pool=pool, nonce=nonce)))
@@ -1108,6 +1116,7 @@ def revoke():
     # The exact dispatch ticket owns an ungranted reservation even if main moved.
     revision = t["revision"] if granted else None
     deadline = time.monotonic() + WORKER_READ_RECOVERY_SECONDS
+    rate_backoff = 0
     for attempt in range(3):
         meta = read_worker(f"revoking worker {child}", verify, child, t, pool, revision, deadline=deadline)
         if meta["status"] == "completed":
@@ -1120,12 +1129,19 @@ def revoke():
             print(f"cancellation requested for coverage worker {child}", flush=True)
             return
         except OSError as error:
-            if (attempt == 2 or (isinstance(error, urllib.error.HTTPError)
-                                 and error.code not in (409, 429) and error.code < 500)):
+            if attempt == 2:
                 raise
+            delay = 2
             if isinstance(error, urllib.error.HTTPError):
+                hint = confirmed_rate_limit_hint(error)
+                if hint is not None:
+                    delay, rate_backoff = rate_limit_pause(hint, rate_backoff)
+                elif error.code != 409 and error.code < 500:
+                    raise
                 error.close()
-        time.sleep(2)
+            if time.monotonic() + delay >= deadline:
+                raise
+            time.sleep(delay)
 
 
 def run_url(r):

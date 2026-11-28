@@ -207,6 +207,56 @@ class ParentAdmission(unittest.TestCase):
             read.assert_called_once()
             sleep.assert_not_called()
 
+    def test_choose_rechecks_the_same_parent_after_grant_read_throttle(self):
+        def select(ticket, *_):
+            ticket.update(revision=self.t['revision'], key=self.t['key'])
+            return 51, self.t['revision'], self.grant['nonce'], 'cs', 0
+
+        for scenario, cooldown, selection_limit, failure in (
+            ('active', 120, s.SELECTOR_RESERVATION_SECONDS, None),
+            ('rerun', 120, s.SELECTOR_RESERVATION_SECONDS, (ValueError, 'identity mismatch: run_attempt')),
+            ('selection deadline', 120, 100, (s.AdmissionDeadlineExceeded, 'cooldown exceeds')),
+            ('handoff deadline', 301, s.SELECTOR_RESERVATION_SECONDS, (s.AdmissionDeadlineExceeded, 'cooldown exceeds')),
+        ):
+            now = 0
+            reads = []
+            error = urllib.error.HTTPError('/actions/runs/42', 429, 'throttled',
+                                           {'Retry-After': str(cooldown)}, None)
+            after = dict(self.p, run_attempt=2) if scenario == 'rerun' else self.p
+            responses = iter([self.p, error, after])
+
+            def read(run_id):
+                reads.append((run_id, now))
+                response = next(responses)
+                if isinstance(response, Exception):
+                    raise response
+                return response
+
+            def sleep(seconds):
+                nonlocal now
+                now += seconds
+
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as tmp, \
+                 patch.dict(os.environ, {**self.selector_env, 'RUNNER_TEMP': tmp,
+                                         'GITHUB_OUTPUT': str(Path(tmp, 'outputs'))}), \
+                 patch.object(s, 'SELECTOR_RESERVATION_SECONDS', selection_limit), \
+                 patch.object(s, 'select_cs', side_effect=select) as reserve, patch.object(s, 'run', side_effect=read), \
+                 patch.object(s.time, 'monotonic', side_effect=lambda: now), patch.object(s.time, 'sleep', side_effect=sleep):
+                grant = Path(tmp, 'grant.json')
+                if failure is None:
+                    s.choose()
+                    self.assertEqual(json.loads(grant.read_text()),
+                                     dict(self.grant, ticket=dict(self.t, title_version=2)))
+                else:
+                    with self.assertRaisesRegex(*failure):
+                        s.choose()
+                    self.assertFalse(grant.exists())
+                    self.assertFalse(Path(tmp, 'outputs').exists())
+                reserve.assert_called_once()
+                expected_times = [0, 0, 120] if scenario in ('active', 'rerun') else [0, 0]
+                self.assertEqual(reads, [(42, t) for t in expected_times])
+                self.assertEqual(now, expected_times[-1])
+
     def test_queued_parent_dispatch_requires_its_active_selector(self):
         env = dict(GITHUB_RUN_ATTEMPT='1',GITHUB_RUN_ID='42',GROUP='0',HEAD=self.sha,
                    SOURCE=self.src,PR='32922')
@@ -917,6 +967,50 @@ class ParentAdmission(unittest.TestCase):
                     s.revoke()
                     self.assertEqual(api.call_count, len(responses))
                     sleep.assert_called_once_with(2)
+
+    def test_revoke_waits_for_cooldown_and_revalidates_before_retry(self):
+        for scenario, code, cooldown, after, failure in (
+            ('active', 429, 25, self.worker, None),
+            ('completed', 403, 25, dict(self.worker, status='completed'), None),
+            ('rerun', 429, 25, dict(self.worker, run_attempt=2), (ValueError, 'dedicated worker identity mismatch')),
+            ('outside budget', 429, 91, self.worker, (urllib.error.HTTPError, '429')),
+        ):
+            now = 0
+            reads, posts = [], []
+            headers = {'Retry-After': str(cooldown)} if code == 429 else {
+                'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': str(1000 + cooldown),
+            }
+
+            def run(run_id):
+                reads.append((run_id, now))
+                return self.worker if now == 0 else after
+
+            def cancel(path, data):
+                self.assertEqual((path, data), ('/actions/runs/51/cancel', {}))
+                posts.append(now)
+                if now == 0:
+                    raise urllib.error.HTTPError(path, code, 'throttled', headers, None)
+                return {}, now
+
+            def sleep(seconds):
+                nonlocal now
+                now += seconds
+
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as tmp, \
+                 patch.dict(os.environ, {**self.selector_env, 'RUNNER_TEMP': tmp}), \
+                 patch.object(s, 'run', side_effect=run), patch.object(s, 'api', side_effect=cancel), \
+                 patch.object(s.time, 'time', side_effect=lambda: 1000 + now), \
+                 patch.object(s.time, 'monotonic', side_effect=lambda: now), patch.object(s.time, 'sleep', side_effect=sleep):
+                Path(tmp, 'grant.json').write_text(json.dumps(self.grant))
+                if failure is None:
+                    s.revoke()
+                else:
+                    with self.assertRaisesRegex(*failure):
+                        s.revoke()
+            expected_reads = [0] if scenario == 'outside budget' else [0, 25]
+            self.assertEqual(reads, [(51, t) for t in expected_reads])
+            self.assertEqual(posts, [0, 25] if scenario == 'active' else [0])
+            self.assertEqual(now, expected_reads[-1])
 
     def test_revoke_retries_lookup_and_surfaces_cancellation_failure(self):
         for scenario in ('lookup_transient', 'cancel_denied', 'cancel_exhausted'):
@@ -1772,7 +1866,7 @@ class ShortWorkerTitle(unittest.TestCase):
              patch.object(s, "api") as post:
             with self.assertRaisesRegex(ValueError, "deadline exceeded before dispatch"):
                 self.dispatch(deadline=10)
-        parent.assert_called_once_with(self.ticket)
+        parent.assert_called_once_with(self.ticket, deadline=10)
         post.assert_not_called()
         self.remember.assert_not_called()
 
